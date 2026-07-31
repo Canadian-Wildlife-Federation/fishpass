@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Local scripts containing credentials -- never commit these
+run_local.ps1
+*.local.ps1

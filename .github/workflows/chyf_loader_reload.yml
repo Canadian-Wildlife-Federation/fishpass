@@ -1,0 +1,26 @@
+name: CHyF Loader Reload
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  reload:
+    runs-on: ubuntu-latest
+    env:
+      FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
+      FISHPASS_PORT: ${{ secrets.FISHPASS_PORT }}
+      FISHPASS_DBNAME: ${{ secrets.FISHPASS_DBNAME }}
+      FISHPASS_USER: ${{ secrets.FISHPASS_USER }}
+      FISHPASS_PASSWORD: ${{ secrets.FISHPASS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Run reload
+        run: python chyf_loader/scripts/load.py
