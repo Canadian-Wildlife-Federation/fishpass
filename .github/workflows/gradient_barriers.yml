@@ -1,0 +1,29 @@
+name: Gradient Barriers
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    env:
+      FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
+      FISHPASS_PORT: ${{ secrets.FISHPASS_PORT }}
+      FISHPASS_DBNAME: ${{ secrets.FISHPASS_DBNAME }}
+      FISHPASS_USER: ${{ secrets.FISHPASS_USER }}
+      FISHPASS_PASSWORD: ${{ secrets.FISHPASS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install -r gradient_barriers/scripts/requirements.txt
+
+      - name: Verify GEOS version
+        run: python -c "import shapely; print('GEOS version:', shapely.geos_version)"
+
+      - name: Compute gradient barriers
+        run: python gradient_barriers/scripts/compute_barriers.py

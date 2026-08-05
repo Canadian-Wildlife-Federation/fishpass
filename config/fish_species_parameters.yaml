@@ -1,0 +1,54 @@
+# Fish species parameters, as documented in docs/fish_species_parameter_file.md.
+# accessibility_gradient_spawning_max / accessibility_gradient_rearing_max are the only fields
+# used by gradient_barriers/scripts/compute_barriers.py; the rest support other FishPass process
+# steps and are kept here so this file matches the full documented schema.
+#
+# PLACEHOLDER VALUES -- replace with real per-species parameters before running in production.
+species:
+  - code: chn
+    name: Chinook Salmon
+    accessibility_gradient_spawning_max: 4.0
+    accessibility_gradient_rearing_max: 6.0
+    fall_height_threshold: 1.5
+    spawn_gradient_min: 0.0
+    spawn_gradient_max: 3.0
+    rear_gradient_min: 0.0
+    rear_gradient_max: 5.0
+    spawn_discharge_min: 10.0
+    spawn_discharge_max: 500.0
+    rear_discharge_min: 5.0
+    rear_discharge_max: 1000.0
+    spawn_channel_confinement_min: 1.0
+    spawn_channel_confinement_max: 3.0
+    rear_channel_confinement_min: 1.0
+    rear_channel_confinement_max: 4.0
+    strahler_order_spawning_min: 2
+    strahler_order_spawning_max: 5
+    strahler_order_rearing_min: 1
+    strahler_order_rearing_max: 6
+    stream_order_1_weight: 0.2
+    stream_order_2_weight: 0.5
+
+  - code: sth
+    name: Steelhead Trout
+    accessibility_gradient_spawning_max: 6.0
+    accessibility_gradient_rearing_max: 8.0
+    fall_height_threshold: 2.0
+    spawn_gradient_min: 0.0
+    spawn_gradient_max: 4.0
+    rear_gradient_min: 0.0
+    rear_gradient_max: 6.0
+    spawn_discharge_min: 5.0
+    spawn_discharge_max: 300.0
+    rear_discharge_min: 2.0
+    rear_discharge_max: 800.0
+    spawn_channel_confinement_min: 1.0
+    spawn_channel_confinement_max: 4.0
+    rear_channel_confinement_min: 1.0
+    rear_channel_confinement_max: 5.0
+    strahler_order_spawning_min: 1
+    strahler_order_spawning_max: 4
+    strahler_order_rearing_min: 1
+    strahler_order_rearing_max: 5
+    stream_order_1_weight: 0.3
+    stream_order_2_weight: 0.6
