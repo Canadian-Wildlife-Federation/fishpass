@@ -17,7 +17,8 @@ the cached CHyF network or the fish species parameter file has changed. It runs
 `gradient_barriers/scripts/compute_barriers.py`, which:
 
 1. Loads species/lifestage gradient thresholds from
-   [`config/fish_species_parameters.yaml`](../config/fish_species_parameters.yaml).
+   [`config/fish_species_parameters.yaml`](../config/fish_species_parameters.yaml) (override with
+   `--species_params`).
 2. Archives any existing `support.gradient_barriers` table to
    `support.gradient_barriers_archive_<yyyymmdd>_<seq>`, then creates a fresh one.
 3. Walks every mainstem in `chyf_raw.flowpath`, computing the gradient at each vertex against the
@@ -37,6 +38,13 @@ variables (`FISHPASS_HOST`, `FISHPASS_PORT`, `FISHPASS_DBNAME`, `FISHPASS_USER`,
 export FISHPASS_HOST=... FISHPASS_PORT=... FISHPASS_DBNAME=... FISHPASS_USER=... FISHPASS_PASSWORD=...
 pip install -r gradient_barriers/scripts/requirements.txt
 python gradient_barriers/scripts/compute_barriers.py
+```
+
+Pass `--species_params PATH` to use a species parameter file other than the repo default
+(`config/fish_species_parameters.yaml`):
+
+```sh
+python gradient_barriers/scripts/compute_barriers.py --species_params /path/to/other_parameters.yaml
 ```
 
 ## Tests

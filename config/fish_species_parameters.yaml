@@ -7,8 +7,8 @@
 species:
   - code: chn
     name: Chinook Salmon
-    accessibility_gradient_spawning_max: 4.0
-    accessibility_gradient_rearing_max: 6.0
+    accessibility_gradient_spawning_max: 0.3
+    accessibility_gradient_rearing_max: 0.3
     fall_height_threshold: 1.5
     spawn_gradient_min: 0.0
     spawn_gradient_max: 3.0
@@ -31,8 +31,8 @@ species:
 
   - code: sth
     name: Steelhead Trout
-    accessibility_gradient_spawning_max: 6.0
-    accessibility_gradient_rearing_max: 8.0
+    accessibility_gradient_spawning_max: 1
+    accessibility_gradient_rearing_max: .3
     fall_height_threshold: 2.0
     spawn_gradient_min: 0.0
     spawn_gradient_max: 4.0

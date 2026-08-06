@@ -10,7 +10,7 @@ import argparse
 import math
 import sys
 from collections import deque
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 import os
@@ -20,12 +20,12 @@ import shapely
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PARAMS_FILE = REPO_ROOT / "config" / "fish_species_parameters.yaml"
+DEFAULT_SPECIES_PARAMS_FILE = REPO_ROOT / "config" / "fish_species_parameters.yaml"
 
-UPSTREAM_DISTANCE_M = 100.0
+UPSTREAM_DISTANCE_M = 100.0  # the distance to travel upstream to determine gradient 
 EARTH_RADIUS_M = 6_371_008.8  # mean Earth radius (IUGG); chyf_raw geometries are geographic (deg)
 
-EDGE_FETCH_BATCH_SIZE = 10_000
+EDGE_FETCH_BATCH_SIZE = 10_000  # number of edges to fetch at once
 
 REQUIRED_ENV_VARS = [
 	"FISHPASS_HOST",
@@ -35,10 +35,10 @@ REQUIRED_ENV_VARS = [
 	"FISHPASS_PASSWORD",
 ]
 
-
+# optional params path for the species parameters file
 def parse_args():
 	parser = argparse.ArgumentParser(description=__doc__)
-	parser.add_argument("--params", type=Path, default=DEFAULT_PARAMS_FILE)
+	parser.add_argument("--species_params", type=Path, default=DEFAULT_SPECIES_PARAMS_FILE)
 	return parser.parse_args()
 
 
@@ -102,7 +102,7 @@ def prepare_table(cursor, srid):
 		# rename existing table with current date
 		# to ensure we keep a copy of it and don't lose
 		# any manual updates
-		date_str = date.today().strftime("%Y%m%d")
+		date_str = datetime.now(tz=timezone.utc).date().strftime("%Y%m%d")
 		cursor.execute(
 			"SELECT table_name FROM information_schema.tables "
 			"WHERE table_schema = 'support' AND table_name LIKE %s",
@@ -116,6 +116,9 @@ def prepare_table(cursor, srid):
 		next_seq = max(existing_seqs, default=0) + 1
 		archive_name = f"gradient_barriers_archive_{date_str}_{next_seq}"
 		cursor.execute(f"ALTER TABLE support.gradient_barriers RENAME TO {archive_name};")
+		cursor.execute(
+			f"ALTER INDEX support.gradient_barriers_geometry_idx RENAME TO {archive_name}_geometry_idx;"
+		)
 		print(f"Archived existing table to support.{archive_name}")
 
 	cursor.execute(f"""
@@ -172,7 +175,7 @@ def edge_vertices(wkb_bytes):
 	"""
 	geom = shapely.from_wkb(wkb_bytes)
 	coords = shapely.get_coordinates(geom, include_m=True)
-	return coords
+	return coords.tolist()
 
 
 def flag_species(gradient, species_params):
@@ -239,7 +242,7 @@ def compute_barriers(conn, species_params):
 	prev = None  # (cum_dist, elevation) of the vertex immediately before the one just walked
 	window = deque()  # (cum_dist, elevation, lon, lat) vertices still waiting for an upstream match
 
-	for _edge_id, mainstem_id, _mainstem_seq, wkb in edges:
+	for _edge_id, mainstem_id, mainstem_seq, wkb in edges:
 		if mainstem_id != current_mainstem:
 			window.clear()  # vertices left waiting had no upstream point on this mainstem
 			running_total = 0.0
@@ -250,6 +253,11 @@ def compute_barriers(conn, species_params):
 		# upstream so cum_dist increases monotonically as we move up the mainstem.
 		vertices = edge_vertices(bytes(wkb))[::-1]
 		for i, (lon, lat, m) in enumerate(vertices):
+			if i == 0 and mainstem_seq != 1:
+				# Shared boundary vertex with the previous edge's last (topologically
+				# connected) vertex -- already resolved/tracked via `prev`, so skip it here
+				# rather than re-walking the same physical point a second time.
+				continue
 			if i > 0:
 				prev_lon, prev_lat, _ = vertices[i - 1]
 				running_total += haversine_m(prev_lon, prev_lat, lon, lat)
@@ -295,7 +303,7 @@ def assign_workunits(cursor):
 def main():
 	args = parse_args()
 	require_env()
-	species_params = load_species_parameters(args.params)
+	species_params = load_species_parameters(args.species_params)
 
 	conn = db_connect()
 	try:
