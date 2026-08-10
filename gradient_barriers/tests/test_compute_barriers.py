@@ -3,23 +3,28 @@
 These drive the whole compute_barriers() function -- including fetch_edges and the shapely
 WKB/M-ordinate parsing in edge_vertices() -- against a stubbed psycopg2 connection/cursor, so no
 real database is needed. shapely must be genuinely installed (not stubbed) since these tests build
-and parse real WKB fixtures.
+and parse real WKB fixtures. compute_barriers() writes directly via insert_barriers as its
+internal barrier cache fills, so tests patch that module-level function to capture the batches
+instead of hitting a database.
 
 Run with: python -m unittest gradient_barriers.tests.test_compute_barriers
 """
 
 import math
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 # compute_barriers.py imports psycopg2/psycopg2.extras/yaml at module level for its DB-connection
 # and species-file-loading code paths, neither of which compute_barriers() itself touches (it
-# only calls conn.cursor(...), which FakeConnection below provides). Stub them out when
-# unavailable so these tests don't require the full production dependency set to be installed.
+# only calls conn.cursor(...), which FakeConnection below provides, and insert_barriers, which
+# tests patch out). Stub them out when unavailable so these tests don't require the full
+# production dependency set to be installed.
 for _module_name in ("psycopg2", "psycopg2.extras", "yaml"):
 	try:
 		__import__(_module_name)
@@ -32,8 +37,10 @@ import compute_barriers as cb  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Stubbed DB layer -- compute_barriers(conn, ...) only ever calls fetch_edges(conn), which calls
-# conn.cursor(name=...), sets .itersize, .execute(...), iterates the cursor, then closes it.
+# Stubbed DB layer -- compute_barriers(conn, cursor, srid, ...) calls fetch_edges(conn), which
+# calls conn.cursor(name=...), sets .itersize, .execute(...), iterates the cursor, then closes
+# it; compute_barriers also calls insert_barriers(cursor, srid, batch) directly whenever its
+# internal cache fills, which tests patch via run_compute_barriers below.
 # ---------------------------------------------------------------------------
 
 
@@ -41,9 +48,14 @@ class FakeNamedCursor:
 	def __init__(self, rows):
 		self._rows = rows
 		self.itersize = None
+		self.last_sql = None
+		self.last_params = None
 
-	def execute(self, sql):
-		pass  # SQL text isn't inspected; the fixture rows are already prepared
+	def execute(self, sql, params=None):
+		# fixture rows are already prepared -- just record what was asked for, so tests can
+		# assert on the query shape without a real database
+		self.last_sql = sql
+		self.last_params = params
 
 	def __iter__(self):
 		return iter(self._rows)
@@ -55,9 +67,34 @@ class FakeNamedCursor:
 class FakeConnection:
 	def __init__(self, rows):
 		self._rows = rows
+		self.commit_count = 0
 
-	def cursor(self, name=None):
+	def cursor(self, name=None, withhold=False):
 		return FakeNamedCursor(self._rows)
+
+	def commit(self):
+		self.commit_count += 1
+
+
+def run_compute_barriers(rows, species_params, aoi_ids=None):
+	"""Run compute_barriers against a FakeConnection(rows), with insert_barriers patched to
+	record each batch it's called with instead of touching a database.
+
+	Returns (total, batches) -- total is compute_barriers' own returned count, batches is the
+	list of barrier-lists passed to each insert_barriers call, in call order. cursor/srid are
+	arbitrary placeholders since the real insert_barriers is patched out."""
+	batches = []
+	with mock.patch.object(cb, "insert_barriers", side_effect=lambda cursor, srid, batch: batches.append(list(batch))):
+		total = cb.compute_barriers(FakeConnection(rows), "cursor", "srid", species_params, aoi_ids=aoi_ids)
+	return total, batches
+
+
+def flat_barriers(rows, species_params, aoi_ids=None):
+	"""Convenience for tests that just want the full ordered barrier list, not per-batch detail."""
+	total, batches = run_compute_barriers(rows, species_params, aoi_ids=aoi_ids)
+	barriers = [b for batch in batches for b in batch]
+	assert len(barriers) == total
+	return barriers
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +103,7 @@ class FakeConnection:
 
 BASE_LON = -64.0
 BASE_LAT = 45.0
+DEFAULT_AOI_ID = "aoi-default"
 
 
 def lat_offset_deg(distance_m):
@@ -95,8 +133,8 @@ def make_wkb(vertices):
 	return shapely.to_wkb(shapely.from_wkt(f"LINESTRING M ({points})"))
 
 
-def edge_row(edge_id, mainstem_id, mainstem_seq, vertices):
-	return (edge_id, mainstem_id, mainstem_seq, make_wkb(vertices))
+def edge_row(edge_id, mainstem_id, mainstem_seq, vertices, aoi_id=DEFAULT_AOI_ID):
+	return (edge_id, mainstem_id, mainstem_seq, aoi_id, make_wkb(vertices))
 
 
 # Thresholds picked low enough that both worked-example gradients (5.25% and 0.5%) clear
@@ -129,8 +167,8 @@ class ComputeBarriersTests(unittest.TestCase):
 		a = point_at(50.0, 5.0)
 		b = point_at(200.0, 5.75)
 		rows =  [edge_row("worked-e1", "1", 1, [b, a, i])]
-	
-		barriers = cb.compute_barriers(FakeConnection(rows), LOW_THRESHOLDS)
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS)
 
 		self.assertEqual(len(barriers), 2)
 
@@ -146,7 +184,7 @@ class ComputeBarriersTests(unittest.TestCase):
 		self.assertAlmostEqual(a_gradient, 0.005)
 		self.assertEqual(a_species, ["chn_rear"])
 
-		barriers = cb.compute_barriers(FakeConnection(rows), HIGH_THRESHOLDS)
+		barriers = flat_barriers(rows, HIGH_THRESHOLDS)
 		self.assertEqual(barriers, [])
 
 	def test_nearest_vertex_would_have_given_a_different_answer(self):
@@ -169,7 +207,7 @@ class ComputeBarriersTests(unittest.TestCase):
 		end = point_at(60.0, 3.0)
 		rows = [edge_row("short-e1", "short", 1, [end, start])]
 
-		barriers = cb.compute_barriers(FakeConnection(rows), LOW_THRESHOLDS)
+		barriers = flat_barriers(rows, LOW_THRESHOLDS)
 		self.assertEqual(barriers, [])
 
 	def test_multi_edge_mainstem_crosses_edge_boundary(self):
@@ -185,7 +223,7 @@ class ComputeBarriersTests(unittest.TestCase):
 			edge_row("multi-e2", "multi", 2, [up, boundary]),
 		]
 
-		barriers = cb.compute_barriers(FakeConnection(rows), LOW_THRESHOLDS)
+		barriers = flat_barriers(rows, LOW_THRESHOLDS)
 
 		# Only i2 resolves: its 100m mark (falls between boundary@60m and up@105m) is reached
 		# once `up` is walked. boundary's own 100m mark (target 160m) is never reached -- the
@@ -197,6 +235,25 @@ class ComputeBarriersTests(unittest.TestCase):
 		expected_interp_elev = 6.0 + (100.0 - 60.0) / (105.0 - 60.0) * (7.0 - 6.0)
 		expected_gradient = (expected_interp_elev - 0.0) / 100.0
 		self.assertAlmostEqual(gradient, expected_gradient)
+		self.assertEqual(species, ["chn_rear"])
+
+	def test_invalid_elevation_vertex_is_skipped_but_distance_carries_through(self):
+		# A (0m, elev 0) -- invalid (50m, NO_DATA) -- B (150m, elev 15). The invalid vertex must
+		# never appear as a barrier, must not become the interpolation reference, but distance
+		# must still accumulate through it so A's 100m mark (reached once B arrives) interpolates
+		# directly from A to B: interp_elev = 0 + (100/150)*15 = 10, gradient = 10/100 = 0.10.
+		a = point_at(0.0, 0.0)
+		invalid = point_at(50.0, cb.NO_DATA)
+		b = point_at(150.0, 15.0)
+		rows = [edge_row("nodata-e1", "nodata", 1, [b, invalid, a])]
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS)
+
+		self.assertEqual(len(barriers), 1)
+		lon, lat, gradient, species = barriers[0]
+		self.assertAlmostEqual(lon, a[0], places=9)
+		self.assertAlmostEqual(lat, a[1], places=9)
+		self.assertAlmostEqual(gradient, 0.10)
 		self.assertEqual(species, ["chn_rear"])
 
 	def test_multiple_mainstems_do_not_leak_into_each_other(self):
@@ -211,14 +268,96 @@ class ComputeBarriersTests(unittest.TestCase):
 		a = point_at(50.0, 5.0)
 		b = point_at(200.0, 5.75)
 		worked_rows =  [edge_row("worked-e1", "2", 1, [b, a, i])]
-		
-		barriers = cb.compute_barriers(FakeConnection(short_rows + worked_rows), LOW_THRESHOLDS)
+
+		barriers = flat_barriers(short_rows + worked_rows, LOW_THRESHOLDS)
 
 		self.assertEqual(len(barriers), 2)
 		self.assertAlmostEqual(barriers[0][0], i[0], places=9)
 		self.assertAlmostEqual(barriers[0][2], 0.0525)
 		self.assertAlmostEqual(barriers[1][0], a[0], places=9)
 		self.assertAlmostEqual(barriers[1][2], 0.005)
+
+
+class AoiScopedComputeBarriersTests(unittest.TestCase):
+
+	"""A single mainstem of 4 contiguous edges -- e1 (in-scope), e2 (OUT of scope), e3
+	(in-scope), e4 (in-scope) -- covering vertices p0@0m, p1@40m, p2@90m, p3@150m, p4@260m at
+	elevations 0/4/9/15/26. p2 is the only out-of-scope vertex.
+
+	Walking this mainstem resolves p0, p1, p3 (all in-scope, all gradient exactly 0.10 -- worked
+	by hand below) and p2 (out-of-scope, also gradient 0.10, but must NOT appear in the output).
+	This proves the walk carries distance/elevation state correctly *through* an out-of-scope
+	edge -- p0 and p1's gradients depend on p2's elevation via interpolation even though p2
+	itself never becomes a barrier -- rather than resetting or corrupting at the AOI boundary.
+	"""
+
+	def test_out_of_scope_edge_is_walked_through_but_not_emitted(self):
+		p0 = point_at(0.0, 0.0)
+		p1 = point_at(40.0, 4.0)
+		p2 = point_at(90.0, 9.0)
+		p3 = point_at(150.0, 15.0)
+		p4 = point_at(260.0, 26.0)  # margin past p3's exact 100m target (250m) to avoid a float boundary tie
+
+		rows = [
+			edge_row("e1", "ms", 1, [p1, p0], aoi_id="aoi-target"),
+			edge_row("e2", "ms", 2, [p2, p1], aoi_id="aoi-other"),
+			edge_row("e3", "ms", 3, [p3, p2], aoi_id="aoi-target"),
+			edge_row("e4", "ms", 4, [p4, p3], aoi_id="aoi-target"),
+		]
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS, aoi_ids=["aoi-target"])
+
+		self.assertEqual(len(barriers), 3)
+		for (lon, lat, gradient, species), expected_point in zip(barriers, [p0, p1, p3]):
+			self.assertAlmostEqual(lon, expected_point[0], places=9)
+			self.assertAlmostEqual(lat, expected_point[1], places=9)
+			self.assertAlmostEqual(gradient, 0.10)
+			self.assertEqual(species, ["chn_rear"])
+
+	def test_aoi_ids_none_treats_every_edge_as_in_scope(self):
+		# Same fixture as above, but with no aoi_ids -- p2 (edge2's vertex) should now also
+		# resolve and appear, since an unscoped run treats every edge as in scope.
+		p0 = point_at(0.0, 0.0)
+		p1 = point_at(40.0, 4.0)
+		p2 = point_at(90.0, 9.0)
+		p3 = point_at(150.0, 15.0)
+		p4 = point_at(260.0, 26.0)  # margin past p3's exact 100m target (250m) to avoid a float boundary tie
+
+		rows = [
+			edge_row("e1", "ms", 1, [p1, p0], aoi_id="aoi-target"),
+			edge_row("e2", "ms", 2, [p2, p1], aoi_id="aoi-other"),
+			edge_row("e3", "ms", 3, [p3, p2], aoi_id="aoi-target"),
+			edge_row("e4", "ms", 4, [p4, p3], aoi_id="aoi-target"),
+		]
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS)
+		self.assertEqual(len(barriers), 4)
+
+
+class BarrierCacheFlushTests(unittest.TestCase):
+
+	def test_cache_flushes_in_batches_around_the_configured_size(self):
+		# A single long mainstem with vertices every 10m, steeply climbing, so every
+		# resolvable vertex clears LOW_THRESHOLDS and becomes a barrier.
+		n_vertices = 20
+		vertices_downstream_to_upstream = [
+			point_at(i * 10.0, i * 10.0 * 0.5) for i in range(n_vertices)
+		]
+		storage_order = list(reversed(vertices_downstream_to_upstream))
+		rows = [edge_row("big-edge", "big-mainstem", 1, storage_order)]
+
+		with mock.patch.object(cb, "BARRIER_CACHE_SIZE", 3):
+			total, batches = run_compute_barriers(rows, LOW_THRESHOLDS)
+
+		self.assertGreater(total, 3)
+		self.assertGreater(len(batches), 1)
+		# Every flush except the final (trailing leftovers) fires only once the cache has
+		# reached the configured size -- it can occasionally overshoot slightly if a single
+		# vertex resolves more than one queued barrier at once, so this checks the flush
+		# trigger fired promptly rather than asserting an exact upper bound.
+		for batch in batches[:-1]:
+			self.assertGreaterEqual(len(batch), 3)
+		self.assertEqual(sum(len(batch) for batch in batches), total)
 
 
 # ---------------------------------------------------------------------------
@@ -249,14 +388,14 @@ class RealWorldMultiSpeciesTests(unittest.TestCase):
 
 	def test_real_world_mainstems(self):
 		rows = [
-			("edge1", "mainstem-1", 1, wkb_from_wkt(WKT_EDGE1)),
-			("edge2", "mainstem-1", 2, wkb_from_wkt(WKT_EDGE2)),
-			("edge3", "mainstem-1", 3, wkb_from_wkt(WKT_EDGE3)),
-			("edge4", "mainstem-2", 1, wkb_from_wkt(WKT_EDGE4)),
-			("edge5", "mainstem-3", 1, wkb_from_wkt(WKT_EDGE5)),
+			("edge1", "mainstem-1", 1, DEFAULT_AOI_ID, wkb_from_wkt(WKT_EDGE1)),
+			("edge2", "mainstem-1", 2, DEFAULT_AOI_ID, wkb_from_wkt(WKT_EDGE2)),
+			("edge3", "mainstem-1", 3, DEFAULT_AOI_ID, wkb_from_wkt(WKT_EDGE3)),
+			("edge4", "mainstem-2", 1, DEFAULT_AOI_ID, wkb_from_wkt(WKT_EDGE4)),
+			("edge5", "mainstem-3", 1, DEFAULT_AOI_ID, wkb_from_wkt(WKT_EDGE5)),
 		]
 
-		barriers = cb.compute_barriers(FakeConnection(rows), REALWORLD_THRESHOLDS)
+		barriers = flat_barriers(rows, REALWORLD_THRESHOLDS)
 
 		expected = [
 			# edge 1, vertex 5 -- engineered to hit exactly 0.25.
@@ -280,6 +419,104 @@ class RealWorldMultiSpeciesTests(unittest.TestCase):
 			self.assertAlmostEqual(lat, exp_lat, places=9)
 			self.assertAlmostEqual(gradient, exp_gradient)
 			self.assertEqual(species, exp_species)
+
+
+class LoadSpeciesParametersTests(unittest.TestCase):
+
+	def _write_params(self, tmp, yaml_text):
+		params_path = Path(tmp) / "fish_species_parameters.yaml"
+		params_path.write_text(yaml_text)
+		return params_path
+
+	def test_valid_thresholds_are_parsed(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			params_path = self._write_params(tmp, """
+species:
+  - code: chn
+    accessibility_gradient_spawning_max: 0.16
+    accessibility_gradient_rearing_max: 0.11
+""")
+			species = cb.load_species_parameters(params_path)
+			self.assertEqual(species, [{"code": "chn", "spawning_max": 0.16, "rearing_max": 0.11}])
+
+	def test_blank_threshold_is_allowed(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			params_path = self._write_params(tmp, """
+species:
+  - code: chn
+    accessibility_gradient_spawning_max: 0.16
+""")
+			species = cb.load_species_parameters(params_path)
+			self.assertIsNone(species[0]["rearing_max"])
+
+	def test_non_numeric_threshold_exits(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			params_path = self._write_params(tmp, """
+species:
+  - code: chn
+    accessibility_gradient_spawning_max: "not-a-number"
+""")
+			with self.assertRaises(SystemExit):
+				cb.load_species_parameters(params_path)
+
+	def test_out_of_range_threshold_exits(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			params_path = self._write_params(tmp, """
+species:
+  - code: chn
+    accessibility_gradient_rearing_max: 1.5
+""")
+			with self.assertRaises(SystemExit):
+				cb.load_species_parameters(params_path)
+
+	def test_negative_threshold_exits(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			params_path = self._write_params(tmp, """
+species:
+  - code: chn
+    accessibility_gradient_rearing_max: -0.1
+""")
+			with self.assertRaises(SystemExit):
+				cb.load_species_parameters(params_path)
+
+
+class LoadAoiConfigTests(unittest.TestCase):
+
+	def test_missing_file_means_full_run(self):
+		self.assertEqual(cb.load_aoi_config(Path("/no/such/gradient_barriers.ini")), [])
+
+	def test_blank_short_names_means_full_run(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			config_path = Path(tmp) / "gradient_barriers.ini"
+			config_path.write_text("[aoi]\nshort_names =\n")
+			self.assertEqual(cb.load_aoi_config(config_path), [])
+
+	def test_populated_short_names_are_parsed_and_stripped(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			config_path = Path(tmp) / "gradient_barriers.ini"
+			config_path.write_text("[aoi]\nshort_names = 08MF001, 08MF002\n")
+			self.assertEqual(cb.load_aoi_config(config_path), ["08MF001", "08MF002"])
+
+	def test_invalid_short_name_exits(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			config_path = Path(tmp) / "gradient_barriers.ini"
+			config_path.write_text("[aoi]\nshort_names = 08MF001; DROP TABLE support.gradient_barriers;\n")
+			with self.assertRaises(SystemExit):
+				cb.load_aoi_config(config_path)
+
+
+class FetchEdgesAoiFilterTests(unittest.TestCase):
+
+	def test_no_aoi_ids_omits_mainstem_filter(self):
+		conn = FakeConnection([])
+		cursor = cb.fetch_edges(conn)
+		self.assertNotIn("mainstem_id = ANY", cursor.last_sql)
+
+	def test_aoi_ids_adds_mainstem_subquery_filter(self):
+		conn = FakeConnection([])
+		cursor = cb.fetch_edges(conn, aoi_ids=["aoi-1", "aoi-2"])
+		self.assertIn("aoi_id = ANY(%(aoi_ids)s)", cursor.last_sql)
+		self.assertEqual(cursor.last_params, {"aoi_ids": ["aoi-1", "aoi-2"]})
 
 
 if __name__ == "__main__":
