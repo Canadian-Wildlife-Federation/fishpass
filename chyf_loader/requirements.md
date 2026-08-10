@@ -3,7 +3,9 @@ This tool copies the stream network from CHyF, preprocesses it, and caches those
 
 After this step is complete the FishPass database will have a copy of the CHyF network, preprocessed and ready for use as input to the fishpass modelling process.
 
-This will be executed using a GitHub action.
+## Running
+
+This is run via a GitHub action, triggered by `workflow_dispatch` (manual).
 
 ## Inputs
 
@@ -30,6 +32,11 @@ Data will be managed by workunit (aoi). Currently we are only working in Atlanti
 You can reload an individual workunit by only specifying that workunit in the .ini file.  All existing cached data for a workunit(s) will be removed before copying over new data.
 
 Source and Target Database configurations should live in github secrets.  Not publicly available ini or other files.
+
+### Fishpas Database Connection
+
+The database connection uses the `FISHPASS_HOST/PORT/DBNAME/USER/PASSWORD` environment variable / GitHub secrets. Connection details are never stored in config files and never logged.
+
 
 ## Outputs
 Writes to the FishPass database chyf_raw schema, populating the schema with the CHyF stream network and aoi. We can merge the flowpath and flowpath_properties table into a single table in this database. 
