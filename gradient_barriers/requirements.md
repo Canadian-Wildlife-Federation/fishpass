@@ -34,9 +34,9 @@ This is run via a GitHub action, triggered by `workflow_dispatch` (manual), matc
   * Created only during an AOI-scoped run (see "AOI-scoped reprocessing" below). Holds the rows removed from support.gradient_barriers for the AOI(s) being reprocessed, so manual edits aren't lost. `<short_names>` is the requested `chyf_raw.aoi.short_name` value(s), joined with `_`. `seq` is incremented if today's backup name for that short_name combination is already taken.
   * Same columns as support.gradient_barriers, plus:
 
-    | Column       | Type      | Description                                    |
+    | Column       | Type      | Description                                     |
     | ------------ | --------- | ----------------------------------------------- |
-    | archived_at  | timestamp | When this row was backed up, prior to deletion.  |
+    | archived_at  | timestamp | When this row was backed up, prior to deletion. |
 
 * Gradient barriers will be computed at all locations where the gradient is greater than the maximum gradient defined in the fish species parameter files. 
   * We will use the accessibility_gradient_spawning_max and accessibility_gradient_rearing_max attributes.
