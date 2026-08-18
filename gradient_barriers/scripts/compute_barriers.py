@@ -11,13 +11,13 @@ import configparser
 import math
 import re
 import sys
+import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
 import os
-import psycopg2
-import psycopg2.extras
+import psycopg
 import shapely
 import yaml
 
@@ -81,7 +81,7 @@ def require_env():
 
 
 def db_connect():
-	return psycopg2.connect(
+	return psycopg.connect(
 		host=os.environ["FISHPASS_HOST"],
 		port=os.environ["FISHPASS_PORT"],
 		dbname=os.environ["FISHPASS_DBNAME"],
@@ -446,15 +446,14 @@ def insert_barriers(cursor, srid, barriers):
 		(lon, lat, srid, gradient, computed_species, computed_species)
 		for lon, lat, gradient, computed_species in barriers
 	]
-	psycopg2.extras.execute_values(
-		cursor,
+
+	cursor.executemany(
 		"""
 		INSERT INTO support.gradient_barriers
 			(geometry, gradient, computed_species, actual_species)
-		VALUES %s
+		VALUES (ST_SetSRID(ST_MakePoint(%s, %s), %s), %s, %s, %s)
 		""",
-		rows,
-		template="(ST_SetSRID(ST_MakePoint(%s, %s), %s), %s, %s, %s)",
+		rows
 	)
 
 
@@ -475,7 +474,14 @@ def assign_workunits(cursor):
 	""")
 
 
+def format_elapsed(seconds):
+	minutes, secs = divmod(int(seconds), 60)
+	return f"{minutes}m {secs:02d}s"
+
+
 def main():
+	start_time = time.monotonic()
+
 	args = parse_args()
 	require_env()
 	species_params = load_species_parameters(args.species_params)
@@ -507,7 +513,8 @@ def main():
 	finally:
 		conn.close()
 
-	print("Gradient barrier computation complete.")
+	elapsed = format_elapsed(time.monotonic() - start_time)
+	print(f"Gradient barrier computation complete in {elapsed}.")
 
 
 if __name__ == "__main__":

@@ -5,10 +5,10 @@ SELECT id, short_name, geometry
 FROM :source_aoi_table
 WHERE id = ANY(:'workunit_ids'::uuid[]);
 
-INSERT INTO :target_shoreline_table (id, geometry)
-SELECT id, geometry
+INSERT INTO :target_shoreline_table (id, aoi_id, geometry)
+SELECT id, aoi_id, geometry
 FROM :source_shoreline_table
-WHERE id = ANY(:'workunit_ids'::uuid[]);
+WHERE aoi_id = ANY(:'workunit_ids'::uuid[]);
 
 
 INSERT INTO :target_flowpath_table (

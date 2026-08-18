@@ -1,0 +1,30 @@
+name: FishPass Modelling Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_code:
+        description: "Plan code (loads config/models/<plan_code>.yaml)"
+        required: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
+      FISHPASS_PORT: ${{ secrets.FISHPASS_PORT }}
+      FISHPASS_DBNAME: ${{ secrets.FISHPASS_DBNAME }}
+      FISHPASS_USER: ${{ secrets.FISHPASS_USER }}
+      FISHPASS_PASSWORD: ${{ secrets.FISHPASS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install -r fishpass_engine/scripts/requirements.txt
+
+      - name: Run model
+        run: python fishpass_engine/scripts/run_model.py "${{ inputs.plan_code }}"

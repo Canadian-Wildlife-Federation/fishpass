@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -167,7 +168,14 @@ def run_reload_sql(workunit_ids, dry_run, verbosity, schema_vars):
 			sys.exit(f"{sql_file.name} failed (exit code {result.returncode})")
 
 
+def format_elapsed(seconds):
+	minutes, secs = divmod(int(seconds), 60)
+	return f"{minutes}m {secs:02d}s"
+
+
 def main():
+	start_time = time.monotonic()
+
 	args = parse_args()
 	short_names, dry_run, verbosity, schema_vars = load_config(args.config)
 	require_env()
@@ -176,7 +184,12 @@ def main():
 	workunit_ids = resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars)
 	run_reload_sql(workunit_ids, dry_run, verbosity, schema_vars)
 
-	print("Reload complete." if not dry_run else "Dry run complete -- no changes made.")
+	elapsed = format_elapsed(time.monotonic() - start_time)
+	print(
+		f"Dry run complete in {elapsed} -- no changes made."
+		if dry_run
+		else f"Reload complete in {elapsed}."
+	)
 
 
 if __name__ == "__main__":

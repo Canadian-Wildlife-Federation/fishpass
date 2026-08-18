@@ -82,7 +82,7 @@ python gradient_barriers/scripts/compute_barriers.py --config /path/to/other_gra
 ### Running Test Cases
 
 `tests/test_compute_barriers.py` unit-tests the gradient/interpolation logic directly (no database
-or real network geometry needed) using Python's stdlib `unittest` — it stubs out `psycopg2`,
+or real network geometry needed) using Python's stdlib `unittest` — it stubs out `psycopg`,
 `shapely`, and `yaml` if they aren't installed, since those are only needed for the DB/geometry code
 paths, not the algorithm under test.
 

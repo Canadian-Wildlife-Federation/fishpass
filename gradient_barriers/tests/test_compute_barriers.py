@@ -1,7 +1,7 @@
 """Tests for gradient_barriers/scripts/compute_barriers.py.
 
 These drive the whole compute_barriers() function -- including fetch_edges and the shapely
-WKB/M-ordinate parsing in edge_vertices() -- against a stubbed psycopg2 connection/cursor, so no
+WKB/M-ordinate parsing in edge_vertices() -- against a stubbed psycopg connection/cursor, so no
 real database is needed. shapely must be genuinely installed (not stubbed) since these tests build
 and parse real WKB fixtures. compute_barriers() writes directly via insert_barriers as its
 internal barrier cache fills, so tests patch that module-level function to capture the batches
@@ -20,12 +20,12 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-# compute_barriers.py imports psycopg2/psycopg2.extras/yaml at module level for its DB-connection
+# compute_barriers.py imports psycopg/yaml at module level for its DB-connection
 # and species-file-loading code paths, neither of which compute_barriers() itself touches (it
 # only calls conn.cursor(...), which FakeConnection below provides, and insert_barriers, which
 # tests patch out). Stub them out when unavailable so these tests don't require the full
 # production dependency set to be installed.
-for _module_name in ("psycopg2", "psycopg2.extras", "yaml"):
+for _module_name in ("psycopg", "yaml"):
 	try:
 		__import__(_module_name)
 	except ImportError:
