@@ -87,14 +87,11 @@ Each model run will generate its own schema for the output. The schema name is d
 
 **Table:** <output_schema>.streams
 
-This is the single working/output table for the stream network — there is no separate
-`<output_schema>.flowpath` copy. It is created directly from `chyf_raw.flowpath`/`chyf_raw.aoi`
-during Load Stream Network (see below), has vertices inserted into its geometries in place during
-structure/habitat snapping, is split into more rows in place during the network-breaking step in
-Compute Statistics, and finally has the statistics columns below populated on it. It is never
-duplicated into a second table.
+This is the single output table for the stream network. It is created directly from `chyf_raw.flowpath`
+during Load Stream Network (see below), then is maniuplated to have vertices inserted during the snapping phases, and
+edges split during the network breaking phases. The output statistics columns below populated on this data. Due to the snapping and breaking there will be more edges in the output table than the raw input table.
 
-All chyf stream network fields, plus `graph_id` and `isolated` (see Load Stream Network)
+The output statistics are stored in a single jsonb column.
 
 For each species/lifecycle identified in the reporting_values:
 
@@ -105,7 +102,7 @@ For each species/lifecycle identified in the reporting_values:
 * number of impassable natural barriers downstream of the stream edge
 * the ids of the impassable anthropogenic barriers upstream of the stream edge
 * the ids of the impassable anthropogenic barriers downstream of the stream edge
-* accessibility - naturally accessible, naturally inaccessible
+* accessibility - connected naturally accessible waterbodies, disconnected naturally accessible waterbodies, naturally inaccessible waterbodies (see Compute Statistics step 6)
 * \<lifecycle\>_habitat - true/false if habitat for given species
 * upstream accessible length - sum of all upstream edge lengths that are accessible or potentially accessible habitat
 * upstream \<lifecycle\> length - sum of all upstream edge lengths that are \<lifecycle\> habitat
@@ -122,9 +119,8 @@ For each lifecycle (rear, spawn, general):
 `general` is not a lifecycle tracked by the fish species parameter file or the habitat_updates
 dataset (neither has a `general` value). `general` habitat/length values are computed as the
 union of `rear` and `spawn`: an edge is `general` habitat (for a species, or for "at least one
-species" in the per-lifecycle rollups above) if it is `rear` habitat or `spawn` habitat. A
-habitat_updates row that changes `rear` or `spawn` habitat therefore implicitly changes `general`
-too, through this union — there is no separate `general` update path.
+species" in the per-lifecycle rollups above) if it is `rear` habitat or `spawn` habitat.
+
 
 **View:** <output_schema>.natural_barriers
 
@@ -153,13 +149,56 @@ NOT NULL`:
 * The ids of the impassable downstream anthropogenic barriers
 * The ids of the impassable downstream natural barriers
 
+**View:** <output_schema>.unsnapped_structures
+
+A view over `<output_schema>.all_structures` (`WHERE snapped_geometry IS NULL`), exposing all
+structures that never snapped onto the stream network.
+
 **Table:** <output_schema>.cabd_<feature_type>
 
-Cached values of the barrier imported from CABD and used in the analysis with all modelling updates applied. For each <feature_type> included in the plan.
+Cached raw values of the barrier as imported from CABD, before any structure_updates,
+new_structures, gradient, classification, or snapping logic is applied -- an immutable record of
+the source data, distinct from `all_structures` which holds the working/modelled values used
+throughout the rest of the pipeline. For each <feature_type> included in the plan (excluding
+`gradients`).
+
+| Field | Type | Comment |
+| :---- | :---- | :---- |
+| cabd_id | uuid | cabd_id for the feature; primary key |
+| species_passability_value | jsonb | as computed in Load Structures step 2, before any later updates |
+| passability_status_code | integer | raw passability_status_code as returned by CABD, unmapped |
+| geometry | point | original location of barrier, as returned by CABD |
+
+(No `source` column here -- every row in this table came from CABD by construction, so a column
+that would always read `'cabd'` was dropped. No `feature_type` column either -- the table is
+already scoped to a single feature type via its `<feature_type>`-suffixed name.)
 
 **Table:** <output_schema>.gradient_barriers
 
-Cached version of gradient barriers used in analysis.
+Cached version of gradient barriers containing only barriers used in this analysis, with their
+snapped location. Unlike `cabd_<feature_type>`, this is not an immutable pre-processing copy of
+the source table -- it is created and populated during Compute Statistics (after Add Gradient
+Barriers and Snap to the CHyF Network have already run), by copying the relevant rows back out of
+`all_structures` (`WHERE source = 'gradient_barriers'`). Only created when the plan's
+`structure_types` list contains `gradients`.
+
+| Field | Type | Comment |
+| :---- | :---- | :---- |
+| id | uuid | system generated primary key, copied from `all_structures.id` |
+| feature_id | uuid | id of the source row in the gradient barriers table |
+| species_passability_value | jsonb | as computed in Add Gradient Barriers |
+| geometry | point | original location of barrier |
+| snapped_geometry | point (4617) | point snapped to the chyf stream network |
+
+**Table:** <output_schema>.all_structures
+
+All structures used in the analysis, including those loaded from the CABD database, the gardient barriers table, and the new structures table. This table
+will contain all the updates applied to the structures and used in the modelling.  
+
+**Table:** <output_schema>.habitat_updates
+
+A copy of the habitat updates table that only includes the rows used for this model.
+
 
 ## Processing
 
@@ -224,7 +263,7 @@ Edges where `is_isolated = true` are excluded from Compute Statistics entirely -
 are computed for them.
 
 `strahler_order` is copied as-is from `chyf_raw.flowpath` (via `chyf2.eflowpath_properties`,
-same source as `graph_id`) -- it isn't produced by anything in this tool, but is required by
+same source as `graph_id`) -- it is required by
 Compute Statistics step 7 (habitat assignment's `strahler_order >= min_<lc>_strahler_order`
 test) and was missing from this field list.
 
@@ -239,7 +278,7 @@ Copy Filters:
 
 Model Parameter File: aoi_filter
 
-* aoi = 'working'
+* aoi = 'workunit'
   * all - copy all data (not filter required)
   * individual units - create an aoi_id filter on the shortname, by joining to the chyf_raw.aoi table
 * aoi = 'province'
@@ -249,13 +288,19 @@ Model Parameter File: aoi_filter
 
 ### Load Structures (CABD, New, Updates)
 
-#### Step 1: Create structures table
+This step creates and populates the `<output_schema>.cabd_<feature_type>` cache tables (see
+Outputs section), one per `structure_types` entry (excluding `gradients`), processed one feature
+type at a time: create the table, fetch that feature type from CABD, and insert directly into the
+table -- without holding the fetched features or converted rows for every feature type in memory
+at once -- then commit before moving to the next feature type. Once every feature type's cache
+table has been populated this way, `all_structures` is populated in a single pass by reading back
+from the `cabd_<feature_type>` tables.
 
-Create a table to hold all structures used in the processing and associated passability status information.
+#### Create `all_structures` table
 
-Rows are duplicated per species, so feature_id is not unique on its own.
+This table holds all structures used in processing and associated passability status information and statistics.
 
-Table Name: The name will be generated using the model parameter file output_schema. `<output_schema>.all_structures`
+Table: `<output_schema>.all_structures`
 
 | Field | Type | Comment |
 | :---- | :---- | :---- |
@@ -263,39 +308,32 @@ Table Name: The name will be generated using the model parameter file output_sch
 | feature_id | uuid | cabd_id for feature from cabd, new_structure_id for other features |
 | feature_type | string | |
 | species_passability_value | jsonb | a json string whose key is the species_lifestage and value is the passability status |
-| source | enum (cabd, new_structure) | where the structure/barrier originated |
+| source | enum (cabd, new_structure, gradient_barriers) | where the structure/barrier originated |
 | structure_type | enum (natural, anthropogenic) | the classification of the structure based on feature_type |
 | geometry | point (4617) | original location of barrier |
 | snapped_geometry | point (4617) | point snapped to the chyf stream network |
-| snapped_edge_id | uuid | id of the `streams` edge this structure snapped to. Not in the original spec -- added because Compute Statistics step 2 (breaking the network) needs to know exactly which edge/vertex to split at. |
+| snapped_edge_id | uuid | id of the `streams` edge this structure snapped to |
 | network_vertex_x, network_vertex_y | double precision | the same snapped location as `snapped_geometry`, but in the `streams` table's native SRID rather than 4617, so Compute Statistics can match it against `streams` vertices exactly rather than through a lossy reprojection round-trip. Not in the original spec, added for the same reason as `snapped_edge_id`. |
-| species_stats | jsonb | per-species upstream/downstream barrier passability stats (see the natural_barriers/anthropogenic_barriers Outputs entries), written by Compute Statistics step 9. NULL until then, and stays NULL for structures that never snapped onto a processed edge -- the `natural_barriers`/`anthropogenic_barriers` views key off `species_stats IS NOT NULL` to reproduce that row set. Not in the original spec, added so those two outputs can be views over `all_structures` instead of separate tables. |
+| species_stats | jsonb | per-species upstream/downstream barrier passability stats (see the natural_barriers/anthropogenic_barriers Outputs entries), written by Compute Statistics step 9 (NULL until then).  Stays NULL for structures that never snapped onto a processed edge  |
 
-#### Step 2. Populate the structures table from CABD API
+#### Populate the CABD structure tables from CABD API
 
-Read appropriate filters from the model parameters file, access the CABD api to download required features and populate the table.
+For each feature type (specified by structure_types parameter), download the appropriate data from the CABD api and store in the `<output_schema>.cabd_<feature_type>` output table. There will be one record per CABD feature. This data is never maniuplated and will represent the CABD data at the time it was downloaded. Only data in the model plan AOI will be downloaded.
 
-**Model Parameter File: structure_types**
+Output Table: `<output_schema>.cabd_<feature_type>`
 
-If provided create an api feature filter=feature_type:in:<type1>,<type2>
+CABD API Filters:
+ *  feature type filter: `feature_type:in:a,b,c`
+ * aoi filter: `nhn_watershed_id:in:shortname1,shortname2`
 
-**aoi_filter**
-
-Filter based on aois in the `<output_schema>.aoi` table. 
-  * filter=nhn_watershed_id:in:shortname1,shortname2
-
-**Field Mapping**
-
-* one record per feature, with the species array populated with multiple values
+Field Mapping:
 
 | CABD Field | Structures Table Field |
 | :---- | :---- |
-| cabd_id | feature_id |
-| feature_type | feature_type |
+| cabd_id | cabd_id |
 | lat/lon | geometry |
+| passability_status_code | passability_status_code |
 | passability_status_code | species_passability_value* |
-| | source = 'cabd' |
-| | species[] - one value for each species in the target_species field for each life stage (rear/spawn) |
 
 *the species_passability_value is populated with one key for each species in the target_species (from the model parameter file), for each life stage (rear/spawn), the value computed by mapping the passability_status_code as follows:
 
@@ -306,25 +344,21 @@ Filter based on aois in the `<output_schema>.aoi` table.
   * 5 (NA - No Structure) = 1
   * 6 (NA - Decommissioned / Removed) = 1
 
-#### Step 3. Load new structures
+#### Initialize `all_structures` table
 
-Add to the table, the new structures from the input dataset, filtering on the fields provided in the model configuration file.
+The `all_structures` table is initially populated with all CABD features. The source is identified as either 'cabd' or 'gradient_barriers'
 
-**Source Table**
+#### Load new structures
 
-In the model configuration file, the structure_new_table parameter identifies the name of the new structures table to use. If not provided default to support.new_structures.
+Add to the `all_structures` table, add the structures from the new_structures input database filtering on the fields provided in the model configuration. Each new structure adds one record to the all_structures table.
 
-**Model Parameter File: structure_types**
+* new_structures source table:  either the structure_new_table parameter (from the model plan) OR the default `support.new_structures`
+ 
+* structure types: only include structure_types listed in the structure_types field from the model plan
 
-Only include feature types that match.
+* update_scope: only include features where the update_scope = 'all' OR update_scope contains the value of the update_scope parameter from the model plan
 
-**Model Parameter File: update_scope**
-
-Only include structures where update_scope = 'all' or update_scope contains the value of the update_scope parameter from the model parameter file.
-
-**Field Mapping**
-
-Create one record for each species in the new structure table passability_status json field.
+Field Mapping:
 
 | Structures Table | New Structure Table |
 | :---- | :---- |
@@ -334,30 +368,19 @@ Create one record for each species in the new structure table passability_status
 | species_passability_value | passability_status key/value pairs. If lifestage is not provided in the key explode into multiple values, one for each life stage |
 | source | fixed - 'new_structure' |
 
-* species with the same passability status value should be merged into a single record; however if they have a different passability status value then multiple records are required.
 
-#### Step 4. Apply structure updates
+#### Apply structure updates
 
-Apply the structure updates to the structure tables.
+Apply the structure updates to the structure tables. This reads the records from the updates table and modifies the passability status for various species.
 
-**Source Table**
+* structure updates source table: either the structure_update_table parameter (from the model plan) OR the default `support.structure_updates`
+* update_scope: only include features where the update_scope = 'all' OR update_scope contains the value of the update_scope parameter from the model plan
+* ordering:  apply the updates in the order:
 
-In the model configuration file, the structure_update_table parameter identifies the name of the structure updates table to use. If not provided default to support.structure_updates.
+  1. update_type = authoritative by update_date asc
+  2. update_type = local_override by update_date asc
 
-**Model Parameter File: update_scope**
-
-Only include structures where update_scope = 'all' or update_scope contains the value of the update_scope parameter from the model parameter file.
-
-**Ordering**
-
-Apply the updates in the order:
-
-1. update_type = authoritative by update_date asc
-2. update_type = local_override by update_date asc
-
-**Field Mapping**
-
-Create one record for each species in the structure updates table passability_status json field.
+Field Mapping:
 
 | Structures Table | Structure Updates Table |
 | :---- | :---- |
@@ -365,18 +388,16 @@ Create one record for each species in the structure updates table passability_st
 | feature_type | feature_type |
 | species_passability_value | passability_status key/value pairs. If lifestage is not provided in the key explode into multiple values, one for each life stage |
 
-For json_key if lifestage is not provided assume it applies to both rear and spawn.
-If the update changes the passability status value for one species/lifestage but not another in the same record, then a new record needs to be added to the all_structures table
+For json_key if lifestage is not provided assume it applies to both rear and spawn. 
 
-#### Step 5. Snap to the CHyF Network
+#### Snap to the CHyF Network
 
-Snap the structures in the all_structures table to the stream network.
+Snap the structures in the `all_structures` table to the stream network.
 
-Source Geometry: `<output_schema>.all_structures.geometry`
-
-Target (snapped) Geometry: `<output_schema>.all_structures.snapped_geometry`
-
-Stream Network Geometry: `<output_schema>.streams.geometry`
+* source geometry: `<output_schema>.all_structures.geometry`
+* target (snapped) geometry: `<output_schema>.all_structures.snapped_geometry`
+* target (snapped) edge_id: `<output_schema>.all_structures.snapped_edge_id` 
+* stream network geometry: `<output_schema>.streams.geometry`
 
 Snapping has the following steps:
 
@@ -395,38 +416,42 @@ Snapping Parameters:
   * always snap to the nearest vertex within this distance
   * if not provided use a default value of 50m
 
-#### Step 6. Add Gradient Barriers
+#### Add Gradient Barriers
 
-Only run this step if the plan's `structure_types` list contains `gradient_barriers`; otherwise
-skip it and exclude gradient barriers from this run entirely.
+This step is only run if the plan's `structure_types` list contains `gradients`; otherwise
+it is skipped and gradient barriers are excluded from the statistics.
 
-Copy the gradient barriers from the `support.gradient_barriers` table into the `output_schema.all_structures` table.
+This step adds all the gradient barriers to the `all_structures` table; each gradient barrier
+becomes a single row. The `<output_schema>.gradient_barriers` cache table (see Outputs section)
+is not created here -- it is populated later, during Compute Statistics, from the rows this step
+adds to `all_structures`.
+* gradient barriers table: the gradient_barriers_table parameter (from the model plan), defaults to `support.gradient_barriers`
 
-Explode the actual_species array so that each entry becomes a key in species_passability_value:
+Field Mapping:
 
 | Structures Table | Gradient Barriers Table |
 | :---- | :---- |
 | feature_id | id |
-| feature_type | 'gradient' |
+| feature_type | Fixed - 'gradients' |
 | geometry | geometry |
 | species_passability_value | actual_species - one key for each entry (already encoded as `<species>_<lifestage>`), value 0 (not passable) |
 | source | fixed - 'gradient_barriers' |
 
-#### Step 7. Classify Structures
+#### Classify Structures
 
-Populate the `output_schema.all_structures` table structure_type based on the following mappings:
+Populate the `output_schema.all_structures.structure_type` field based on the following mappings:
 
-| feature type | structure_type |
+| feature_type | structure_type |
 | :---- | :---- |
 | waterfalls | natural |
-| gradient | natural |
+| gradients | natural |
 | _all others_ | anthropogenic |
 
 ### Process Habitat
 
 ### 1. Load Habitat Updates
 
-Create a working copy of the habitat points, copying relevant records and manipulated as required.
+Create a working copy of the habitat points, copying relevant records and updating as required.
 
 Inputs:
 
@@ -443,7 +468,7 @@ The output schema is populated from the output_schema parameter in the model par
 | Column | Type | Description |
 | :---- | :---- | :---- |
 | id | uuid | Unique system generated id |
-| species\_lifestage | string\[\] | Array of species/lifecycle combinations with habitat in the specified area, each encoded as `[not_]<species>[_<spawn|rear>]`. Omitting the `_spawn`/`_rear` suffix means both lifecycles; a `not_` prefix explicitly excludes (clears) that species/lifecycle combination instead of setting it. |
+| species\_lifestage | string\[\] | Array of species/lifecycle combinations with habitat in the specified area, each encoded as `<species>`, `not_<species>`, `<species>_<lifestage>`, `not_<species>_<lifestage>`. Omitting the lifestage suffix means both lifecycles; a `not_` prefix explicitly excludes (clears) that species/lifecycle combination instead of setting it. |
 | update\_scope | string | Values: 'all', any specific plan code (e.g.: cheticamp\_wcrp). This field determines how new structures are added to the model run. The model run will include updates where update\_scope \= 'all' or update\_scope \= the plan code. |
 | points | Geometry (multipoint) | Represents the upstream and/or downstream point of the habitat area. This is modelled as a multi point that can have one or two points and used in conjunction with the location\_type field. It is modelled as a multi point rather than two point fields to support editing in QGIS. QGIS does not easily support editing tables with multiple geometries. |
 | location\_type | enum: upstream, downstream, between | To identify if the point represents the downstream habitat point, the upstream habitat point or if the habitat is between the points. In the cases where the value is upstream or downstream, only one point can be specified in the points; for between two points must be specified. We will implement database triggers to enforce this constraint and reduce user errors. |
@@ -483,6 +508,10 @@ For each record in this table we need:
 
 ### Compute Statistics
 
+This phase also creates and populates the `<output_schema>.gradient_barriers` cache table (see
+Outputs section), if the plan includes gradient barriers -- copying the relevant rows back out of
+`all_structures` after they've been snapped to the network.
+
 Processing is partitioned by `graph_id` (see Load Stream Network): each connected group of edges
 is processed independently, which bounds memory/compute to one river system at a time instead of
 the whole network, and makes runs resumable/parallelizable per component. Any `graph_id` group
@@ -490,14 +519,16 @@ with `is_isolated = true` edges is skipped entirely -- no statistics are compute
 computed as linear passes over each component's edges in topological order (upstream-to-downstream
 for upstream aggregates, downstream-to-upstream for downstream barrier counts) rather than by
 independently walking the graph from every edge -- with 10M+ edges network-wide, a per-edge walk
-does not finish in a reasonable time. Each edge's full vector of per-species/lifecycle values
-should be computed together in the same pass, rather than repeating the traversal once per
-species/lifecycle combination in `reporting_values`.
+does not finish in a reasonable time. Each edge's full vector of per-species/lifecycle values is
+computed together in the same pass (one combined upstream/downstream traversal per pipeline
+stage, covering every species/lifecycle at once via `propagate_upstream_multi`/
+`propagate_downstream_multi`/`propagate_upstream_with_reset_multi` in `graph_stats.py`), rather
+than repeating the traversal once per species/lifecycle combination in `reporting_values`.
 
 1. Load the stream network from the output_schema.streams table
 2. Break the network at all barriers points and habitat points, updating the length attribute and ensure it is computed in meters
-3. Compute effective_length for each edge. For each waterbody(ecatchment_id), the longest mainstem will be determined, and any edges in that waterbody that are not a part of that mainsteam are given an effective_length of 0, all other edges are given their geometric length in meters.
-4. For each stream segments compute the segments gradient (upstream_elevation - downstream elevation) / segment_length
+3. Compute effective_length for each edge. For each waterbody(ecatchment_id), the longest mainstem will be determined, and any edges in that waterbody that are not a part of that mainsteam are given an effective_length of 0, all other edges are given their geometric length in meters. An edge with no ecatchment_id or no mainstem_id has nothing to compare it against, so it keeps its own geometric length as effective_length (same outcome as if it were the winning mainstem in its own single-edge waterbody).
+4. For each stream segments compute the segments gradient (upstream_elevation - downstream elevation) / segment_length. segment_gradient is NULL if the segment's length is 0 (avoiding division by zero), or if either endpoint's elevation is missing -- either a SQL NULL, or CHyF's -9999 sentinel for "no smoothed-elevation data at this vertex". A NULL segment_gradient falls out of the range check in step 7 below (SQL NULL comparisons are neither true nor false), so such a segment is never assigned as habitat for any species/lifecycle by that check.
 5. Compute upstream/downstream barriers per species; Add the following statistics to each stream network edge:
     * For each species, number of impassable anthropogenic barriers upstream of the stream edge
     * For each species, number of impassable anthropogenic barriers downstream of the stream edge

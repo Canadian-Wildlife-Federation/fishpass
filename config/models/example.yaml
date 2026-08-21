@@ -14,14 +14,14 @@ target_species:
   - as
 
 reporting_values:
-  - all_all
+  - as_all
 
 structure_types:
   - dams
-  #- waterfalls
-  #- stream_crossings
+  - waterfalls
+  - stream_crossings
   - gradients
-  # include "gradient_barriers" here to also include computed gradient barriers -- they are
+  # include "gradients" here to also include computed gradient barriers -- they are
   # excluded by default, see requirements.md's Load Structures step 6.
 
 structure_snap_edge_distance_m: 100

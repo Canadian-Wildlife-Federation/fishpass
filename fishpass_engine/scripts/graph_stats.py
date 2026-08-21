@@ -125,6 +125,71 @@ def propagate_upstream_with_reset(order_up, predecessors, local_value, is_reset,
 	return acc
 
 
+def propagate_upstream_multi(order_up, predecessors, local_values, zeros):
+	"""Vector-valued propagate_upstream: local_values[edge_id] is a {field: value} dict (any
+	fields missing for an edge fall back to zeros[field]), and every field is accumulated in the
+	same single traversal of order_up rather than one traversal per field. `+` is used to combine
+	values, which does the right thing for both int fields (addition) and list fields
+	(concatenation) without special-casing either.
+
+	Returns {edge_id: {field: accumulated_value}}.
+	"""
+
+	acc = {}
+	for edge_id in order_up:
+		values = local_values.get(edge_id, {})
+		combined = {field: values.get(field, zero) for field, zero in zeros.items()}
+		for p in predecessors.get(edge_id, []):
+			p_acc = acc[p]
+			for field in zeros:
+				combined[field] = combined[field] + p_acc[field]
+		acc[edge_id] = combined
+	return acc
+
+
+def propagate_downstream_multi(order_down, successor, local_values, zeros):
+	"""Vector-valued propagate_downstream -- see propagate_upstream_multi. Returns
+	{edge_id: {field: accumulated_value}}."""
+
+	acc = {}
+	for edge_id in order_down:
+		succ = successor.get(edge_id)
+		if succ is None:
+			acc[edge_id] = dict(zeros)
+			continue
+		succ_acc = acc[succ]
+		succ_values = local_values.get(succ, {})
+		acc[edge_id] = {
+			field: succ_acc[field] + succ_values.get(field, zero)
+			for field, zero in zeros.items()
+		}
+	return acc
+
+
+def propagate_upstream_with_reset_multi(order_up, predecessors, local_values, is_reset, zeros):
+	"""Vector-valued propagate_upstream_with_reset -- see propagate_upstream_multi and
+	propagate_upstream_with_reset. is_reset[edge_id] is now a {field: bool} dict instead of a
+	single bool, so each field independently resets or accumulates from predecessors within the
+	same traversal -- e.g. two species with barriers at different positions can share one pass
+	even though they reset at different edges."""
+
+	acc = {}
+	for edge_id in order_up:
+		values = local_values.get(edge_id, {})
+		resets = is_reset.get(edge_id, {})
+		combined = {}
+		for field, zero in zeros.items():
+			local = values.get(field, zero)
+			if resets.get(field, False):
+				combined[field] = local
+			else:
+				for p in predecessors.get(edge_id, []):
+					local = local + acc[p][field]
+				combined[field] = local
+		acc[edge_id] = combined
+	return acc
+
+
 def is_impassable(species_passability_value, species, impassable_threshold):
 	"""requirements.md Compute Statistics step 5: impassable for `species` if either lifestage's
 	value is below impassable_threshold. A missing species_lifestage key is treated as 0
@@ -181,24 +246,45 @@ def compute_barrier_stats(order_up, order_down, predecessors, successor, barrier
 	both types -- see the Outputs section -- hence downstream_natural_ids is included here too,
 	but not upstream_natural_ids, which nothing needs)."""
 
-	stats = {}
-	for species, data in barrier_here_by_species.items():
-		up_nat = propagate_upstream(order_up, predecessors, data["natural"], lambda a, b: a + b, 0)
-		down_nat = propagate_downstream(order_down, successor, data["natural"], lambda a, b: a + b, 0)
-		up_anthro = propagate_upstream(order_up, predecessors, data["anthro"], lambda a, b: a + b, 0)
-		down_anthro = propagate_downstream(order_down, successor, data["anthro"], lambda a, b: a + b, 0)
-		up_anthro_ids = propagate_upstream(order_up, predecessors, data["anthro_ids"], lambda a, b: a + b, [])
-		down_anthro_ids = propagate_downstream(order_down, successor, data["anthro_ids"], lambda a, b: a + b, [])
-		down_natural_ids = propagate_downstream(order_down, successor, data["natural_ids"], lambda a, b: a + b, [])
+	up_zeros = {}
+	up_local = {}
+	down_zeros = {}
+	down_local = {}
 
+	for species, data in barrier_here_by_species.items():
+		up_zeros[f"{species}:upstream_natural_count"] = 0
+		up_zeros[f"{species}:upstream_anthro_count"] = 0
+		up_zeros[f"{species}:upstream_anthro_ids"] = []
+		down_zeros[f"{species}:downstream_natural_count"] = 0
+		down_zeros[f"{species}:downstream_anthro_count"] = 0
+		down_zeros[f"{species}:downstream_anthro_ids"] = []
+		down_zeros[f"{species}:downstream_natural_ids"] = []
+
+		for eid, v in data["natural"].items():
+			up_local.setdefault(eid, {})[f"{species}:upstream_natural_count"] = v
+			down_local.setdefault(eid, {})[f"{species}:downstream_natural_count"] = v
+		for eid, v in data["anthro"].items():
+			up_local.setdefault(eid, {})[f"{species}:upstream_anthro_count"] = v
+			down_local.setdefault(eid, {})[f"{species}:downstream_anthro_count"] = v
+		for eid, v in data["anthro_ids"].items():
+			up_local.setdefault(eid, {})[f"{species}:upstream_anthro_ids"] = v
+			down_local.setdefault(eid, {})[f"{species}:downstream_anthro_ids"] = v
+		for eid, v in data["natural_ids"].items():
+			down_local.setdefault(eid, {})[f"{species}:downstream_natural_ids"] = v
+
+	up_acc = propagate_upstream_multi(order_up, predecessors, up_local, up_zeros)
+	down_acc = propagate_downstream_multi(order_down, successor, down_local, down_zeros)
+
+	stats = {}
+	for species in barrier_here_by_species:
 		stats[species] = {
-			"upstream_natural_count": up_nat,
-			"downstream_natural_count": down_nat,
-			"upstream_anthro_count": up_anthro,
-			"downstream_anthro_count": down_anthro,
-			"upstream_anthro_ids": up_anthro_ids,
-			"downstream_anthro_ids": down_anthro_ids,
-			"downstream_natural_ids": down_natural_ids,
+			"upstream_natural_count": {eid: v[f"{species}:upstream_natural_count"] for eid, v in up_acc.items()},
+			"downstream_natural_count": {eid: v[f"{species}:downstream_natural_count"] for eid, v in down_acc.items()},
+			"upstream_anthro_count": {eid: v[f"{species}:upstream_anthro_count"] for eid, v in up_acc.items()},
+			"downstream_anthro_count": {eid: v[f"{species}:downstream_anthro_count"] for eid, v in down_acc.items()},
+			"upstream_anthro_ids": {eid: v[f"{species}:upstream_anthro_ids"] for eid, v in up_acc.items()},
+			"downstream_anthro_ids": {eid: v[f"{species}:downstream_anthro_ids"] for eid, v in down_acc.items()},
+			"downstream_natural_ids": {eid: v[f"{species}:downstream_natural_ids"] for eid, v in down_acc.items()},
 		}
 	return stats
 

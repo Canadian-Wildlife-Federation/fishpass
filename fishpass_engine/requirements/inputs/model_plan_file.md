@@ -22,6 +22,7 @@ Any number of files can exist. These are stored in GitHub at `config/models/<pla
 | structure_update_table | Optional. Defaults to `support.structure_updates`. |
 | structure_new_table | Optional. Defaults to `support.new_structures`. |
 | habitat_update_table | Optional. Defaults to `support.habitat_updates`. |
+| gradient_barriers_table | Optional. Defaults to `support.gradient_barriers`. |
 | update_scope | Optional. Defaults to the plan's `code` value. Used to filter structure and habitat updates. |
 | impassable_threshold | Optional. Default: `1.0`. A structure/barrier is treated as impassable for a given species/lifestage if its `passability_status_value` is less than this threshold. Default means anything short of fully passable (`1.0`) -- including a fractional partial-passability value like `0.25` -- counts as impassable. Used in Compute Statistics step 5. |
 

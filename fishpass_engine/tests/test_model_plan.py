@@ -83,6 +83,7 @@ class LoadModelPlanTests(unittest.TestCase):
 		self.assertEqual(plan["structure_update_table"], "support.structure_updates")
 		self.assertEqual(plan["structure_new_table"], "support.new_structures")
 		self.assertEqual(plan["habitat_update_table"], "support.habitat_updates")
+		self.assertEqual(plan["gradient_barriers_table"], "support.gradient_barriers")
 		self.assertEqual(plan["update_scope"], "myplan")
 		self.assertEqual(plan["aoi_kind"], "workunit")
 		self.assertEqual(plan["aoi_value"], ["03EBA001"])
@@ -112,6 +113,12 @@ class LoadModelPlanTests(unittest.TestCase):
 			models_dir = write_plan(tmp, "myplan", extra_yaml="structure_types:\n  - dams\n  - gradient_barriers")
 			plan = mp.load_model_plan("myplan", models_dir=models_dir)
 		self.assertTrue(plan["include_gradient_barriers"])
+
+	def test_gradient_barriers_table_override(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			models_dir = write_plan(tmp, "myplan", extra_yaml="gradient_barriers_table: other.gb_table")
+			plan = mp.load_model_plan("myplan", models_dir=models_dir)
+		self.assertEqual(plan["gradient_barriers_table"], "other.gb_table")
 
 	def test_code_mismatch_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:

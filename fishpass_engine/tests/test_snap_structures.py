@@ -82,17 +82,37 @@ class FetchCandidateMatchesTests(unittest.TestCase):
 class WriteSnappedGeometriesTests(unittest.TestCase):
 	def test_reprojects_to_snapped_srid(self):
 		cursor = FakeCursor()
-		ss.write_snapped_geometries(cursor, "model_test", 4617, "edge-1", [("s1", -63.0, 45.0, 0.0, 10.0)])
+		ss.write_snapped_geometries(cursor, "model_test", 4617, [("s1", "edge-1", -63.0, 45.0, 0.0, 10.0)])
 		sql, rows = cursor.executemany_calls[0]
 		self.assertIn(f"ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), 4617), {ss.SNAPPED_GEOMETRY_SRID})", sql)
-		self.assertEqual(rows, [(-63.0, 45.0, "s1")])
+		self.assertIn("VALUES (%s, %s, %s, %s)) AS v(x, y, edge_id, structure_id)", sql)
+		self.assertEqual(rows, [(-63.0, 45.0, "edge-1", "s1")])
 
-	def test_sets_snapped_edge_id(self):
+	def test_sets_snapped_edge_id_in_same_statement(self):
 		cursor = FakeCursor()
-		ss.write_snapped_geometries(cursor, "model_test", 4617, "edge-1", [("s1", -63.0, 45.0, 0.0, 10.0)])
-		sql, params = cursor.executed[-1]
-		self.assertIn("SET snapped_edge_id = %s WHERE id = ANY(%s)", sql)
-		self.assertEqual(params, ("edge-1", ["s1"]))
+		ss.write_snapped_geometries(cursor, "model_test", 4617, [("s1", "edge-1", -63.0, 45.0, 0.0, 10.0)])
+		sql, _rows = cursor.executemany_calls[0]
+		self.assertIn("snapped_edge_id = v.edge_id", sql)
+		self.assertEqual(cursor.executed, [])
+
+
+class WriteEdgeGeometriesTests(unittest.TestCase):
+	def test_writes_geometry_per_changed_edge(self):
+		cursor = FakeCursor()
+		vertices = [[0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 0.0, 1.0]]
+		ss.write_edge_geometries(cursor, "model_test", 4617, [("edge-1", vertices)])
+		sql, rows = cursor.executemany_calls[0]
+		self.assertIn("UPDATE", sql)
+		self.assertIn("streams SET geometry = ST_SetSRID(ST_GeomFromWKB(%s), %s) WHERE id = %s", sql)
+		self.assertEqual(len(rows), 1)
+		wkb, srid, edge_id = rows[0]
+		self.assertEqual(srid, 4617)
+		self.assertEqual(edge_id, "edge-1")
+		geom = shapely.from_wkb(bytes(wkb))
+		self.assertEqual(
+			shapely.get_coordinates(geom, include_z=True, include_m=True).tolist(),
+			vertices,
+		)
 
 
 if __name__ == "__main__":

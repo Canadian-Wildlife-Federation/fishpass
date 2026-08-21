@@ -23,7 +23,7 @@ This will load required data from CHyF2 database into the chyf_raw schema using 
 
 #### Configuration File
 * GitHub
-* support/chyf_loader.ini
+* config/chyf_loader.ini
 
 Contains any support parameters required for preprocessing including the AOI.
 

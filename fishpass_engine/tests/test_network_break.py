@@ -163,10 +163,17 @@ class _FakeUUID:
 class FakeCursor:
 	def __init__(self, fetch_results=None):
 		self.executed = []
+		self.executemany_calls = []
 		self._fetch_results = list(fetch_results or [])
 
 	def execute(self, sql, params=None):
 		self.executed.append((" ".join(sql.split()), params))
+
+	def executemany(self, sql, params_seq):
+		params_seq = list(params_seq)
+		self.executemany_calls.append((" ".join(sql.split()), params_seq))
+		for params in params_seq:
+			self.executed.append((" ".join(sql.split()), params))
 
 	def fetchall(self):
 		return self._fetch_results.pop(0) if self._fetch_results else []
@@ -245,6 +252,45 @@ class BreakNetworkEndMarkerTests(unittest.TestCase):
 
 		self.assertEqual(by_ref_id["b1"], "new-seg-1")
 		self.assertNotIn("b2", by_ref_id)
+
+
+class BreakNetworkBatchingTests(unittest.TestCase):
+	"""With BATCH_SIZE forced small, the walk-edges loop must flush in multiple
+	executemany() calls rather than accumulating every row for one flush at the end."""
+
+	def _streams_row(self, edge_id, from_nexus, to_nexus):
+		vertices = [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 10.0], [2.0, 0.0, 0.0, 20.0]]
+		wkb = ns.linestring_zm_wkb(vertices)
+		return (edge_id, "aoi", "single", None, 1, from_nexus, to_nexus, "ec", "ms", "g1", False, 1, bytes(wkb))
+
+	def test_multiple_flushes_when_batch_size_is_small(self):
+		edge_ids = ["E1", "E2", "E3"]
+		fetch_results = [
+			[(eid, 1.0, 0.0, f"b-{eid}") for eid in edge_ids],  # barriers, one internal marker each
+			[],  # habitat_upstream
+			[],  # habitat_downstream
+			[self._streams_row(eid, f"N0-{eid}", f"N2-{eid}") for eid in edge_ids],  # fetch_edges_with_markers
+			[],  # find_downstream_edge_ids
+		]
+		cursor = FakeCursor(fetch_results=fetch_results)
+		conn = mock.Mock()
+		plan = {"output_schema": "out"}
+
+		new_ids = [_FakeUUID(f"new-{i}") for i in range(len(edge_ids) * 2)]
+		with mock.patch.object(nb, "BATCH_SIZE", 1), \
+			mock.patch.object(nb.uuid, "uuid4", side_effect=new_ids):
+			nb.break_network(conn, cursor, plan, srid=4326)
+
+		update_flushes = [
+			call for call in cursor.executemany_calls if "UPDATE" in call[0] and "streams" in call[0]
+		]
+		insert_flushes = [
+			call for call in cursor.executemany_calls if call[0].startswith("INSERT INTO") and "streams" in call[0]
+		]
+		self.assertEqual(len(update_flushes), len(edge_ids))
+		self.assertEqual(len(insert_flushes), len(edge_ids))
+		for _sql, rows in update_flushes + insert_flushes:
+			self.assertEqual(len(rows), 1)
 
 
 if __name__ == "__main__":

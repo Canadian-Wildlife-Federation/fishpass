@@ -1,8 +1,12 @@
 # Gradient Barrier Generator
 
 Computes gradient barriers per fish species/lifestage from the cached CHyF stream network
-(`chyf_raw.flowpath`), and writes them to `support.gradient_barriers`. See
-[requirements.md](requirements.md) for the full requirements and design decisions behind this tool.
+(`chyf_raw.flowpath`), and writes them to `support.gradient_barriers`. Each run also creates (or appends a
+row to) `support.gradient_barriers_metadata`, recording the AOI scope (`{all}` for a full run, or
+the reprocessed AOI short_names for a scoped run), the fish species parameters in effect, and the
+run's timestamp. The metadata table is fully replaced for a full run (all AOI's), and appended to for a AOI scoped run.
+See [requirements.md](requirements.md) for the full requirements and design
+decisions behind this tool.
 
 ## Prerequisite: chyf_loader
 
@@ -13,7 +17,7 @@ This tool reads from `chyf_raw.flowpath`, which must already be populated by the
 ## Warnings
 
 **Table is fully recomputed each run.** Manual edits to `actual_species`/`comments` on the live
-  table don't carry forward — they only survive in the archived copy from before the run.
+  table don't carry forward — they only survive in the archived copy from before the run. For AOI-scoped runs, only the edits for the AOI in scope are lost, other edits (outside the AOI) remain.
 
 **AOI-scoped runs and boundary mainstems.** A scoped run reads across into neighboring AOIs
   where a mainstem crosses a boundary, to keep gradients correct near the edge, but only writes
@@ -45,8 +49,8 @@ variables (`FISHPASS_HOST`, `FISHPASS_PORT`, `FISHPASS_DBNAME`, `FISHPASS_USER`,
 ### Reprocessing one or more AOIs
 
 To recompute barriers for just one or a few AOI(s) instead of the entire network, edit
-[`support/gradient_barriers.ini`](support/gradient_barriers.ini) (see
-[`gradient_barriers.ini.example`](support/gradient_barriers.ini.example) for the documented
+[`config/gradient_barriers.ini`](../config/gradient_barriers.ini) (see
+[`gradient_barriers.ini.example`](../config/gradient_barriers.ini.example) for the documented
 format) and commit the change:
 
 ```ini
@@ -71,7 +75,7 @@ python gradient_barriers/scripts/compute_barriers.py
 
 Pass `--species_params PATH` to use a species parameter file other than the repo default
 (`config/fish_species_parameters.yaml`), and/or `--config PATH` to use an AOI config file other
-than the repo default (`gradient_barriers/support/gradient_barriers.ini`):
+than the repo default (`config/gradient_barriers.ini`):
 
 ```sh
 python gradient_barriers/scripts/compute_barriers.py --species_params /path/to/other_parameters.yaml

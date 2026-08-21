@@ -1,7 +1,7 @@
 -- Copy source aoi rows for the target workunit(s) into the target schema.
 
-INSERT INTO :target_aoi_table (id, short_name, geometry)
-SELECT id, short_name, geometry
+INSERT INTO :target_aoi_table (id, short_name, province_territory_code, geometry)
+SELECT id, short_name, province_territory_code, geometry
 FROM :source_aoi_table
 WHERE id = ANY(:'workunit_ids'::uuid[]);
 

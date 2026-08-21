@@ -11,6 +11,8 @@ local_override), so overlapping rows are applied in update_date ascending order 
 flag simply overwrites an earlier one's for any segment/species/lifecycle they both touch.
 """
 
+import sys
+
 LIFECYCLES = ("rear", "spawn")
 
 
@@ -78,7 +80,7 @@ def mainstem_segments_between(edges_by_id, predecessors, downstream_edge_id, ups
 	mainstem_id = edges_by_id[downstream_edge_id]["mainstem_id"]
 	if edges_by_id[upstream_edge_id]["mainstem_id"] != mainstem_id:
 		raise ValueError(
-			f"habitat update's upstream point (mainstem_id={edges_by_id[upstream_edge_id]['mainstem_id']!r}) "
+			f"upstream point (mainstem_id={edges_by_id[upstream_edge_id]['mainstem_id']!r}) "
 			f"and downstream point (mainstem_id={mainstem_id!r}) are on different mainstems"
 		)
 
@@ -115,7 +117,10 @@ def resolve_segments(row, edges_by_id, predecessors, successor):
 	if location_type == "between":
 		if up_id is None or down_id is None or up_id not in edges_by_id or down_id not in edges_by_id:
 			return None
-		return mainstem_segments_between(edges_by_id, predecessors, down_id, up_id)
+		try:
+			return mainstem_segments_between(edges_by_id, predecessors, down_id, up_id)
+		except ValueError as e:
+			sys.exit(f"habitat_updates row {row.get('id')}: {e}")
 	return None
 
 

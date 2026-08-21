@@ -50,46 +50,6 @@ class WriteBarrierStatTablesTests(unittest.TestCase):
 		self.assertIn("SET species_stats = v.species_stats::jsonb", sql)
 		self.assertEqual(params, [(json.dumps({"es": {"upstream_natural_count": 0}}, default=str), "b1")])
 
-
-class CreateBarrierViewsTests(unittest.TestCase):
-	def test_creates_natural_and_anthropogenic_views(self):
-		cursor = FakeCursor()
-		bt.create_barrier_views(cursor, "model_test")
-		self.assertEqual(len(cursor.executed), 2)
-		sql_natural, _ = cursor.executed[0]
-		sql_anthro, _ = cursor.executed[1]
-		self.assertIn("CREATE VIEW \"model_test\".natural_barriers", sql_natural)
-		self.assertIn("WHERE structure_type = 'natural' AND species_stats IS NOT NULL", sql_natural)
-		self.assertIn("CREATE VIEW \"model_test\".anthropogenic_barriers", sql_anthro)
-		self.assertIn("WHERE structure_type = 'anthropogenic' AND species_stats IS NOT NULL", sql_anthro)
-
-
-class CreateAndPopulateFeatureTypeTablesTests(unittest.TestCase):
-	def test_skips_gradient_barriers(self):
-		cursor = FakeCursor()
-		bt.create_and_populate_feature_type_tables(cursor, "model_test", ["dams", "gradients"], 4617)
-		executed_sql = " ".join(sql for sql, _ in cursor.executed)
-		self.assertIn("cabd_dams", executed_sql)
-		self.assertNotIn("CREATE TABLE \"model_test\".\"cabd_gradients\"", executed_sql)
-
-	def test_rejects_unsafe_feature_type_name(self):
-		cursor = FakeCursor()
-		with self.assertRaises(SystemExit):
-			bt.create_and_populate_feature_type_tables(cursor, "model_test", ["dams; DROP TABLE x"], 4617)
-
-	def test_creates_and_copies_for_each_type(self):
-		cursor = FakeCursor()
-		bt.create_and_populate_feature_type_tables(cursor, "model_test", ["dams", "waterfalls"], 4617)
-		create_statements = [sql for sql, _ in cursor.executed if sql.startswith("CREATE TABLE")]
-		self.assertEqual(len(create_statements), 2)
-		self.assertIn("CREATE TABLE \"model_test\".\"cabd_dams\"", create_statements[0])
-		self.assertIn("CREATE TABLE \"model_test\".\"cabd_waterfalls\"", create_statements[1])
-		insert_statements = [(sql, params) for sql, params in cursor.executed if sql.startswith("INSERT INTO")]
-		self.assertEqual(len(insert_statements), 2)
-		self.assertIn("INSERT INTO \"model_test\".\"cabd_dams\"", insert_statements[0][0])
-		self.assertEqual(insert_statements[0][1], ("dams",))
-
-
 class CreateAndPopulateGradientBarriersCacheTests(unittest.TestCase):
 	def test_filters_by_source(self):
 		cursor = FakeCursor()

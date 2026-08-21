@@ -11,9 +11,10 @@ point snapping -- see network_snap.py.
 import psycopg
 
 from db import quote_ident
-from network_snap import point_xyzm, snap_points_to_edge, write_edge_geometry
+from network_snap import linestring_zm_wkb, point_xyzm, snap_points_to_edge
 
 SNAPPED_GEOMETRY_SRID = 4617
+BATCH_SIZE = 5000  # rows per bulk write; bounds memory, not a correctness requirement
 
 
 def fetch_candidate_matches(cursor, output_schema, edge_distance_m):
@@ -55,30 +56,41 @@ def group_by_edge(matches):
 	return by_edge
 
 
-def write_snapped_geometries(cursor, output_schema, srid, edge_id, snap_results):
-	"""snap_results: list of (structure_id, x, y, z, m). snapped_geometry (for reporting) is
-	stored in SNAPPED_GEOMETRY_SRID (4617, per requirements.md), reprojected from the streams
-	SRID. network_vertex_x/y store the same location in the streams table's native SRID (no
-	reprojection), so Compute Statistics' network-breaking step can match it against streams
-	vertices exactly. snapped_edge_id records which streams edge the structure landed on."""
+def write_snapped_geometries(cursor, output_schema, srid, all_results):
+	"""all_results: list of (structure_id, edge_id, x, y, z, m) across one or more edges.
+	snapped_geometry (for reporting) is stored in SNAPPED_GEOMETRY_SRID (4617, per
+	requirements.md), reprojected from the streams SRID. network_vertex_x/y store the same
+	location in the streams table's native SRID (no reprojection), so Compute Statistics'
+	network-breaking step can match it against streams vertices exactly. snapped_edge_id
+	records which streams edge the structure landed on."""
 
 	schema_ident = quote_ident(output_schema)
-	rows = [(x, y, structure_id) for structure_id, x, y, _z, _m in snap_results]
-	
+	rows = [(x, y, edge_id, structure_id) for structure_id, edge_id, x, y, _z, _m in all_results]
+
 	cursor.executemany(
 		f"""
 		UPDATE {schema_ident}.all_structures AS s
 		SET snapped_geometry = ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), {srid}), {SNAPPED_GEOMETRY_SRID}),
 			network_vertex_x = v.x,
-			network_vertex_y = v.y
-		FROM (VALUES (%s, %s, %s)) AS v(x, y, structure_id)
+			network_vertex_y = v.y,
+			snapped_edge_id = v.edge_id
+		FROM (VALUES (%s, %s, %s, %s)) AS v(x, y, edge_id, structure_id)
 		WHERE s.id = v.structure_id
 		""",
 		rows,
 	)
-	cursor.execute(
-		f"UPDATE {schema_ident}.all_structures SET snapped_edge_id = %s WHERE id = ANY(%s)",
-		(edge_id, [r[0] for r in snap_results]),
+
+
+def write_edge_geometries(cursor, output_schema, srid, changed_edges):
+	"""changed_edges: list of (edge_id, vertices) for edges where snap_points_to_edge inserted
+	a new vertex."""
+
+	schema_ident = quote_ident(output_schema)
+	rows = [(linestring_zm_wkb(vertices), srid, edge_id) for edge_id, vertices in changed_edges]
+
+	cursor.executemany(
+		f"UPDATE {schema_ident}.streams SET geometry = ST_SetSRID(ST_GeomFromWKB(%s), %s) WHERE id = %s",
+		rows,
 	)
 
 
@@ -101,18 +113,41 @@ def snap_structures(conn, cursor, plan, srid):
 	cursor.execute(f"SELECT count(*) FROM {quote_ident(output_schema)}.all_structures WHERE snapped_geometry IS NULL")
 	total_unsnapped = cursor.fetchone()[0]
 
+	print(f"Finding candidate edges for {total_unsnapped} unsnapped structure(s)...")
 	matches = fetch_candidate_matches(cursor, output_schema, edge_distance_m)
 	by_edge = group_by_edge(matches)
 
 	snapped_count = 0
+	results_buffer = []  # (structure_id, edge_id, x, y, z, m)
+	edges_buffer = []  # (edge_id, vertices), only where changed=True
+
 	for edge_id, group in by_edge.items():
 		vertices, results, changed = snap_points_to_edge(group["wkb"], group["structures"], vertex_distance_m)
 		if changed:
-			write_edge_geometry(cursor, output_schema, edge_id, vertices, srid)
-		write_snapped_geometries(cursor, output_schema, srid, edge_id, results)
+			edges_buffer.append((edge_id, vertices))
+		results_buffer.extend((structure_id, edge_id, x, y, z, m) for structure_id, x, y, z, m in results)
 		snapped_count += len(results)
 
+		if len(results_buffer) >= BATCH_SIZE:
+			write_snapped_geometries(cursor, output_schema, srid, results_buffer)
+			results_buffer = []
+		if len(edges_buffer) >= BATCH_SIZE:
+			write_edge_geometries(cursor, output_schema, srid, edges_buffer)
+			edges_buffer = []
+
+		if snapped_count // BATCH_SIZE > (snapped_count - len(results)) // BATCH_SIZE:
+			print(f"Snapped {snapped_count}/{total_unsnapped} structure(s)...")
+
+	if results_buffer:
+		write_snapped_geometries(cursor, output_schema, srid, results_buffer)
+	if edges_buffer:
+		write_edge_geometries(cursor, output_schema, srid, edges_buffer)
+
 	unmatched_count = total_unsnapped - snapped_count
+
+	# create after the data is loaded so data loading isn't affected
+	cursor.execute(f"CREATE INDEX all_structures_snapped_edge_id_idx ON {quote_ident(output_schema)}.all_structures (snapped_edge_id);")
+
 	conn.commit()
 
 	print(f"Snapped {snapped_count} structure(s); {unmatched_count} had no edge within {edge_distance_m}m.")

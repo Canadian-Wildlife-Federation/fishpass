@@ -42,10 +42,11 @@ def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_
 	treated as a signal of truncation, not a complete result, and aborts the run rather than
 	silently returning partial data -- see requirements.md.
 
-	Returns a list of GeoJSON feature dicts.
+	Yields GeoJSON feature dicts one at a time, chunked by work-unit subgroup so each chunk's
+	response can be freed as soon as its features are consumed rather than holding every chunk's
+	features in one combined list.
 	"""
 	http = session or requests
-	features = []
 	for i in range(0, len(short_names), chunk_size):
 		chunk = short_names[i:i + chunk_size]
 		url = _build_url(feature_type, chunk, base_url)
@@ -54,9 +55,8 @@ def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_
 			resp.raise_for_status()
 		except requests.exceptions.HTTPError as e:
 			if e.response.status_code == 404:
-				print(f"Resource not found (404) at {url}. This feature type may not exist of the CABD API may be broken.")
-			else:
-				raise
+				sys.exit(f"404 response from CABD API at {url}")
+			raise
 		chunk_features = resp.json().get("features", [])
 		if len(chunk_features) >= RESULT_CAP:
 			sys.exit(
@@ -64,5 +64,4 @@ def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_
 				f"{feature_type!r}, work units {chunk} -- this may be truncated at the "
 				f"{RESULT_CAP}-feature cap. Reduce chunk_size and retry."
 			)
-		features.extend(chunk_features)
-	return features
+		yield from chunk_features

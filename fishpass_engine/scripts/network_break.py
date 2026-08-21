@@ -26,6 +26,7 @@ from db import quote_ident
 from network_snap import edge_vertices, linestring_zm_wkb
 
 VERTEX_MATCH_TOLERANCE = 1e-9  # degrees -- exact float match expected, no reprojection occurs
+BATCH_SIZE = 5000
 
 STREAM_FIELDS = (
 	"id", "aoi_id", "ef_type", "ef_subtype", "rank", "from_nexus_id", "to_nexus_id",
@@ -121,15 +122,20 @@ def break_edge(edge, points, new_id_factory=lambda: str(uuid.uuid4())):
 	return segments, end_markers
 
 
-def write_segments(cursor, output_schema, srid, edge_row, segments):
-	"""Write `segments` (from break_edge) back to <output_schema>.streams: the first segment
-	updates edge_row's own id in place, later segments are inserted as new rows sharing
-	edge_row's non-geometric attributes. Returns {(kind, ref_id): new_segment_id} for every
-	marker that ended up in a non-first segment, so the caller can fix up the referencing
-	all_structures/habitat_updates row."""
+def build_segment_writes(edge_row, srid, segments):
+	"""Compute (no DB access) the writes `segments` (from break_edge) require against
+	<output_schema>.streams: the first segment updates edge_row's own id in place, later
+	segments become new rows sharing edge_row's non-geometric attributes. Returns
+	(update_row, insert_rows, reassignments):
 
-	schema_ident = quote_ident(output_schema)
+	update_row is the single UPDATE params tuple for segment 0 (always present). insert_rows
+	is the list of INSERT params tuples for segments 1..n. reassignments is
+	{(kind, ref_id): new_segment_id} for every marker that ended up in a non-first segment, so
+	the caller can fix up the referencing all_structures/habitat_updates row."""
+
 	edge_id = edge_row["id"]
+	update_row = None
+	insert_rows = []
 	reassignments = {}
 
 	for seg_num, seg in enumerate(segments):
@@ -137,38 +143,50 @@ def write_segments(cursor, output_schema, srid, edge_row, segments):
 		wkb = linestring_zm_wkb(seg["vertices"])
 
 		if seg_num == 0:
-			cursor.execute(
-				f"""
-				UPDATE {schema_ident}.streams
-				SET from_nexus_id = %s, to_nexus_id = %s,
-					geometry = ST_SetSRID(ST_GeomFromWKB(%s), %s),
-					length = ST_Length(ST_SetSRID(ST_GeomFromWKB(%s), %s)::geography)
-				WHERE id = %s
-				""",
-				(seg["from_nexus_id"], seg["to_nexus_id"], wkb, srid, wkb, srid, seg_id),
-			)
+			update_row = (seg["from_nexus_id"], seg["to_nexus_id"], wkb, srid, wkb, srid, seg_id)
 		else:
-			cols = ", ".join(STREAM_FIELDS)
-			cursor.execute(
-				f"""
-				INSERT INTO {schema_ident}.streams
-					({cols}, geometry, length)
-				VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-						ST_SetSRID(ST_GeomFromWKB(%s), %s), ST_Length(ST_SetSRID(ST_GeomFromWKB(%s), %s)::geography))
-				""",
-				(
-					seg_id, edge_row["aoi_id"], edge_row["ef_type"], edge_row["ef_subtype"], edge_row["rank"],
-					seg["from_nexus_id"], seg["to_nexus_id"], edge_row["ecatchment_id"], edge_row["mainstem_id"],
-					edge_row["graph_id"], edge_row["is_isolated"], edge_row["strahler_order"],
-					wkb, srid, wkb, srid,
-				),
-			)
-
-		if seg_num != 0:
+			insert_rows.append((
+				seg_id, edge_row["aoi_id"], edge_row["ef_type"], edge_row["ef_subtype"], edge_row["rank"],
+				seg["from_nexus_id"], seg["to_nexus_id"], edge_row["ecatchment_id"], edge_row["mainstem_id"],
+				edge_row["graph_id"], edge_row["is_isolated"], edge_row["strahler_order"],
+				wkb, srid, wkb, srid,
+			))
 			for kind, ref_id in seg["start_markers"]:
 				reassignments[(kind, ref_id)] = seg_id
 
-	return reassignments
+	return update_row, insert_rows, reassignments
+
+
+def flush_segment_updates(cursor, output_schema, rows):
+	if not rows:
+		return
+	schema_ident = quote_ident(output_schema)
+	cursor.executemany(
+		f"""
+		UPDATE {schema_ident}.streams
+		SET from_nexus_id = %s, to_nexus_id = %s,
+			geometry = ST_SetSRID(ST_GeomFromWKB(%s), %s),
+			length = ST_Length(ST_SetSRID(ST_GeomFromWKB(%s), %s)::geography)
+		WHERE id = %s
+		""",
+		rows,
+	)
+
+
+def flush_segment_inserts(cursor, output_schema, rows):
+	if not rows:
+		return
+	schema_ident = quote_ident(output_schema)
+	cols = ", ".join(STREAM_FIELDS)
+	cursor.executemany(
+		f"""
+		INSERT INTO {schema_ident}.streams
+			({cols}, geometry, length)
+		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+				ST_SetSRID(ST_GeomFromWKB(%s), %s), ST_Length(ST_SetSRID(ST_GeomFromWKB(%s), %s)::geography))
+		""",
+		rows,
+	)
 
 
 def apply_edge_id_reassignments(cursor, output_schema, reassignments):
@@ -178,9 +196,20 @@ def apply_edge_id_reassignments(cursor, output_schema, reassignments):
 		"habitat_upstream": (f"{schema_ident}.habitat_updates", "upstream_snapped_edge_id"),
 		"habitat_downstream": (f"{schema_ident}.habitat_updates", "downstream_snapped_edge_id"),
 	}
+
+	grouped = {}
 	for (kind, ref_id), new_edge_id in reassignments.items():
+		grouped.setdefault(kind, []).append((new_edge_id, ref_id))
+
+	total = len(reassignments)
+	done = 0
+	for kind, rows in grouped.items():
 		table, column = tables_and_columns[kind]
-		cursor.execute(f"UPDATE {table} SET {column} = %s WHERE id = %s", (new_edge_id, ref_id))
+		for i in range(0, len(rows), BATCH_SIZE):
+			chunk = rows[i:i + BATCH_SIZE]
+			cursor.executemany(f"UPDATE {table} SET {column} = %s WHERE id = %s", chunk)
+			done += len(chunk)
+			print(f"  reassigned {done}/{total} edge id(s)")
 
 
 def find_downstream_edge_ids(cursor, output_schema, to_nexus_ids):
@@ -216,11 +245,13 @@ def break_network(conn, cursor, plan, srid):
 	increase in <output_schema>.streams row count)."""
 
 	output_schema = plan["output_schema"]
+	print("  getting break points");
 	by_edge = get_break_points(cursor, output_schema)
 	if not by_edge:
 		print("No barrier/habitat points to break the network at.")
 		return 0
 
+	print("  fetch edges with markers");
 	edges = fetch_edges_with_markers(cursor, output_schema, list(by_edge.keys()))
 	nexus_to_downstream_edge = find_downstream_edge_ids(
 		cursor, output_schema, [edge_row["to_nexus_id"] for edge_row in edges]
@@ -228,16 +259,34 @@ def break_network(conn, cursor, plan, srid):
 
 	all_reassignments = {}
 	new_segment_count = 0
+	pending_updates = []
+	pending_inserts = []
+	edges_done = 0
+	print("  walk edges");
 	for edge_row in edges:
 		segments, end_markers = break_edge(edge_row, by_edge[edge_row["id"]])
-		reassignments = write_segments(cursor, output_schema, srid, edge_row, segments)
+		update_row, insert_rows, reassignments = build_segment_writes(edge_row, srid, segments)
+		pending_updates.append(update_row)
+		pending_inserts.extend(insert_rows)
 		all_reassignments.update(reassignments)
 		new_segment_count += len(segments) - 1
+		edges_done += 1
 
 		downstream_edge_id = nexus_to_downstream_edge.get(edge_row["to_nexus_id"])
 		if downstream_edge_id is not None:
 			for kind, ref_id in end_markers:
 				all_reassignments[(kind, ref_id)] = downstream_edge_id
+
+		if len(pending_updates) + len(pending_inserts) >= BATCH_SIZE:
+			flush_segment_updates(cursor, output_schema, pending_updates)
+			flush_segment_inserts(cursor, output_schema, pending_inserts)
+			print(f"    wrote segments for {edges_done}/{len(edges)} edges")
+			pending_updates.clear()
+			pending_inserts.clear()
+
+	flush_segment_updates(cursor, output_schema, pending_updates)
+	flush_segment_inserts(cursor, output_schema, pending_inserts)
+	print(f"    wrote segments for {edges_done}/{len(edges)} edges")
 
 	apply_edge_id_reassignments(cursor, output_schema, all_reassignments)
 	conn.commit()

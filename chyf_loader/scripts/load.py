@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Reload CHyF stream network data into the FishPass chyf_raw schema for the
-workunit(s) configured in support/chyf_loader.ini.
+workunit(s) configured in config/chyf_loader.ini.
 
 Database connection details come from environment variables only (see
 README.md) -- never from the ini file and never logged.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RELOAD_SQL_DIR = REPO_ROOT / "sql" / "reload"
-DEFAULT_CONFIG = REPO_ROOT / "support" / "chyf_loader.ini"
+DEFAULT_CONFIG = REPO_ROOT.parent / "config" / "chyf_loader.ini"
 
 REQUIRED_ENV_VARS = [
 	"FISHPASS_HOST",
@@ -121,7 +121,11 @@ def resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars):
 			"-f", query_path,
 		]
 		if verbosity == "debug":
-			print("Resolving workunit ids:", " ".join(cmd))
+			resolved_query = query.replace(
+				":source_aoi_table", schema_vars["source_aoi_table"]
+			).replace(":'short_names'", f"'{names_literal}'")
+			print("Resolving workunit ids with query:\n", resolved_query)
+			print("Command:", " ".join(cmd))
 
 		result = subprocess.run(cmd, env=psql_env(), capture_output=True, text=True)
 	finally:

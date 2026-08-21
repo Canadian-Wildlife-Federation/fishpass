@@ -97,6 +97,13 @@ class ResolveSegmentsTests(unittest.TestCase):
 		result = ha.resolve_segments(row, self.edges_by_id, self.predecessors, self.successor)
 		self.assertEqual(result, ["E4", "E3", "E1"])
 
+	def test_between_on_different_mainstems_exits_gracefully(self):
+		row = {"id": "H1", "location_type": "between", "upstream_snapped_edge_id": "E1", "downstream_snapped_edge_id": "E2"}
+		with self.assertRaises(SystemExit) as ctx:
+			ha.resolve_segments(row, self.edges_by_id, self.predecessors, self.successor)
+		self.assertIn("H1", str(ctx.exception))
+		self.assertIn("different mainstems", str(ctx.exception))
+
 
 class ApplyHabitatAccessOverridesTests(unittest.TestCase):
 	def setUp(self):

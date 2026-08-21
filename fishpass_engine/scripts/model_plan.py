@@ -26,6 +26,7 @@ DEFAULTS = {
 	"structure_update_table": "support.structure_updates",
 	"structure_new_table": "support.new_structures",
 	"habitat_update_table": "support.habitat_updates",
+	"gradient_barriers_table": "support.gradient_barriers",
 	"impassable_threshold": 1.0,
 }
 

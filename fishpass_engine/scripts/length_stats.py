@@ -13,7 +13,7 @@ for at least one reporting species", independent of which species) -- see the mo
     single species to anchor a shared value to.
 """
 
-from graph_stats import propagate_upstream, propagate_upstream_with_reset
+from graph_stats import propagate_upstream_multi, propagate_upstream_with_reset_multi
 from species_params import stream_order_weight
 
 
@@ -42,22 +42,27 @@ def compute_species_length_stats(
 	habitat[species]["general"], already derived as rear OR spawn by habitat_access.py)."""
 
 	species_list = sorted({sp for sp, _lc in reporting_species_lifecycles})
-	result = {}
+
+	plain_zeros, plain_local = {}, {eid: {} for eid in edge_ids}
+	reset_zeros, reset_local, reset_is_reset = {}, {eid: {} for eid in edge_ids}, {eid: {} for eid in edge_ids}
+	lifecycles_by_species = {}
 
 	for species in species_list:
 		accessible_local = {
 			eid: effective_length[eid] if accessibility[species][eid] in ("connected_naturally_accessible", "disconnected_naturally_accessible") else 0.0
 			for eid in edge_ids
 		}
-		species_result = {
-			"upstream_accessible_length": propagate_upstream(order_up, predecessors, accessible_local, lambda a, b: a + b, 0.0),
-		}
+		accessible_field = f"{species}:upstream_accessible_length"
+		plain_zeros[accessible_field] = 0.0
+		for eid in edge_ids:
+			plain_local[eid][accessible_field] = accessible_local[eid]
 
 		is_barrier = {
 			eid: bool(barrier_here_by_species[species]["natural"].get(eid) or barrier_here_by_species[species]["anthro"].get(eid))
 			for eid in edge_ids
 		}
 		lifecycles = {lc for sp, lc in reporting_species_lifecycles if sp == species}
+		lifecycles_by_species[species] = lifecycles
 		params = species_params_by_code[species]
 
 		for lc in lifecycles:
@@ -65,11 +70,37 @@ def compute_species_length_stats(
 			local = masked_local_value(edge_ids, effective_length, habitat_flag)
 			weighted_local = weighted_local_value(edge_ids, effective_length, strahler_order, habitat_flag, params)
 
-			species_result[f"{lc}_upstream_length"] = propagate_upstream(order_up, predecessors, local, lambda a, b: a + b, 0.0)
-			species_result[f"{lc}_functional_upstream_length"] = propagate_upstream_with_reset(order_up, predecessors, local, is_barrier)
-			species_result[f"{lc}_weighted_upstream_length"] = propagate_upstream(order_up, predecessors, weighted_local, lambda a, b: a + b, 0.0)
-			species_result[f"{lc}_functional_weighted_upstream_length"] = propagate_upstream_with_reset(order_up, predecessors, weighted_local, is_barrier)
+			up_field = f"{species}:{lc}_upstream_length"
+			weighted_field = f"{species}:{lc}_weighted_upstream_length"
+			func_field = f"{species}:{lc}_functional_upstream_length"
+			func_weighted_field = f"{species}:{lc}_functional_weighted_upstream_length"
 
+			plain_zeros[up_field] = 0.0
+			plain_zeros[weighted_field] = 0.0
+			reset_zeros[func_field] = 0.0
+			reset_zeros[func_weighted_field] = 0.0
+
+			for eid in edge_ids:
+				plain_local[eid][up_field] = local[eid]
+				plain_local[eid][weighted_field] = weighted_local[eid]
+				reset_local[eid][func_field] = local[eid]
+				reset_local[eid][func_weighted_field] = weighted_local[eid]
+				reset_is_reset[eid][func_field] = is_barrier[eid]
+				reset_is_reset[eid][func_weighted_field] = is_barrier[eid]
+
+	plain_acc = propagate_upstream_multi(order_up, predecessors, plain_local, plain_zeros)
+	reset_acc = propagate_upstream_with_reset_multi(order_up, predecessors, reset_local, reset_is_reset, reset_zeros)
+
+	result = {}
+	for species in species_list:
+		species_result = {
+			"upstream_accessible_length": {eid: v[f"{species}:upstream_accessible_length"] for eid, v in plain_acc.items()},
+		}
+		for lc in lifecycles_by_species[species]:
+			species_result[f"{lc}_upstream_length"] = {eid: v[f"{species}:{lc}_upstream_length"] for eid, v in plain_acc.items()}
+			species_result[f"{lc}_weighted_upstream_length"] = {eid: v[f"{species}:{lc}_weighted_upstream_length"] for eid, v in plain_acc.items()}
+			species_result[f"{lc}_functional_upstream_length"] = {eid: v[f"{species}:{lc}_functional_upstream_length"] for eid, v in reset_acc.items()}
+			species_result[f"{lc}_functional_weighted_upstream_length"] = {eid: v[f"{species}:{lc}_functional_weighted_upstream_length"] for eid, v in reset_acc.items()}
 		result[species] = species_result
 	return result
 
@@ -86,7 +117,9 @@ def compute_lifecycle_rollups(
 	for sp, lc in reporting_species_lifecycles:
 		species_by_lifecycle.setdefault(lc, set()).add(sp)
 
-	result = {}
+	plain_zeros, plain_local = {}, {eid: {} for eid in edge_ids}
+	reset_zeros, reset_local, reset_is_reset = {}, {eid: {} for eid in edge_ids}, {eid: {} for eid in edge_ids}
+
 	for lc, species_set in species_by_lifecycle.items():
 		any_habitat = {
 			eid: any(habitat[sp][lc].get(eid, False) for sp in species_set)
@@ -114,10 +147,27 @@ def compute_lifecycle_rollups(
 			for eid in edge_ids
 		}
 
+		up_field = f"{lc}:upstream_length"
+		weighted_field = f"{lc}:weighted_upstream_length"
+		func_field = f"{lc}:functional_upstream_length"
+		plain_zeros[up_field] = 0.0
+		plain_zeros[weighted_field] = 0.0
+		reset_zeros[func_field] = 0.0
+		for eid in edge_ids:
+			plain_local[eid][up_field] = local[eid]
+			plain_local[eid][weighted_field] = avg_weighted_local[eid]
+			reset_local[eid][func_field] = local[eid]
+			reset_is_reset[eid][func_field] = is_barrier_for_all[eid]
+
+	plain_acc = propagate_upstream_multi(order_up, predecessors, plain_local, plain_zeros)
+	reset_acc = propagate_upstream_with_reset_multi(order_up, predecessors, reset_local, reset_is_reset, reset_zeros)
+
+	result = {}
+	for lc in species_by_lifecycle:
 		result[lc] = {
-			"upstream_length": propagate_upstream(order_up, predecessors, local, lambda a, b: a + b, 0.0),
-			"functional_upstream_length": propagate_upstream_with_reset(order_up, predecessors, local, is_barrier_for_all),
-			"weighted_upstream_length": propagate_upstream(order_up, predecessors, avg_weighted_local, lambda a, b: a + b, 0.0),
+			"upstream_length": {eid: v[f"{lc}:upstream_length"] for eid, v in plain_acc.items()},
+			"functional_upstream_length": {eid: v[f"{lc}:functional_upstream_length"] for eid, v in reset_acc.items()},
+			"weighted_upstream_length": {eid: v[f"{lc}:weighted_upstream_length"] for eid, v in plain_acc.items()},
 		}
 	return result
 

@@ -23,27 +23,16 @@ This is run via a GitHub action, triggered by `workflow_dispatch` (manual), matc
 
 ## Outputs
 
-* Database table: support.gradient_barriers
+Gradient barriers will be computed at all locations where the gradient is greater than the maximum gradient defined in the fish species parameter files. 
 
-  * Any existing table will be renamed support.gradient_barriers_archive_<yyyymmdd>_<seq>, to prevent losing manual updates. The `seq` is incremented if today's archive name is already taken.
-  * The script owns the full lifecycle of this table each run: it creates the `support` schema if missing, archives any existing table as above, then creates a fresh table. There is no separate one-time init script for this table.
-  * This full-table archive/recreate only happens on an unscoped (whole-network) run -- see "AOI-scoped reprocessing" below for the alternative when only one or a few AOI(s) are being redone.
-
-* Database table: support.gradient_barriers_aoi_backup_<short_names>_<yyyymmdd>_<seq>
-
-  * Created only during an AOI-scoped run (see "AOI-scoped reprocessing" below). Holds the rows removed from support.gradient_barriers for the AOI(s) being reprocessed, so manual edits aren't lost. `<short_names>` is the requested `chyf_raw.aoi.short_name` value(s), joined with `_`. `seq` is incremented if today's backup name for that short_name combination is already taken.
-  * Same columns as support.gradient_barriers, plus:
-
-    | Column       | Type      | Description                                     |
-    | ------------ | --------- | ----------------------------------------------- |
-    | archived_at  | timestamp | When this row was backed up, prior to deletion. |
-
-* Gradient barriers will be computed at all locations where the gradient is greater than the maximum gradient defined in the fish species parameter files. 
-  * We will use the accessibility_gradient_spawning_max and accessibility_gradient_rearing_max attributes.
+  * The accessibility_gradient_spawning_max and accessibility_gradient_rearing_max attributes and used for graident limits
   * Each barrier will be flagged with the species and lifecycles (spawn,rear) they are barriers for. A single point can be a barrier for any number of species/lifecycles.
 
+**Table: support.gradient_barriers**
 
-### Table: support.gradient_barriers
+  * Any existing table will be renamed support.gradient_barriers_archive_<yyyymmdd>_<seq>, to prevent losing manual updates. The `seq` is incremented if today's archive name is already taken. This full-table archive/recreate only happens on an unscoped (whole-network) run -- see "AOI-scoped reprocessing" below for the alternative when only one or a few AOI(s) are being redone.
+
+
 | Column           | Type      | Description                                                                                                                                                                                                                                                                       | 
 | ---------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | id               | uuid      | Unique system generated id                                                                                                                                                                                                                                                        |
@@ -52,7 +41,21 @@ This is run via a GitHub action, triggered by `workflow_dispatch` (manual), matc
 | gradient         | double    | Computed gradient value.                                                                                                                                                                                                                                                          |
 | computed_species | string[]  | List of fish species/lifestage that this barrier applies to. These will be encoded as <species>_<lifestage> (ex. as_rear, as_spawn).                                                                                                                                              |
 | actual_species   | string[]  | Used for modelling, this is a copy of the computed_species but allows users to overwrite.  Further details are in the FishPass Process input description. For the purposes of the barrier computation, this will always be populated with the same value as the computed_species. |
-| comments         | varchar   | Placeholder for user comments.                                                                                                                                                                                                                                                    |
+| comments         | varchar   | Placeholder for user comments.                                                                                                                                                          
+
+**Table: support.gradient_barriers_metadata**
+
+  * Records the AOI scope, the fish species parameters in effect, and the run's timestamp.
+    * On a full (unscoped) run, any existing table is archived to support.gradient_barriers_metadata_archive_<yyyymmdd>_<seq> (same convention as support.gradient_barriers) before a fresh table is created and a single row inserted with aoi = {all}.
+    * On an AOI-scoped run, no archiving happens -- a row is simply appended identifying the AOI(s) being reprocessed, so metadata history from prior runs is preserved.
+                                                                                         |
+
+| Column         | Type      | Description                                                                                      |
+| -------------- | --------- | ------------------------------------------------------------------------------------------------ |
+| id             | uuid      | Unique system generated id                                                                       |
+| aoi            | varchar[] | {all} for a full (unscoped) run, or the reprocessed chyf_raw.aoi short_name(s) for a scoped run. |
+| species_params | jsonb     | Snapshot of the fish species/lifestage gradient parameters in effect for this run.               |
+| run_at         | timestamp | When this run completed.                                                                         |
 
 	
 ## Process
@@ -81,7 +84,7 @@ The workunit should record the short_name from the chyf_raw.aoi table (linked to
 
 ## AOI-scoped reprocessing
 
-Optionally, a run can be scoped to just one or a few AOI(s) instead of the entire network, via `[aoi] short_names` in `support/gradient_barriers.ini` (see README.md). This is unset/blank by default, meaning "recompute everything" (unchanged default behavior).
+Optionally, a run can be scoped to just one or a few AOI(s) instead of the entire network, via `[aoi] short_names` in `config/gradient_barriers.ini` (see README.md). This is unset/blank by default, meaning "recompute everything" (unchanged default behavior).
 
 When AOI(s) are configured, the script:
 

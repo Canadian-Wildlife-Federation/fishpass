@@ -117,6 +117,61 @@ class PropagateTests(unittest.TestCase):
 		self.assertEqual(acc["E4"], 3 + (5 + 10 + 20))
 
 
+class PropagateMultiTests(unittest.TestCase):
+	def setUp(self):
+		self.successor, self.predecessors, self.roots = gs.build_graph(make_confluence_edges())
+		self.order_up = gs.upstream_order(self.predecessors, self.roots)
+		self.order_down = gs.downstream_order(self.order_up)
+
+	def test_propagate_upstream_multi_matches_separate_single_field_calls(self):
+		length = {"E1": 10, "E2": 20, "E3": 5, "E4": 3}
+		ids = {"E3": ["b1"]}
+		local_values = {eid: {"length": length.get(eid, 0), "ids": ids.get(eid, [])} for eid in length}
+		acc = gs.propagate_upstream_multi(self.order_up, self.predecessors, local_values, {"length": 0, "ids": []})
+
+		expected_length = gs.propagate_upstream(self.order_up, self.predecessors, length, lambda a, b: a + b, 0)
+		expected_ids = gs.propagate_upstream(self.order_up, self.predecessors, ids, lambda a, b: a + b, [])
+		for eid in length:
+			self.assertEqual(acc[eid]["length"], expected_length[eid])
+			self.assertEqual(acc[eid]["ids"], expected_ids[eid])
+
+	def test_propagate_downstream_multi_matches_separate_single_field_calls(self):
+		barrier_here = {"E3": 1}
+		ids = {"E3": ["b1"]}
+		local_values = {"E3": {"count": 1, "ids": ["b1"]}}
+		acc = gs.propagate_downstream_multi(self.order_down, self.successor, local_values, {"count": 0, "ids": []})
+
+		expected_count = gs.propagate_downstream(self.order_down, self.successor, barrier_here, lambda a, b: a + b, 0)
+		expected_ids = gs.propagate_downstream(self.order_down, self.successor, ids, lambda a, b: a + b, [])
+		for eid in ("E1", "E2", "E3", "E4"):
+			self.assertEqual(acc[eid]["count"], expected_count[eid])
+			self.assertEqual(acc[eid]["ids"], expected_ids[eid])
+
+	def test_propagate_upstream_with_reset_multi_independent_per_field(self):
+		# two fields sharing the same edges but different reset masks -- confirms one field
+		# resetting at an edge doesn't affect the other field on the same edge. Extend the
+		# network with E0 upstream of E1 so the reset at E1 actually excludes something
+		# (E0's length) from field "a" but not field "b", making them observably diverge.
+		edges = make_confluence_edges() + [{"id": "E0", "from_nexus_id": "N0", "to_nexus_id": "N1"}]
+		successor, predecessors, roots = gs.build_graph(edges)
+		order_up = gs.upstream_order(predecessors, roots)
+
+		length = {"E0": 7, "E1": 10, "E2": 20, "E3": 5, "E4": 3}
+		local_values = {eid: {"a": v, "b": v} for eid, v in length.items()}
+		is_reset = {"E1": {"a": True, "b": False}}
+
+		acc = gs.propagate_upstream_with_reset_multi(order_up, predecessors, local_values, is_reset, {"a": 0.0, "b": 0.0})
+
+		expected_a = gs.propagate_upstream_with_reset(order_up, predecessors, length, {"E1": True})
+		expected_b = gs.propagate_upstream_with_reset(order_up, predecessors, length, {})
+		for eid in length:
+			self.assertEqual(acc[eid]["a"], expected_a[eid])
+			self.assertEqual(acc[eid]["b"], expected_b[eid])
+		# sanity: the two fields actually diverge at E3 (downstream of the reset edge) -- field
+		# "a" excludes E0's length via the reset at E1, field "b" doesn't reset so includes it.
+		self.assertNotEqual(acc["E3"]["a"], acc["E3"]["b"])
+
+
 class IsImpassableTests(unittest.TestCase):
 	def test_fully_passable(self):
 		self.assertFalse(gs.is_impassable({"es_rear": 1, "es_spawn": 1}, "es", 1.0))
@@ -189,6 +244,27 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		self.assertEqual(accessibility["es"]["E2"], gs.ACCESSIBILITY_DISCONNECTED)
 		self.assertEqual(accessibility["es"]["E3"], gs.ACCESSIBILITY_CONNECTED)
 		self.assertEqual(accessibility["es"]["E4"], gs.ACCESSIBILITY_CONNECTED)
+
+	def test_multi_species_barriers_dont_leak_between_species(self):
+		# es is blocked at E3, wl is blocked at E1 -- since compute_barrier_stats now runs both
+		# species' fields through one combined pass, this confirms one species' field values
+		# don't bleed into another's within that shared traversal.
+		barriers = [
+			{"edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 0, "wl_rear": 1, "wl_spawn": 1}, "structure_type": "anthropogenic", "id": "b_es"},
+			{"edge_id": "E1", "species_passability_value": {"es_rear": 1, "es_spawn": 1, "wl_rear": 0, "wl_spawn": 0}, "structure_type": "natural", "id": "b_wl"},
+		]
+		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es", "wl"], 1.0)
+		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
+
+		self.assertEqual(stats["es"]["downstream_anthro_count"]["E1"], 1)
+		self.assertEqual(stats["es"]["downstream_anthro_ids"]["E1"], ["b_es"])
+		self.assertEqual(stats["es"]["downstream_natural_count"]["E1"], 0)
+		self.assertEqual(stats["es"]["upstream_anthro_count"]["E1"], 0)  # es not blocked at E1
+
+		self.assertEqual(stats["wl"]["upstream_natural_count"]["E3"], 1)
+		self.assertEqual(stats["wl"]["upstream_natural_count"]["E4"], 1)
+		self.assertEqual(stats["wl"]["downstream_natural_count"]["E1"], 0)  # barrier is at E1's own start
+		self.assertEqual(stats["wl"]["downstream_anthro_count"]["E1"], 0)  # wl not blocked at E3
 
 	def test_natural_barrier_makes_inaccessible_not_disconnected(self):
 		barriers = [

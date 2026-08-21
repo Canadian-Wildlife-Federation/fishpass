@@ -302,6 +302,10 @@ def snap_habitat_points(conn, cursor, plan, srid):
 	if snap_results:
 		write_habitat_snap_results(cursor, output_schema, srid, snap_results)
 
+	# create after the data is loaded so data loading isn't affected
+	cursor.execute(f"CREATE INDEX habitat_updates_upstream_snapped_edge_id_idx ON {quote_ident(output_schema)}.habitat_updates (upstream_snapped_edge_id);")
+	cursor.execute(f"CREATE INDEX habitat_updates_downstream_snapped_edge_id_idx ON {quote_ident(output_schema)}.habitat_updates (downstream_snapped_edge_id);")
+
 	conn.commit()
 	print(
 		f"Snapped {len(rows) - ignored_count}/{len(rows)} habitat update row(s) "

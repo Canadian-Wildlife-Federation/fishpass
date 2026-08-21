@@ -38,21 +38,21 @@ class FakeSession:
 class FetchFeatureTypeTests(unittest.TestCase):
 	def test_single_chunk(self):
 		session = FakeSession([[{"id": 1}, {"id": 2}]])
-		features = cc.fetch_feature_type("dams", ["AOI1", "AOI2"], session=session)
+		features = list(cc.fetch_feature_type("dams", ["AOI1", "AOI2"], session=session))
 		self.assertEqual(features, [{"id": 1}, {"id": 2}])
 		self.assertIn("features/dams/", session.urls[0])
 		self.assertIn("nhn_watershed_id:in:AOI1;AOI2", session.urls[0])
 
 	def test_chunks_by_chunk_size(self):
 		session = FakeSession([[{"id": 1}], [{"id": 2}]])
-		features = cc.fetch_feature_type("dams", ["AOI1", "AOI2", "AOI3"], chunk_size=2, session=session)
+		features = list(cc.fetch_feature_type("dams", ["AOI1", "AOI2", "AOI3"], chunk_size=2, session=session))
 		self.assertEqual(len(session.urls), 2)
 		self.assertEqual(features, [{"id": 1}, {"id": 2}])
 
 	def test_truncated_result_exits(self):
 		session = FakeSession([[{"id": i} for i in range(cc.RESULT_CAP)]])
 		with self.assertRaises(SystemExit):
-			cc.fetch_feature_type("dams", ["AOI1"], session=session)
+			list(cc.fetch_feature_type("dams", ["AOI1"], session=session))
 
 
 class MapPassabilityTests(unittest.TestCase):

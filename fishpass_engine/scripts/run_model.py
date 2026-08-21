@@ -11,6 +11,7 @@ been validated against a real database run yet.
 """
 
 import argparse
+import time
 
 from compute_statistics import compute_statistics
 from db import db_connect, require_env
@@ -18,6 +19,7 @@ from load_habitat import load_habitat
 from load_stream_network import get_source_srid, init_output_schema, load_stream_network
 from load_structures import load_structures
 from model_plan import load_model_plan
+from postprocess_views import create_barrier_views
 from snap_structures import snap_structures
 
 
@@ -28,6 +30,7 @@ def parse_args():
 
 
 def main():
+	start = time.monotonic()
 	args = parse_args()
 	require_env()
 	plan = load_model_plan(args.plan_code)
@@ -50,16 +53,22 @@ def main():
 			print("Snapping Structures")
 			snap_structures(conn, cursor, plan, srid)
 
+			print("Loading Habitat")
 			load_habitat(conn, cursor, plan, srid)
 
+			print("Computing Statistics")
 			compute_statistics(conn, cursor, plan, srid)
+
+			print("Creating Barrier Views")
+			create_barrier_views(conn, cursor, plan)
 	except Exception:
 		conn.rollback()
 		raise
 	finally:
 		conn.close()
 
-	print("Model run complete.")
+	minutes, seconds = divmod(int(time.monotonic() - start), 60)
+	print(f"Model run complete ({minutes}min, {seconds}sec)")
 
 
 if __name__ == "__main__":

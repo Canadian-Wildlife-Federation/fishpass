@@ -8,6 +8,7 @@ README.md) -- never from a config file and never logged.
 
 import argparse
 import configparser
+import json
 import math
 import re
 import sys
@@ -23,7 +24,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPECIES_PARAMS_FILE = REPO_ROOT / "config" / "fish_species_parameters.yaml"
-DEFAULT_CONFIG_FILE = REPO_ROOT / "gradient_barriers" / "support" / "gradient_barriers.ini"
+DEFAULT_CONFIG_FILE = REPO_ROOT / "config" / "gradient_barriers.ini"
 
 SHORT_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -153,15 +154,16 @@ def get_source_srid(cursor):
 	return row[0]
 
 
-def table_exists(cursor):
+def table_exists(cursor, table_name):
 	cursor.execute(
 		"SELECT 1 FROM information_schema.tables "
-		"WHERE table_schema = 'support' AND table_name = 'gradient_barriers'"
+		"WHERE table_schema = 'support' AND table_name = %s",
+		(table_name,),
 	)
 	return cursor.fetchone() is not None
 
 
-def next_archive_name(cursor, prefix):
+def next_archive_name_postfix(cursor, prefix):
 	"""Return f"{prefix}_<today's yyyymmdd>_<seq>", where seq is one past the highest
 	existing sequence number for today's date under this prefix (so re-runs on the same day
 	don't collide)."""
@@ -177,14 +179,14 @@ def next_archive_name(cursor, prefix):
 		if name.rsplit("_", 1)[-1].isdigit()
 	]
 	next_seq = max(existing_seqs, default=0) + 1
-	return f"{prefix}_{date_str}_{next_seq}"
+	return f"{date_str}_{next_seq}"
 
 
-def create_table(cursor, srid):
-	"""Ensure the support schema exists and create a fresh (empty) support.gradient_barriers
-	table."""
+def create_tables(cursor, srid):
+	"""Ensure the support schema exists, and creates the gradient_barriers and gradient_barriers_metadata tables"""
 
 	cursor.execute("CREATE SCHEMA IF NOT EXISTS support;")
+
 	cursor.execute(f"""
 		CREATE TABLE support.gradient_barriers (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -200,37 +202,67 @@ def create_table(cursor, srid):
 		"CREATE INDEX gradient_barriers_geometry_idx ON support.gradient_barriers USING gist (geometry);"
 	)
 
+	cursor.execute("""
+		CREATE TABLE support.gradient_barriers_metadata (
+			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+			aoi varchar[] NOT NULL,
+			species_params jsonb NOT NULL,
+			run_at timestamptz NOT NULL DEFAULT now()
+		);
+	""")
 
-def prepare_table(cursor, srid):
+def prepare_tables(cursor, srid):
 	"""Ensure the support schema exists, archive any existing gradient_barriers table, and
 	create a fresh one."""
 
 	cursor.execute("CREATE SCHEMA IF NOT EXISTS support;")
 
-	if table_exists(cursor):
+	archive_postfix = next_archive_name_postfix(cursor, "gradient_barriers_archive")
+
+	if table_exists(cursor, "gradient_barriers"):
 		# rename existing table with current date
 		# to ensure we keep a copy of it and don't lose
 		# any manual updates
-		archive_name = next_archive_name(cursor, "gradient_barriers_archive")
+		archive_name = f"gradient_barriers_archive_{archive_postfix}";
 		cursor.execute(f"ALTER TABLE support.gradient_barriers RENAME TO {archive_name};")
 		cursor.execute(
 			f"ALTER INDEX support.gradient_barriers_geometry_idx RENAME TO {archive_name}_geometry_idx;"
 		)
 		print(f"Archived existing table to support.{archive_name}")
 
-	create_table(cursor, srid)
+	if table_exists(cursor, "gradient_barriers_metadata"):
+		# rename existing table with current date
+		# to ensure we keep a copy of it and don't lose
+		# any manual updates
+		archive_name = f"gradient_barriers_metadata_{archive_postfix}";
+		cursor.execute(f"ALTER TABLE support.gradient_barriers_metadata RENAME TO {archive_name};")		
+		print(f"Archived existing table to support.{archive_name}")
+
+	create_tables(cursor, srid);
+
+def insert_metadata_record(cursor, aoi, species_params):
+	"""Append a row to support.gradient_barriers_metadata recording this run's AOI scope
+	({'all'} for a full run, or the reprocessed short_names for a partial run) and the fish
+	species parameters that were in effect."""
+
+	cursor.execute(
+		"INSERT INTO support.gradient_barriers_metadata (aoi, species_params) VALUES (%s, %s::jsonb)",
+		(aoi, json.dumps(species_params)),
+	)
 
 
 def backup_and_clear_aoi_rows(cursor, srid, short_names):
 	"""Back up the existing support.gradient_barriers rows for short_names to a timestamped
 	audit table, then delete them from the live table, ahead of a scoped recompute."""
 
-	if not table_exists(cursor):
+	if not table_exists(cursor, "gradient_barriers"):
 		print("support.gradient_barriers does not exist yet -- creating it.")
-		create_table(cursor, srid)
+		create_tables(cursor, srid)
 		return
 
-	backup_name = next_archive_name(cursor, "gradient_barriers_aoi_backup_" + "_".join(short_names))
+	backup_name = next_archive_name_postfix(cursor, "gradient_barriers_aoi_backup")
+	backup_name = f"gradient_barriers_aoi_backup_{backup_name}"
+
 	cursor.execute(
 		f"CREATE TABLE support.{backup_name} AS "
 		f"SELECT *, now() AS archived_at FROM support.gradient_barriers WHERE workunit && %s::varchar[]",
@@ -498,10 +530,15 @@ def main():
 				backup_and_clear_aoi_rows(cursor, srid, short_names)
 				conn.commit()
 				count = compute_barriers(conn, cursor, srid, species_params, aoi_ids=[a["id"] for a in aois])
+				if not table_exists(cursor, "gradient_barriers_metadata"):
+					print("gradient_barriers_metadata table does not exist - metadata will not be updated")
+				else:
+					insert_metadata_record(cursor, short_names, species_params)
 			else:
-				prepare_table(cursor, srid)
+				prepare_tables(cursor, srid)
 				conn.commit()
 				count = compute_barriers(conn, cursor, srid, species_params)
+				insert_metadata_record(cursor, ["all"], species_params)
 
 			print(f"Computed and inserted {count} barrier point(s).")
 			if count:
