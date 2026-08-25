@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """Reload CHyF stream network data into the FishPass chyf_raw schema for the
-workunit(s) configured in support/chyf_loader.ini.
+workunit(s) configured in config/chyf_loader.yaml.
 
 Database connection details come from environment variables only (see
-README.md) -- never from the ini file and never logged.
+README.md) -- never from the config file and never logged.
 """
 
 import argparse
-import configparser
 import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RELOAD_SQL_DIR = REPO_ROOT / "sql" / "reload"
-DEFAULT_CONFIG = REPO_ROOT / "support" / "chyf_loader.ini"
+DEFAULT_CONFIG = REPO_ROOT.parent / "config" / "chyf_loader.yaml"
 
 REQUIRED_ENV_VARS = [
 	"FISHPASS_HOST",
@@ -36,28 +38,27 @@ def parse_args():
 def load_config(config_path):
 	if not config_path.is_file():
 		sys.exit(f"Config file not found: {config_path}")
-	parser = configparser.ConfigParser()
-	parser.read(config_path)
+	with open(config_path) as f:
+		data = yaml.safe_load(f) or {}
 
-	short_names = [
-		s.strip()
-		for s in parser.get("workunits", "short_names", fallback="").split(",")
-		if s.strip()
-	]
+	short_names = (data.get("workunits") or {}).get("short_names") or []
 	if not short_names:
-		sys.exit("No workunits configured in [workunits] short_names -- refusing to run.")
+		sys.exit("No workunits configured in workunits.short_names -- refusing to run.")
 
-	dry_run = parser.getboolean("behavior", "dry_run", fallback=False)
-	verbosity = parser.get("behavior", "verbosity", fallback="info")
+	behavior = data.get("behavior") or {}
+	dry_run = behavior.get("dry_run", False)
+	verbosity = behavior.get("verbosity", "info")
 
+	target = data.get("target") or {}
+	source = data.get("source") or {}
 	schema_vars = {
-		"target_flowpath_table": parser.get("target", "flowpath_table"),
-		"target_aoi_table": parser.get("target", "aoi_table"),
-		"target_shoreline_table": parser.get("target", "shoreline_table"),
-		"source_flowpath_table": parser.get("source", "flowpath_table"),
-		"source_flowpath_properties_table": parser.get("source", "flowpath_properties_table"),
-		"source_aoi_table": parser.get("source", "aoi_table"),
-		"source_shoreline_table": parser.get("source", "shoreline_table"),
+		"target_flowpath_table": target["flowpath_table"],
+		"target_aoi_table": target["aoi_table"],
+		"target_shoreline_table": target["shoreline_table"],
+		"source_flowpath_table": source["flowpath_table"],
+		"source_flowpath_properties_table": source["flowpath_properties_table"],
+		"source_aoi_table": source["aoi_table"],
+		"source_shoreline_table": source["shoreline_table"],
 	}
 
 	return short_names, dry_run, verbosity, schema_vars
@@ -120,7 +121,11 @@ def resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars):
 			"-f", query_path,
 		]
 		if verbosity == "debug":
-			print("Resolving workunit ids:", " ".join(cmd))
+			resolved_query = query.replace(
+				":source_aoi_table", schema_vars["source_aoi_table"]
+			).replace(":'short_names'", f"'{names_literal}'")
+			print("Resolving workunit ids with query:\n", resolved_query)
+			print("Command:", " ".join(cmd))
 
 		result = subprocess.run(cmd, env=psql_env(), capture_output=True, text=True)
 	finally:
@@ -167,7 +172,14 @@ def run_reload_sql(workunit_ids, dry_run, verbosity, schema_vars):
 			sys.exit(f"{sql_file.name} failed (exit code {result.returncode})")
 
 
+def format_elapsed(seconds):
+	minutes, secs = divmod(int(seconds), 60)
+	return f"{minutes}m {secs:02d}s"
+
+
 def main():
+	start_time = time.monotonic()
+
 	args = parse_args()
 	short_names, dry_run, verbosity, schema_vars = load_config(args.config)
 	require_env()
@@ -176,7 +188,12 @@ def main():
 	workunit_ids = resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars)
 	run_reload_sql(workunit_ids, dry_run, verbosity, schema_vars)
 
-	print("Reload complete." if not dry_run else "Dry run complete -- no changes made.")
+	elapsed = format_elapsed(time.monotonic() - start_time)
+	print(
+		f"Dry run complete in {elapsed} -- no changes made."
+		if dry_run
+		else f"Reload complete in {elapsed}."
+	)
 
 
 if __name__ == "__main__":

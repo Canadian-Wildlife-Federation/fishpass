@@ -1,7 +1,7 @@
 """Tests for gradient_barriers/scripts/compute_barriers.py.
 
 These drive the whole compute_barriers() function -- including fetch_edges and the shapely
-WKB/M-ordinate parsing in edge_vertices() -- against a stubbed psycopg2 connection/cursor, so no
+WKB/M-ordinate parsing in edge_vertices() -- against a stubbed psycopg connection/cursor, so no
 real database is needed. shapely must be genuinely installed (not stubbed) since these tests build
 and parse real WKB fixtures. compute_barriers() writes directly via insert_barriers as its
 internal barrier cache fills, so tests patch that module-level function to capture the batches
@@ -20,12 +20,12 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-# compute_barriers.py imports psycopg2/psycopg2.extras/yaml at module level for its DB-connection
+# compute_barriers.py imports psycopg/yaml at module level for its DB-connection
 # and species-file-loading code paths, neither of which compute_barriers() itself touches (it
 # only calls conn.cursor(...), which FakeConnection below provides, and insert_barriers, which
 # tests patch out). Stub them out when unavailable so these tests don't require the full
 # production dependency set to be installed.
-for _module_name in ("psycopg2", "psycopg2.extras", "yaml"):
+for _module_name in ("psycopg", "yaml"):
 	try:
 		__import__(_module_name)
 	except ImportError:
@@ -483,24 +483,26 @@ species:
 class LoadAoiConfigTests(unittest.TestCase):
 
 	def test_missing_file_means_full_run(self):
-		self.assertEqual(cb.load_aoi_config(Path("/no/such/gradient_barriers.ini")), [])
+		self.assertEqual(cb.load_aoi_config(Path("/no/such/gradient_barriers.yaml")), [])
 
 	def test_blank_short_names_means_full_run(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			config_path = Path(tmp) / "gradient_barriers.ini"
-			config_path.write_text("[aoi]\nshort_names =\n")
+			config_path = Path(tmp) / "gradient_barriers.yaml"
+			config_path.write_text("aoi:\n  short_names: []\n")
 			self.assertEqual(cb.load_aoi_config(config_path), [])
 
 	def test_populated_short_names_are_parsed_and_stripped(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			config_path = Path(tmp) / "gradient_barriers.ini"
-			config_path.write_text("[aoi]\nshort_names = 08MF001, 08MF002\n")
+			config_path = Path(tmp) / "gradient_barriers.yaml"
+			config_path.write_text("aoi:\n  short_names: [08MF001, 08MF002]\n")
 			self.assertEqual(cb.load_aoi_config(config_path), ["08MF001", "08MF002"])
 
 	def test_invalid_short_name_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			config_path = Path(tmp) / "gradient_barriers.ini"
-			config_path.write_text("[aoi]\nshort_names = 08MF001; DROP TABLE support.gradient_barriers;\n")
+			config_path = Path(tmp) / "gradient_barriers.yaml"
+			config_path.write_text(
+				"aoi:\n  short_names: ['08MF001; DROP TABLE support.gradient_barriers;']\n"
+			)
 			with self.assertRaises(SystemExit):
 				cb.load_aoi_config(config_path)
 

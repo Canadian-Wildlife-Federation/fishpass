@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS chyf_raw.aoi (
 	id uuid PRIMARY KEY,
 	short_name varchar NOT NULL,
 	full_name varchar,
+	province_territory_code varchar[],
 	geometry public.geometry(polygon, 4617),
 	display_status int2
 );

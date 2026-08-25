@@ -1,0 +1,30 @@
+# Example model plan file, per fishpass/requirements/inputs/model_plan_file.md.
+# Copy this file to <plan_code>.yaml (code must match the file name) to define a new plan.
+
+code: example
+name: Example Plan
+output_schema: model_example
+
+aoi:
+  workunit:
+    - 02YL000
+    - 02YG000
+
+target_species:
+  - as
+
+reporting_values:
+  - as_all
+
+structure_types:
+  - dams
+  - waterfalls
+  - stream_crossings
+  - gradients
+  # include "gradients" here to also include computed gradient barriers -- they are
+  # excluded by default, see requirements.md's Load Structures step 6.
+
+structure_snap_edge_distance_m: 100
+structure_snap_vertex_distance_m: 50
+habitat_point_snap_edge_distance_m: 100
+habitat_point_snap_vertex_distance_m: 50

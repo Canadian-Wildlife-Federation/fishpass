@@ -1,10 +1,14 @@
-name: CHyF Loader Reload
+name: FishPass Modelling Engine
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      plan_code:
+        description: "Plan code (loads config/models/<plan_code>.yaml)"
+        required: true
 
 jobs:
-  reload:
+  run:
     runs-on: ubuntu-latest
     env:
       FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
@@ -19,11 +23,8 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Install postgresql-client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install dependencies
+        run: pip install -r fishpass_engine/scripts/requirements.txt
 
-      - name: Install Python dependencies
-        run: pip install -r chyf_loader/scripts/requirements.txt
-
-      - name: Run reload
-        run: python chyf_loader/scripts/load.py
+      - name: Run model
+        run: python fishpass_engine/scripts/run_model.py "${{ inputs.plan_code }}"

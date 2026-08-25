@@ -1,0 +1,64 @@
+# Active configuration used by the chyf_loader_reload GitHub Action.
+# See chyf_loader.yaml.example for full documentation of each setting.
+
+workunits:
+  short_names:
+    - 01DA000
+    - 01DB000
+    - 01DC000
+    - 01DD000
+    - 01DE000
+    - 01DF000
+    - 01DG000
+    - 01DH000
+    - 01DJ000
+    - 01DK000
+    - 01DL000
+    - 01DM000
+    - 01DN000
+    - 01DO000
+    - 01DP000
+    - 01DQ000
+    - 01DR000
+    - 01DS000
+    - 01EA000
+    - 01EB000
+    - 01EC000
+    - 01ED000
+    - 01EE000
+    - 01EF000
+    - 01EG000
+    - 01EH000
+    - 01EJ000
+    - 01EK000
+    - 01EL000
+    - 01EM000
+    - 01EN000
+    - 01EO000
+    - 01EP000
+    - 01EQ000
+    - 01ER000
+    - 01FA000
+    - 01FB000
+    - 01FC000
+    - 01FD000
+    - 01FE000
+    - 01FF000
+    - 01FG000
+    - 01FH000
+    - 01FJ000
+
+target:
+  flowpath_table: chyf_raw.flowpath
+  aoi_table: chyf_raw.aoi
+  shoreline_table: chyf_raw.shoreline
+
+source:
+  flowpath_table: chyf2_fdw.eflowpath
+  flowpath_properties_table: chyf2_fdw.eflowpath_properties
+  aoi_table: chyf2_fdw.aoi
+  shoreline_table: chyf2_fdw.shoreline
+
+behavior:
+  dry_run: false
+  verbosity: info

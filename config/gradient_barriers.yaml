@@ -1,0 +1,7 @@
+# Configuration for gradient_barriers/scripts/compute_barriers.py.
+# See gradient_barriers.yaml.example for the documented format.
+
+aoi:
+  # List of chyf_raw.aoi.short_name values to reprocess.
+  # Leave empty to recompute the entire network.
+  short_names: []
