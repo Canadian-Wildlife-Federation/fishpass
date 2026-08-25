@@ -18,6 +18,15 @@ anything -- a rare, harmless edge case since there is nothing downstream of an o
 
 Only edges with at least one marker on them are touched; the (large majority of) edges with none
 are left as single, unbroken segments.
+
+Barrier markers (not habitat markers) get two edge-id references: all_barriers.downstream_edge_id
+(the segment starting at the marker's vertex, continuing toward to_nexus_id -- this is the
+pre-existing reference, previously named snapped_edge_id) and all_barriers.upstream_edge_id (the
+segment ending at the marker's vertex). For an internal split these are the two adjacent segments
+produced by that split, always unambiguous. For a marker at an edge's own last vertex,
+upstream_edge_id is simply that edge's own last segment. A marker at an edge's own *first* vertex
+needs no split (see above) but has no unambiguous upstream_edge_id either, since a confluence can
+have more than one incoming edge -- upstream_edge_id is left NULL in that rare case.
 """
 
 import uuid
@@ -37,16 +46,16 @@ STREAM_FIELDS = (
 def get_break_points(cursor, output_schema):
 	"""Return {edge_id: [(x, y, kind, ref_id), ...]} for every streams edge with at least one
 	barrier or habitat point snapped onto it. kind is 'barrier', 'habitat_upstream', or
-	'habitat_downstream'; ref_id is the all_structures.id or habitat_updates.id, needed so their
+	'habitat_downstream'; ref_id is the all_barriers.id or habitat_updates.id, needed so their
 	edge-id reference can be corrected if the marker ends up in a non-first segment."""
 
 	schema_ident = quote_ident(output_schema)
 	by_edge = {}
 
 	cursor.execute(f"""
-		SELECT snapped_edge_id, network_vertex_x, network_vertex_y, id
-		FROM {schema_ident}.all_structures
-		WHERE snapped_edge_id IS NOT NULL
+		SELECT downstream_edge_id, network_vertex_x, network_vertex_y, id
+		FROM {schema_ident}.all_barriers
+		WHERE downstream_edge_id IS NOT NULL
 	""")
 	for edge_id, x, y, structure_id in cursor.fetchall():
 		by_edge.setdefault(edge_id, []).append((x, y, "barrier", structure_id))
@@ -126,17 +135,22 @@ def build_segment_writes(edge_row, srid, segments):
 	"""Compute (no DB access) the writes `segments` (from break_edge) require against
 	<output_schema>.streams: the first segment updates edge_row's own id in place, later
 	segments become new rows sharing edge_row's non-geometric attributes. Returns
-	(update_row, insert_rows, reassignments):
+	(update_row, insert_rows, reassignments, last_segment_id):
 
 	update_row is the single UPDATE params tuple for segment 0 (always present). insert_rows
 	is the list of INSERT params tuples for segments 1..n. reassignments is
 	{(kind, ref_id): new_segment_id} for every marker that ended up in a non-first segment, so
-	the caller can fix up the referencing all_structures/habitat_updates row."""
+	the caller can fix up the referencing all_barriers/habitat_updates row -- a "barrier" marker
+	produces both a "barrier_downstream" entry (the segment it starts, unchanged from before) and
+	a "barrier_upstream" entry (the previous, adjacent segment -- unambiguous since a barrier
+	always splits exactly one edge into exactly two adjacent segments at its own vertex).
+	last_segment_id is this edge's final segment's id, needed by the caller's end-marker handling."""
 
 	edge_id = edge_row["id"]
 	update_row = None
 	insert_rows = []
 	reassignments = {}
+	prev_seg_id = edge_id
 
 	for seg_num, seg in enumerate(segments):
 		seg_id = edge_id if seg_num == 0 else str(uuid.uuid4())
@@ -152,9 +166,15 @@ def build_segment_writes(edge_row, srid, segments):
 				wkb, srid, wkb, srid,
 			))
 			for kind, ref_id in seg["start_markers"]:
-				reassignments[(kind, ref_id)] = seg_id
+				if kind == "barrier":
+					reassignments[("barrier_downstream", ref_id)] = seg_id
+					reassignments[("barrier_upstream", ref_id)] = prev_seg_id
+				else:
+					reassignments[(kind, ref_id)] = seg_id
 
-	return update_row, insert_rows, reassignments
+		prev_seg_id = seg_id
+
+	return update_row, insert_rows, reassignments, prev_seg_id
 
 
 def flush_segment_updates(cursor, output_schema, rows):
@@ -192,7 +212,8 @@ def flush_segment_inserts(cursor, output_schema, rows):
 def apply_edge_id_reassignments(cursor, output_schema, reassignments):
 	schema_ident = quote_ident(output_schema)
 	tables_and_columns = {
-		"barrier": (f"{schema_ident}.all_structures", "snapped_edge_id"),
+		"barrier_downstream": (f"{schema_ident}.all_barriers", "downstream_edge_id"),
+		"barrier_upstream": (f"{schema_ident}.all_barriers", "upstream_edge_id"),
 		"habitat_upstream": (f"{schema_ident}.habitat_updates", "upstream_snapped_edge_id"),
 		"habitat_downstream": (f"{schema_ident}.habitat_updates", "downstream_snapped_edge_id"),
 	}
@@ -265,7 +286,7 @@ def break_network(conn, cursor, plan, srid):
 	print("  walk edges");
 	for edge_row in edges:
 		segments, end_markers = break_edge(edge_row, by_edge[edge_row["id"]])
-		update_row, insert_rows, reassignments = build_segment_writes(edge_row, srid, segments)
+		update_row, insert_rows, reassignments, last_segment_id = build_segment_writes(edge_row, srid, segments)
 		pending_updates.append(update_row)
 		pending_inserts.extend(insert_rows)
 		all_reassignments.update(reassignments)
@@ -273,8 +294,12 @@ def break_network(conn, cursor, plan, srid):
 		edges_done += 1
 
 		downstream_edge_id = nexus_to_downstream_edge.get(edge_row["to_nexus_id"])
-		if downstream_edge_id is not None:
-			for kind, ref_id in end_markers:
+		for kind, ref_id in end_markers:
+			if kind == "barrier":
+				all_reassignments[("barrier_upstream", ref_id)] = last_segment_id
+				if downstream_edge_id is not None:
+					all_reassignments[("barrier_downstream", ref_id)] = downstream_edge_id
+			elif downstream_edge_id is not None:
 				all_reassignments[(kind, ref_id)] = downstream_edge_id
 
 		if len(pending_updates) + len(pending_inserts) >= BATCH_SIZE:

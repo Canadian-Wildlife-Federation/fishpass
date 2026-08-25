@@ -1,0 +1,11 @@
+# Configuration for fishpass_engine.
+# Edit natural_feature_types below to change the default natural/anthropogenic
+# classification (or use a model plan's natural_feature_types_override field for a
+# one-off, per-plan change -- see fishpass_engine/requirements/inputs/model_plan_file.md).
+#
+# ANY feature_type NOT listed here -- including typos or future new feature types --
+# falls back to 'anthropogenic'. This is a deliberate fail-safe default.
+structure_classification:
+  natural_feature_types:
+    - waterfalls
+    - gradients

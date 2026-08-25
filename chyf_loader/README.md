@@ -25,8 +25,8 @@ after a schema change.
 Run the **CHyF Loader Reload** GitHub Action (`workflow_dispatch`, manual trigger only) whenever
 CHyF2 data has changed and needs to be re-cached. It runs `chyf_loader/scripts/load.py`, which:
 
-1. Reads the workunit(s) to reload from [`config/chyf_loader.ini`](../config/chyf_loader.ini)
-   (`[workunits] short_names`).
+1. Reads the workunit(s) to reload from [`config/chyf_loader.yaml`](../config/chyf_loader.yaml)
+   (`workunits.short_names`).
 2. Resolves those `short_name`s to `chyf2.aoi.id` UUIDs.
 3. Deletes all existing cached `chyf_raw` data.
 4. Copies the corresponding `aoi`, `shoreline` and (merged) `eflowpath` + `eflowpath_properties` rows from
@@ -35,10 +35,10 @@ CHyF2 data has changed and needs to be re-cached. It runs `chyf_loader/scripts/l
 6. Computes `is_isolated` for the newly loaded rows.
 
 Database connection details for both CHyF2 (source) and FishPass (target) come from GitHub
-Actions secrets and are injected as environment variables. They are never stored in the ini file or logged.
+Actions secrets and are injected as environment variables. They are never stored in the config file or logged.
 
-To change which workunit(s) get reloaded, edit `config/chyf_loader.ini` and commit the change
-(see [`chyf_loader.ini.example`](../config/chyf_loader.ini.example) for the documented format).
+To change which workunit(s) get reloaded, edit `config/chyf_loader.yaml` and commit the change
+(see [`chyf_loader.yaml.example`](../config/chyf_loader.yaml.example) for the documented format).
 
 ## WARNING: workunits are not independent
 

@@ -7,8 +7,8 @@ output_schema: model_example
 
 aoi:
   workunit:
-    - 02YK000
     - 02YL000
+    - 02YG000
 
 target_species:
   - as

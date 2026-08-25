@@ -25,7 +25,7 @@ from species_params import load_species_params
 
 NO_DATA = -9999  # sentinel used in chyf_raw for a missing smoothed-elevation (M ordinate) value
 BUNDLE_EDGE_BUDGET = 100_000  # max total edge count packed into one bulk-fetch bundle of graph_ids
-WRITE_BATCH_SIZE = 5000  # streams.species_stats/lifecycle_stats write-back chunk size
+WRITE_BATCH_SIZE = 5000  # streams.species_stats write-back chunk size
 
 
 def compute_effective_length_and_gradient(cursor, output_schema):
@@ -111,12 +111,12 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 			if not edges:
 				continue
 
-			species_stats, lifecycle_stats, barrier_rows = process_component(
+			species_stats, barrier_rows, route_measures = process_component(
 				graph_id, edges, barriers_by_graph.get(graph_id, []),
 				habitat_by_graph.get(graph_id, []), plan, species_params_by_code,
 			)
 			all_barrier_rows.extend(barrier_rows)
-			pending_write_rows.extend(build_stats_write_rows(species_stats, lifecycle_stats))
+			pending_write_rows.extend(build_stats_write_rows(species_stats, route_measures))
 
 			if len(pending_write_rows) >= WRITE_BATCH_SIZE:
 				flush_stats_writes(cursor, output_schema, pending_write_rows)

@@ -225,33 +225,41 @@ class BreakNetworkEndMarkerTests(unittest.TestCase):
 		# ecatchment_id, mainstem_id, graph_id, is_isolated, strahler_order, then geometry wkb.
 		return ("E", "aoi", "single", None, 1, "N0", "N2", "ec", "ms", "g1", False, 1, bytes(wkb))
 
+	def _by_column_and_ref_id(self, cursor):
+		by_column = {"downstream_edge_id": {}, "upstream_edge_id": {}}
+		for sql, params in cursor.executed:
+			if not (sql.startswith("UPDATE") and "all_barriers" in sql):
+				continue
+			for column in by_column:
+				if column in sql:
+					by_column[column][params[1]] = params[0]
+		return by_column
+
 	def test_end_marker_reassigned_to_downstream_edge_not_own_split_segment(self):
 		cursor = self._run(self._streams_row(), downstream_lookup_result=[("N2", "F")])
+		by_column = self._by_column_and_ref_id(cursor)
 
-		update_calls = [
-			(sql, params) for sql, params in cursor.executed
-			if sql.startswith("UPDATE") and "all_structures" in sql
-		]
-		by_ref_id = {params[1]: params[0] for _sql, params in update_calls}
+		# b1 sits on the internal split vertex -> downstream is E's own new second segment,
+		# upstream is E's own first (original-id) segment.
+		self.assertEqual(by_column["downstream_edge_id"]["b1"], "new-seg-1")
+		self.assertEqual(by_column["upstream_edge_id"]["b1"], "E")
+		# b2 sits on E's last vertex -> downstream must be reassigned to the real downstream
+		# edge F, not left on "E" (which after the split only names the *first* segment) and
+		# not on "new-seg-1" (E's own last segment) either. Upstream is unambiguous either
+		# way -- it's E's own last segment.
+		self.assertEqual(by_column["downstream_edge_id"]["b2"], "F")
+		self.assertEqual(by_column["upstream_edge_id"]["b2"], "new-seg-1")
 
-		# b1 sits on the internal split vertex -> reassigned to E's own new second segment.
-		self.assertEqual(by_ref_id["b1"], "new-seg-1")
-		# b2 sits on E's last vertex -> must be reassigned to the real downstream edge F, not
-		# left on "E" (which after the split only names the *first* segment) and not on
-		# "new-seg-1" (E's own last segment) either.
-		self.assertEqual(by_ref_id["b2"], "F")
-
-	def test_end_marker_on_outlet_edge_is_left_untouched(self):
+	def test_end_marker_on_outlet_edge_downstream_untouched_but_upstream_still_set(self):
 		cursor = self._run(self._streams_row(), downstream_lookup_result=[])
+		by_column = self._by_column_and_ref_id(cursor)
 
-		update_calls = [
-			(sql, params) for sql, params in cursor.executed
-			if sql.startswith("UPDATE") and "all_structures" in sql
-		]
-		by_ref_id = {params[1]: params[0] for _sql, params in update_calls}
-
-		self.assertEqual(by_ref_id["b1"], "new-seg-1")
-		self.assertNotIn("b2", by_ref_id)
+		self.assertEqual(by_column["downstream_edge_id"]["b1"], "new-seg-1")
+		self.assertEqual(by_column["upstream_edge_id"]["b1"], "E")
+		# b2 has no downstream continuation (outlet), so downstream_edge_id is left untouched --
+		# but upstream_edge_id is still unambiguous (E's own last segment) and gets set.
+		self.assertNotIn("b2", by_column["downstream_edge_id"])
+		self.assertEqual(by_column["upstream_edge_id"]["b2"], "new-seg-1")
 
 
 class BreakNetworkBatchingTests(unittest.TestCase):

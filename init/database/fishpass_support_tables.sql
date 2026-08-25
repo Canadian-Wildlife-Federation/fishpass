@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS support.structure_updates (
 	feature_type varchar,
 	update_type varchar NOT NULL CHECK (update_type IN ('authoritative', 'local_override')),
 	update_scope varchar[] NOT NULL DEFAULT ARRAY['all']::varchar[],
-	passability_status jsonb,
+	passability_status_spawn jsonb,
+	passability_status_rear jsonb,
 	update_source varchar,
 	update_date date,
 	notes varchar
@@ -46,7 +47,8 @@ CREATE TABLE IF NOT EXISTS support.new_structures (
 	new_structure_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	feature_type varchar NOT NULL,
 	update_scope varchar[] NOT NULL DEFAULT ARRAY['all']::varchar[],
-	passability_status jsonb,
+	passability_status_spawn jsonb,
+	passability_status_rear jsonb,
 	point public.geometry(point, 4617),
 	source varchar,
 	notes varchar

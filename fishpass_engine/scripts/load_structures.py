@@ -2,9 +2,9 @@
 6-7). Step 5 (snap to the CHyF network) is implemented separately in snap_structures.py.
 
 Design note / deviation from the literal requirements.md wording: requirements.md describes
-all_structures as potentially having multiple rows per feature_id, merging/splitting rows as
+all_barriers as potentially having multiple rows per feature_id, merging/splitting rows as
 species share or diverge in passability value. This module instead keeps exactly one
-all_structures row per feature_id, with species_passability_value holding the complete
+all_barriers row per feature_id, with species_passability_value holding the complete
 <species>_<lifestage> -> value map for that feature. This is query-equivalent (every downstream
 lookup is by species_lifestage jsonb key, which works identically either way) and much simpler
 to build/update correctly; flagged here in case the row-per-species-group shape turns out to
@@ -13,8 +13,10 @@ matter for a reason not captured in requirements.md.
 
 import json
 import sys
+from pathlib import Path
 
 import psycopg
+import yaml
 
 from cabd_client import fetch_feature_type, map_passability
 from db import quote_ident, quote_qualified_ident
@@ -22,8 +24,21 @@ from model_plan import IDENTIFIER_RE
 
 STRUCTURE_LIFESTAGES = ("rear", "spawn")
 
-# requirements.md Load Structures step 7
-NATURAL_FEATURE_TYPES = {"waterfalls", "gradients"}
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CLASSIFICATION_CONFIG = REPO_ROOT / "config" / "fishpass.yaml"
+
+
+def load_natural_feature_types(config_path=DEFAULT_CLASSIFICATION_CONFIG):
+	"""requirements.md Classify Structures. Returns the set of feature_type values classified as
+	'natural' -- any feature_type not in this set is classified as 'anthropogenic' (see
+	classify_structures). See config/fishpass.yaml."""
+
+	if not Path(config_path).is_file():
+		sys.exit(f"FishPass config file not found: {config_path}")
+	with open(config_path) as f:
+		data = yaml.safe_load(f) or {}
+	raw = (data.get("structure_classification") or {}).get("natural_feature_types") or []
+	return set(raw)
 
 def create_cabd_table(cursor, output_schema, feature_type, srid):
 	"""Create <output_schema>.cabd_<feature_type>, one per plan structure_types entry (the caller
@@ -49,7 +64,7 @@ def create_cabd_table(cursor, output_schema, feature_type, srid):
 def create_structures_table(cursor, output_schema, srid):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"""
-		CREATE TABLE {schema_ident}.all_structures (
+		CREATE TABLE {schema_ident}.all_barriers (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			feature_id uuid NOT NULL,
 			feature_type varchar NOT NULL,
@@ -58,51 +73,61 @@ def create_structures_table(cursor, output_schema, srid):
 			structure_type varchar CHECK (structure_type IN ('natural', 'anthropogenic')),
 			geometry geometry(point, {srid}) NOT NULL,
 			snapped_geometry geometry(point, 4617),
-			snapped_edge_id uuid,
+			upstream_edge_id uuid,
+			downstream_edge_id uuid,
 			network_vertex_x double precision,
 			network_vertex_y double precision,
 			species_stats jsonb
 		);
 	""")
 	cursor.execute(
-		f"CREATE UNIQUE INDEX all_structures_feature_id_idx ON {schema_ident}.all_structures (feature_id);"
+		f"CREATE UNIQUE INDEX all_barriers_feature_id_idx ON {schema_ident}.all_barriers (feature_id);"
 	)
 
 
 
-def explode_passability(passability_status, target_species=None):
-	"""Explode a passability_status jsonb value (from new_structures/structure_updates) into
-	full <species>_<lifestage> keys.
+def _require_passability_object(status, lifestage, row_id):
+	"""passability_status_rear/_spawn must be a JSON object per structure_new_dataset.md /
+	structure_updates_dataset.md (e.g. {"es": 0.25}). Raise a clear, actionable error instead of
+	an AttributeError deep in .items() if a row has malformed data (e.g. a JSON string/number)."""
+	if not isinstance(status, dict):
+		raise ValueError(
+			f"passability_status_{lifestage} for row {row_id!r} must be a JSON object "
+			f"(e.g. {{\"es\": 0.25}}), got {status!r}"
+		)
 
-	A key without an explicit _rear/_spawn suffix applies to both lifestages (requirements.md).
 
-	A null passability_status means "full barrier" for every species/lifestage in
-	target_species -- the "full barrier (impassable)" case documented on the passability_status
-	column in structure_new_dataset.md / structure_updates_dataset.md. target_species is
-	required in that case (callers omit it only when they don't need null-handling, e.g. tests).
+def explode_new_structure_passability(passability_status_rear, passability_status_spawn, target_species, row_id=None):
+	"""Build a <species>_<lifestage> -> value map from support.new_structures' split
+	passability_status_rear/_spawn columns, for species in target_species only. A species with
+	no entry in the relevant column defaults to impassable (0) -- unlike
+	explode_structure_update, there is no pre-existing all_barriers row for a brand-new
+	structure to fall back to; this call builds the initial insert."""
+	result = {f"{sp}_{lc}": 0 for sp in target_species for lc in STRUCTURE_LIFESTAGES}
+	for lifestage, status in (("rear", passability_status_rear), ("spawn", passability_status_spawn)):
+		if not status:
+			continue
+		_require_passability_object(status, lifestage, row_id)
+		for sp, value in status.items():
+			if sp in target_species:
+				result[f"{sp}_{lifestage}"] = value
+	return result
 
-	A non-null passability_status is also defaulted to impassable for every species/lifestage in
-	target_species before the JSON's own keys are applied on top, so a species target_species
-	cares about but that isn't mentioned in the JSON ends up impassable -- per
-	structure_new_dataset.md / structure_updates_dataset.md's "or the specific species doesn't
-	exist in the JSON string" wording. As with the null case, this defaulting only happens when
-	target_species is given; callers that omit it (e.g. tests) get keys only for what the JSON
-	explicitly lists.
-	"""
-	if passability_status is None:
-		if target_species is None:
-			return {}
-		return {f"{sp}_{lc}": 0 for sp in target_species for lc in STRUCTURE_LIFESTAGES}
 
+def explode_structure_update(passability_status_rear, passability_status_spawn, target_species, row_id=None):
+	"""Build a <species>_<lifestage> -> value map from support.structure_updates' split
+	passability_status_rear/_spawn columns, for species in target_species only. Species with no
+	entry in the relevant column are omitted (not defaulted to impassable) so the jsonb `||` merge
+	in apply_structure_updates leaves the structure's existing default (from CABD or
+	support.new_structures) untouched."""
 	result = {}
-	if target_species is not None:
-		result = {f"{sp}_{lc}": 0 for sp in target_species for lc in STRUCTURE_LIFESTAGES}
-	for key, value in passability_status.items():
-		if key.endswith("_rear") or key.endswith("_spawn"):
-			result[key] = value
-		else:
-			for lc in STRUCTURE_LIFESTAGES:
-				result[f"{key}_{lc}"] = value
+	for lifestage, status in (("rear", passability_status_rear), ("spawn", passability_status_spawn)):
+		if not status:
+			continue
+		_require_passability_object(status, lifestage, row_id)
+		for sp, value in status.items():
+			if sp in target_species:
+				result[f"{sp}_{lifestage}"] = value
 	return result
 
 
@@ -156,8 +181,8 @@ def populate_cabd_table(cursor, output_schema, feature_type, short_names, target
 	return count
 
 
-def populate_all_structures_from_cabd(cursor, output_schema, cabd_feature_types):
-	"""Populate all_structures by reading back from the already-populated
+def populate_all_barriers_from_cabd(cursor, output_schema, cabd_feature_types):
+	"""Populate all_barriers by reading back from the already-populated
 	<output_schema>.cabd_<feature_type> tables (see populate_cabd_table) rather than from
 	Python-held rows. Returns the number of rows inserted."""
 
@@ -169,7 +194,7 @@ def populate_all_structures_from_cabd(cursor, output_schema, cabd_feature_types)
 	]
 	cursor.execute(
 		f"""
-		INSERT INTO {schema_ident}.all_structures
+		INSERT INTO {schema_ident}.all_barriers
 			(feature_id, feature_type, species_passability_value, source, geometry)
 		{" UNION ALL ".join(selects)}
 		ON CONFLICT (feature_id) DO NOTHING
@@ -180,13 +205,13 @@ def populate_all_structures_from_cabd(cursor, output_schema, cabd_feature_types)
 
 
 def populate_from_cabd(cursor, conn, output_schema, plan, srid):
-	"""Load Structures step 2. Returns the number of rows inserted into all_structures.
+	"""Load Structures step 2. Returns the number of rows inserted into all_barriers.
 
 	For each feature_type: creates <output_schema>.cabd_<feature_type>, fetches that type from
 	CABD and streams it straight into the table, then commits -- before any
 	structure_updates/new_structures/gradient/classification/snapping logic that mutates
-	all_structures later in the pipeline. Once every feature_type's cache table is populated,
-	all_structures is populated by reading back from those cache tables."""
+	all_barriers later in the pipeline. Once every feature_type's cache table is populated,
+	all_barriers is populated by reading back from those cache tables."""
 
 	cabd_feature_types = [ft for ft in plan["structure_types"] if ft != "gradients"]
 	if not cabd_feature_types:
@@ -200,7 +225,7 @@ def populate_from_cabd(cursor, conn, output_schema, plan, srid):
 		conn.commit()
 		print(f"  CABD {feature_type}: {count} feature(s)")
 
-	return populate_all_structures_from_cabd(cursor, output_schema, cabd_feature_types)
+	return populate_all_barriers_from_cabd(cursor, output_schema, cabd_feature_types)
 
 
 def load_new_structures(cursor, output_schema, plan, srid):
@@ -209,7 +234,7 @@ def load_new_structures(cursor, output_schema, plan, srid):
 	table_ident = quote_qualified_ident(plan["structure_new_table"])
 	cursor.execute(
 		f"""
-		SELECT new_structure_id, feature_type, passability_status, ST_AsBinary(point)
+		SELECT new_structure_id, feature_type, passability_status_rear, passability_status_spawn, ST_AsBinary(point)
 		FROM {table_ident}
 		WHERE feature_type = ANY(%s)
 		  AND ('all' = ANY(update_scope) OR %s = ANY(update_scope))
@@ -221,15 +246,17 @@ def load_new_structures(cursor, output_schema, plan, srid):
 		return 0
 
 	insert_rows = []
-	for new_structure_id, feature_type, passability_status, point_wkb in rows:
-		species_map = explode_passability(passability_status, plan["target_species"])
+	for new_structure_id, feature_type, passability_status_rear, passability_status_spawn, point_wkb in rows:
+		species_map = explode_new_structure_passability(
+			passability_status_rear, passability_status_spawn, plan["target_species"], row_id=new_structure_id
+		)
 		insert_rows.append((new_structure_id, feature_type, json.dumps(species_map), bytes(point_wkb)))
 
 	schema_ident = quote_ident(output_schema)
 	
 	cursor.executemany(
 		f"""
-		INSERT INTO {schema_ident}.all_structures
+		INSERT INTO {schema_ident}.all_barriers
 			(feature_id, feature_type, species_passability_value, source, geometry)
 		VALUES (%s, %s, %s::jsonb, 'new_structure', ST_SetSRID(ST_GeomFromWKB(%s), {srid}))
 		ON CONFLICT (feature_id) DO NOTHING
@@ -247,12 +274,17 @@ def apply_structure_updates(cursor, output_schema, plan):
 	naturally wins over an earlier one for any species/lifestage key both touch -- giving
 	exactly the authoritative-then-local_override, earlier-then-later precedence
 	requirements.md specifies.
+
+	Species with no entry in a given row's passability_status_rear/_spawn are omitted from that
+	row's exploded map (see explode_structure_update), so the species_passability_value || %s::jsonb
+	merge below leaves that structure's existing value (from CABD or new_structures) untouched
+	rather than forcing it to impassable.
 	"""
 
 	table_ident = quote_qualified_ident(plan["structure_update_table"])
 	cursor.execute(
 		f"""
-		SELECT barrier_id, passability_status
+		SELECT barrier_id, passability_status_rear, passability_status_spawn
 		FROM {table_ident}
 		WHERE ('all' = ANY(update_scope) OR %s = ANY(update_scope))
 		ORDER BY (update_type = 'local_override'), update_date ASC
@@ -264,8 +296,10 @@ def apply_structure_updates(cursor, output_schema, plan):
 		return 0
 
 	updates_by_feature = {}
-	for barrier_id, passability_status in rows:
-		exploded = explode_passability(passability_status, plan["target_species"])
+	for barrier_id, passability_status_rear, passability_status_spawn in rows:
+		exploded = explode_structure_update(
+			passability_status_rear, passability_status_spawn, plan["target_species"], row_id=barrier_id
+		)
 		updates_by_feature.setdefault(barrier_id, {}).update(exploded)
 
 	schema_ident = quote_ident(output_schema)
@@ -273,7 +307,7 @@ def apply_structure_updates(cursor, output_schema, plan):
 	for feature_id, update_map in updates_by_feature.items():
 		cursor.execute(
 			f"""
-			UPDATE {schema_ident}.all_structures
+			UPDATE {schema_ident}.all_barriers
 			SET species_passability_value = species_passability_value || %s::jsonb
 			WHERE feature_id = %s
 			""",
@@ -316,7 +350,7 @@ def add_gradient_barriers(cursor, output_schema, plan, srid):
 	
 	cursor.executemany(
 		f"""
-		INSERT INTO {schema_ident}.all_structures
+		INSERT INTO {schema_ident}.all_barriers
 			(feature_id, feature_type, species_passability_value, source, geometry)
 		VALUES (%s, 'gradients', %s::jsonb, 'gradient_barriers', ST_SetSRID(ST_GeomFromWKB(%s), {srid}))
 		ON CONFLICT (feature_id) DO NOTHING
@@ -326,16 +360,17 @@ def add_gradient_barriers(cursor, output_schema, plan, srid):
 	return len(insert_rows)
 
 
-def classify_structures(cursor, output_schema):
-	"""Load Structures step 7. Returns the number of rows updated."""
+def classify_structures(cursor, output_schema, natural_feature_types):
+	"""Load Structures step 7. Any feature_type not in natural_feature_types is classified as
+	'anthropogenic'. Returns the number of rows updated."""
 
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(
 		f"""
-		UPDATE {schema_ident}.all_structures
+		UPDATE {schema_ident}.all_barriers
 		SET structure_type = CASE WHEN feature_type = ANY(%s) THEN 'natural' ELSE 'anthropogenic' END
 		""",
-		(list(NATURAL_FEATURE_TYPES),),
+		(list(natural_feature_types),),
 	)
 	return cursor.rowcount
 
@@ -361,6 +396,9 @@ def load_structures(conn, cursor, plan, srid):
 		gb_count = add_gradient_barriers(cursor, output_schema, plan, srid)
 		print(f"Added {gb_count} gradient barrier(s).")
 
-	classify_structures(cursor, output_schema)
+	natural_feature_types = plan["natural_feature_types_override"]
+	if natural_feature_types is None:
+		natural_feature_types = load_natural_feature_types()
+	classify_structures(cursor, output_schema, natural_feature_types)
 
 	conn.commit()

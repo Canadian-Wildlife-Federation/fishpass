@@ -15,6 +15,9 @@ known gaps/assumptions not yet validated against a real database run.
 * A model plan file at `config/models/<plan_code>.yaml` -- see
   [model_plan_file.md](../fishpass/requirements/inputs/model_plan_file.md) and
   [config/models/example.yaml](../config/models/example.yaml).
+* [config/fishpass.yaml](../config/fishpass.yaml) -- natural/anthropogenic structure
+  classification. Any `feature_type` not listed there (or in a plan's
+  `natural_feature_types_override`) falls back to `anthropogenic`.
 
 ## Warnings
 
@@ -72,7 +75,7 @@ python -m unittest discover -s fishpass_engine/tests -p "test_*.py" -v
 | :---- | :---- |
 | `model_plan.py` | Load/validate `config/models/<plan_code>.yaml` |
 | `load_stream_network.py` | Initialize + Load Stream Network |
-| `cabd_client.py`, `load_structures.py` | Load Structures steps 1-4, 6-7 |
+| `cabd_client.py`, `load_structures.py` | Load Structures steps 1-4, 6-7 (`load_structures.load_natural_feature_types` loads `config/fishpass.yaml`) |
 | `network_snap.py`, `snap_structures.py` | Load Structures step 5 (snapping) |
 | `load_habitat.py` | Process Habitat |
 | `network_break.py` | Compute Statistics step 2 (network breaking) |

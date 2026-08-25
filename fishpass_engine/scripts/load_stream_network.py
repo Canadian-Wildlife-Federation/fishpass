@@ -110,8 +110,9 @@ def create_streams_table(cursor, output_schema, srid):
 			strahler_order int,
 			effective_length double precision,
 			segment_gradient double precision,
+			downstream_route_measure double precision,
+			upstream_route_measure double precision,
 			species_stats jsonb,
-			lifecycle_stats jsonb,
 			geometry geometry(LineStringZM, {srid}) NOT NULL
 		);
 	""")

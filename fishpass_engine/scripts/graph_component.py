@@ -1,7 +1,7 @@
 """DB I/O for Compute Statistics steps 5-9: fetch one graph_id connected component's data from
-<output_schema>.streams/all_structures/habitat_updates, run it through the pure engine
+<output_schema>.streams/all_barriers/habitat_updates, run it through the pure engine
 (graph_stats.py, habitat_access.py, length_stats.py), and assemble the per-edge JSON to write
-back to streams.species_stats/lifecycle_stats.
+back to streams.species_stats and the per-barrier JSON to write back to all_barriers.species_stats.
 
 Caveat (see requirements.md's Outstanding Decisions): for an AOI-scoped run, a graph_id's edges
 here are only whatever fell inside the requested AOI(s) during Load Stream Network -- this
@@ -19,20 +19,21 @@ from graph_stats import (
 	compute_accessibility,
 	compute_barrier_here,
 	compute_barrier_stats,
+	compute_downstream_first_barrier_passability,
 	compute_habitat_assignment,
+	compute_route_measures,
 	downstream_order,
 	upstream_order,
 )
-from habitat_access import apply_habitat_access_overrides, derive_general_habitat
+from habitat_access import apply_habitat_access_overrides, derive_spawnrear_habitat
 from length_stats import (
 	compute_barrier_upstream_downstream_stats,
-	compute_lifecycle_rollups,
 	compute_species_length_stats,
 )
 
 STREAM_STAT_FIELDS = (
 	"id", "from_nexus_id", "to_nexus_id", "mainstem_id",
-	"effective_length", "segment_gradient", "strahler_order",
+	"length", "effective_length", "segment_gradient", "strahler_order",
 )
 
 
@@ -97,9 +98,9 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(
 		f"""
-		SELECT e.graph_id, s.id, s.snapped_edge_id, s.species_passability_value, s.structure_type
-		FROM {schema_ident}.all_structures s
-		JOIN {schema_ident}.streams e ON e.id = s.snapped_edge_id
+		SELECT e.graph_id, s.id, s.downstream_edge_id, s.species_passability_value, s.structure_type
+		FROM {schema_ident}.all_barriers s
+		JOIN {schema_ident}.streams e ON e.id = s.downstream_edge_id
 		WHERE e.graph_id = ANY(%s)
 		""",
 		(list(graph_ids),),
@@ -145,9 +146,14 @@ def fetch_bundle_habitat_updates(cursor, output_schema, graph_ids):
 	return by_graph
 
 
-def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats, lifecycle_rollups):
-	"""Returns (species_stats, lifecycle_stats), each {edge_id: {...}} ready for json.dumps,
-	matching requirements.md's Outputs section fields for <output_schema>.streams."""
+def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats):
+	"""Returns species_stats, {edge_id: {...}} ready for json.dumps, matching requirements.md's
+	Outputs section fields for <output_schema>.streams. Upstream length fields (accessible
+	length, and per-lifecycle upstream/functional upstream/weighted upstream/functional weighted
+	upstream length) live on barriers instead (see
+	length_stats.compute_barrier_upstream_downstream_stats) -- but the per-edge, non-aggregate
+	"<lc>_weighted_length" (rear/spawn only) IS written here too, since unlike the aggregates it's
+	already a per-edge quantity (see length_stats.compute_species_length_stats)."""
 
 	species_lifecycles = {}
 	for sp, lc in reporting_species_lifecycles:
@@ -159,43 +165,41 @@ def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, ba
 		for species, lifecycles in species_lifecycles.items():
 			s = {
 				"accessibility": accessibility[species][eid],
-				"upstream_anthro_count": barrier_stats[species]["upstream_anthro_count"][eid],
-				"downstream_anthro_count": barrier_stats[species]["downstream_anthro_count"][eid],
-				"upstream_natural_count": barrier_stats[species]["upstream_natural_count"][eid],
-				"downstream_natural_count": barrier_stats[species]["downstream_natural_count"][eid],
+				"upstream_anthro_spawnrear_count": barrier_stats[species]["upstream_anthro_spawnrear_count"][eid],
+				"upstream_anthro_spawn_count": barrier_stats[species]["upstream_anthro_spawn_count"][eid],
+				"upstream_anthro_rear_count": barrier_stats[species]["upstream_anthro_rear_count"][eid],
+				"downstream_anthro_spawnrear_count": barrier_stats[species]["downstream_anthro_spawnrear_count"][eid],
+				"downstream_anthro_spawn_count": barrier_stats[species]["downstream_anthro_spawn_count"][eid],
+				"downstream_anthro_rear_count": barrier_stats[species]["downstream_anthro_rear_count"][eid],
+				"upstream_natural_spawnrear_count": barrier_stats[species]["upstream_natural_spawnrear_count"][eid],
+				"upstream_natural_spawn_count": barrier_stats[species]["upstream_natural_spawn_count"][eid],
+				"upstream_natural_rear_count": barrier_stats[species]["upstream_natural_rear_count"][eid],
+				"downstream_natural_spawnrear_count": barrier_stats[species]["downstream_natural_spawnrear_count"][eid],
+				"downstream_natural_spawn_count": barrier_stats[species]["downstream_natural_spawn_count"][eid],
+				"downstream_natural_rear_count": barrier_stats[species]["downstream_natural_rear_count"][eid],
 				"upstream_anthro_ids": barrier_stats[species]["upstream_anthro_ids"][eid],
 				"downstream_anthro_ids": barrier_stats[species]["downstream_anthro_ids"][eid],
 				"rear_habitat": habitat[species]["rear"][eid],
 				"spawn_habitat": habitat[species]["spawn"][eid],
-				"general_habitat": habitat[species]["general"][eid],
-				"upstream_accessible_length": species_length_stats[species]["upstream_accessible_length"][eid],
+				"spawnrear_habitat": habitat[species]["spawnrear"][eid],
 			}
-			for lc in lifecycles:
-				for field in (
-					"upstream_length", "functional_upstream_length",
-					"weighted_upstream_length", "functional_weighted_upstream_length",
-				):
-					s[f"{lc}_{field}"] = species_length_stats[species][f"{lc}_{field}"][eid]
+			for lc in ("rear", "spawn"):
+				if lc in lifecycles:
+					s[f"{lc}_weighted_length"] = species_length_stats[species][f"{lc}_weighted_length"][eid]
 			entry[species] = s
 		species_stats[eid] = entry
 
-	lifecycle_stats = {}
-	for eid in edge_ids:
-		entry = {}
-		for lc, data in lifecycle_rollups.items():
-			for field in ("upstream_length", "functional_upstream_length", "weighted_upstream_length"):
-				entry[f"{lc}_{field}"] = data[field][eid]
-		lifecycle_stats[eid] = entry
-
-	return species_stats, lifecycle_stats
+	return species_stats
 
 
-def build_stats_write_rows(species_stats, lifecycle_stats):
-	"""(species_json, lifecycle_json, edge_id) tuples for flush_stats_writes, one per edge in
-	species_stats (as returned by assemble_edge_json)."""
+def build_stats_write_rows(species_stats, route_measures):
+	"""(species_json, downstream_route_measure, upstream_route_measure, edge_id) tuples for
+	flush_stats_writes, one per edge in species_stats (as returned by assemble_edge_json).
+	route_measures is compute_route_measures' {edge_id: (downstream, upstream)} result -- an edge
+	missing from it (no mainstem_id) writes NULL for both measure columns."""
 
 	return [
-		(json.dumps(species_stats[eid], default=str), json.dumps(lifecycle_stats[eid], default=str), eid)
+		(json.dumps(species_stats[eid], default=str), *route_measures.get(eid, (None, None)), eid)
 		for eid in species_stats
 	]
 
@@ -208,27 +212,31 @@ def flush_stats_writes(cursor, output_schema, rows):
 	if not rows:
 		return
 	schema_ident = quote_ident(output_schema)
-	species_json, lifecycle_json, edge_ids = zip(*rows)
+	species_json, downstream_measures, upstream_measures, edge_ids = zip(*rows)
 	cursor.execute(
 		f"""
 		UPDATE {schema_ident}.streams AS s
-		SET species_stats = v.species_stats::jsonb, lifecycle_stats = v.lifecycle_stats::jsonb
+		SET species_stats = v.species_stats::jsonb,
+			downstream_route_measure = v.downstream_route_measure,
+			upstream_route_measure = v.upstream_route_measure
 		FROM (
-			SELECT * FROM UNNEST(%s::jsonb[], %s::jsonb[], %s::uuid[]) AS v(species_stats, lifecycle_stats, id)
+			SELECT * FROM UNNEST(%s::jsonb[], %s::double precision[], %s::double precision[], %s::uuid[])
+				AS v(species_stats, downstream_route_measure, upstream_route_measure, id)
 		) AS v
 		WHERE s.id = v.id
 		""",
-		(list(species_json), list(lifecycle_json), list(edge_ids)),
+		(list(species_json), list(downstream_measures), list(upstream_measures), list(edge_ids)),
 	)
 
 
 def process_component(graph_id, edges, barriers, habitat_rows, plan, species_params_by_code):
 	"""Run Compute Statistics steps 5-9 for one graph_id component's already-fetched data (edges,
 	barriers, habitat_rows -- see fetch_bundle_edges/fetch_bundle_barriers/
-	fetch_bundle_habitat_updates). Returns (species_stats, lifecycle_stats, barrier_rows): the
-	first two are ready for build_stats_write_rows, and barrier_rows is barriers annotated with
-	"stats" (for write_barrier_tables to use as the working set for the natural_barriers/
-	anthropogenic_barriers output tables)."""
+	fetch_bundle_habitat_updates). Returns (species_stats, barrier_rows, route_measures):
+	species_stats and route_measures are both ready for build_stats_write_rows, and barrier_rows
+	is barriers annotated with "stats" (for write_barrier_tables to use as the working set for the
+	natural_barriers/anthropogenic_barriers output tables -- including each barrier's upstream
+	length figures)."""
 
 	edges_by_id = {e["id"]: e for e in edges}
 	edge_ids = list(edges_by_id.keys())
@@ -236,6 +244,7 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 	successor, predecessors, roots = build_graph(edges)
 	order_up = upstream_order(predecessors, roots)
 	order_down = downstream_order(order_up)
+	route_measures = compute_route_measures(edges_by_id, predecessors, successor)
 
 	reporting_species_lifecycles = plan["reporting_species_lifecycles"]
 	species_list = sorted({sp for sp, _lc in reporting_species_lifecycles})
@@ -250,24 +259,21 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 	habitat = compute_habitat_assignment(edge_ids, species_list, accessibility, edge_gradient, edge_strahler, species_params_by_code)
 
 	apply_habitat_access_overrides(habitat, edges_by_id, predecessors, successor, habitat_rows)
-	derive_general_habitat(habitat)
+	derive_spawnrear_habitat(habitat)
 
 	effective_length = {eid: edges_by_id[eid]["effective_length"] for eid in edge_ids}
+	downstream_first_barrier_passability = compute_downstream_first_barrier_passability(
+		edge_ids, order_down, successor, barriers, species_list,
+	)
 	species_length_stats = compute_species_length_stats(
 		order_up, predecessors, edge_ids, effective_length, edge_strahler,
 		accessibility, habitat, barrier_here, species_params_by_code,
-		reporting_species_lifecycles,
+		reporting_species_lifecycles, downstream_first_barrier_passability,
 	)
-	lifecycle_rollups = compute_lifecycle_rollups(
-		order_up, predecessors, edge_ids, effective_length, edge_strahler,
-		habitat, barrier_here, species_params_by_code, reporting_species_lifecycles,
-	)
-
-	species_stats_json, lifecycle_stats_json = assemble_edge_json(
-		edge_ids, reporting_species_lifecycles, accessibility, barrier_stats,
-		habitat, species_length_stats, lifecycle_rollups,
+	species_stats_json = assemble_edge_json(
+		edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats,
 	)
 
-	barrier_stats_by_id = compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here)
+	barrier_stats_by_id = compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here, species_length_stats)
 	barrier_rows = [{**b, "stats": barrier_stats_by_id[b["id"]]} for b in barriers]
-	return species_stats_json, lifecycle_stats_json, barrier_rows
+	return species_stats_json, barrier_rows, route_measures

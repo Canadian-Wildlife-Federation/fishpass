@@ -49,16 +49,16 @@ variables (`FISHPASS_HOST`, `FISHPASS_PORT`, `FISHPASS_DBNAME`, `FISHPASS_USER`,
 ### Reprocessing one or more AOIs
 
 To recompute barriers for just one or a few AOI(s) instead of the entire network, edit
-[`config/gradient_barriers.ini`](../config/gradient_barriers.ini) (see
-[`gradient_barriers.ini.example`](../config/gradient_barriers.ini.example) for the documented
+[`config/gradient_barriers.yaml`](../config/gradient_barriers.yaml) (see
+[`gradient_barriers.yaml.example`](../config/gradient_barriers.yaml.example) for the documented
 format) and commit the change:
 
-```ini
-[aoi]
-short_names = 08MF001, 08MG001
+```yaml
+aoi:
+  short_names: [08MF001, 08MG001]
 ```
 
-Leave `short_names` blank (or delete the file) to recompute the entire network. When one or more `short_names` are set, `compute_barriers.py`
+Leave `short_names` empty (or delete the file) to recompute the entire network. When one or more `short_names` are set, `compute_barriers.py`
 backs up the existing rows for those AOI(s), recomputes barriers for just those AOI(s), and
 leaves every other AOI's barriers untouched.
 
@@ -75,11 +75,11 @@ python gradient_barriers/scripts/compute_barriers.py
 
 Pass `--species_params PATH` to use a species parameter file other than the repo default
 (`config/fish_species_parameters.yaml`), and/or `--config PATH` to use an AOI config file other
-than the repo default (`config/gradient_barriers.ini`):
+than the repo default (`config/gradient_barriers.yaml`):
 
 ```sh
 python gradient_barriers/scripts/compute_barriers.py --species_params /path/to/other_parameters.yaml
-python gradient_barriers/scripts/compute_barriers.py --config /path/to/other_gradient_barriers.ini
+python gradient_barriers/scripts/compute_barriers.py --config /path/to/other_gradient_barriers.yaml
 ```
 
 

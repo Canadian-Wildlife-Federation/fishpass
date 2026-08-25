@@ -84,7 +84,7 @@ The workunit should record the short_name from the chyf_raw.aoi table (linked to
 
 ## AOI-scoped reprocessing
 
-Optionally, a run can be scoped to just one or a few AOI(s) instead of the entire network, via `[aoi] short_names` in `config/gradient_barriers.ini` (see README.md). This is unset/blank by default, meaning "recompute everything" (unchanged default behavior).
+Optionally, a run can be scoped to just one or a few AOI(s) instead of the entire network, via `aoi.short_names` in `config/gradient_barriers.yaml` (see README.md). This is unset/empty by default, meaning "recompute everything" (unchanged default behavior).
 
 When AOI(s) are configured, the script:
 

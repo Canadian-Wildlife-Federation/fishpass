@@ -1,5 +1,5 @@
 """Load Structures step 5 (fishpass/requirements/requirements.md): snap
-<output_schema>.all_structures to the <output_schema>.streams network.
+<output_schema>.all_barriers to the <output_schema>.streams network.
 
 Candidate edge search (within structure_snap_edge_distance_m) uses PostGIS geography distance
 in SQL -- structure counts are small enough (thousands, not the 10M-edge network) that this bulk
@@ -31,7 +31,7 @@ def fetch_candidate_matches(cursor, output_schema, edge_distance_m):
 			e.id,
 			ST_AsBinary(e.geometry),
 			ST_AsBinary(ST_LineInterpolatePoint(e.geometry, ST_LineLocatePoint(e.geometry, s.geometry)))
-		FROM {schema_ident}.all_structures s
+		FROM {schema_ident}.all_barriers s
     	LEFT JOIN LATERAL (
     		SELECT id, geometry
     		FROM {schema_ident}.streams e
@@ -61,19 +61,20 @@ def write_snapped_geometries(cursor, output_schema, srid, all_results):
 	snapped_geometry (for reporting) is stored in SNAPPED_GEOMETRY_SRID (4617, per
 	requirements.md), reprojected from the streams SRID. network_vertex_x/y store the same
 	location in the streams table's native SRID (no reprojection), so Compute Statistics'
-	network-breaking step can match it against streams vertices exactly. snapped_edge_id
-	records which streams edge the structure landed on."""
+	network-breaking step can match it against streams vertices exactly. downstream_edge_id
+	records which streams edge the structure landed on (network_break.py later splits that
+	edge and derives upstream_edge_id for the other side of the split)."""
 
 	schema_ident = quote_ident(output_schema)
 	rows = [(x, y, edge_id, structure_id) for structure_id, edge_id, x, y, _z, _m in all_results]
 
 	cursor.executemany(
 		f"""
-		UPDATE {schema_ident}.all_structures AS s
+		UPDATE {schema_ident}.all_barriers AS s
 		SET snapped_geometry = ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), {srid}), {SNAPPED_GEOMETRY_SRID}),
 			network_vertex_x = v.x,
 			network_vertex_y = v.y,
-			snapped_edge_id = v.edge_id
+			downstream_edge_id = v.edge_id
 		FROM (VALUES (%s, %s, %s, %s)) AS v(x, y, edge_id, structure_id)
 		WHERE s.id = v.structure_id
 		""",
@@ -95,7 +96,7 @@ def write_edge_geometries(cursor, output_schema, srid, changed_edges):
 
 
 def snap_structures(conn, cursor, plan, srid):
-	"""Run Load Structures step 5 for every all_structures row that isn't already snapped.
+	"""Run Load Structures step 5 for every all_barriers row that isn't already snapped.
 	Returns (snapped_count, unmatched_count)."""
 
 	output_schema = plan["output_schema"]
@@ -104,13 +105,13 @@ def snap_structures(conn, cursor, plan, srid):
 
     # create necessary indexes to improve performance
 	#do this here after the data is loaded so data loading isn't affected
-	cursor.execute(f"CREATE INDEX all_structures_geometry_idx ON {quote_ident(output_schema)}.all_structures USING gist (geometry);")
-	cursor.execute(f"CREATE INDEX all_structures_geometry_geog_idx ON {quote_ident(output_schema)}.all_structures USING gist((geometry::geography))")
+	cursor.execute(f"CREATE INDEX all_barriers_geometry_idx ON {quote_ident(output_schema)}.all_barriers USING gist (geometry);")
+	cursor.execute(f"CREATE INDEX all_barriers_geometry_geog_idx ON {quote_ident(output_schema)}.all_barriers USING gist((geometry::geography))")
 	cursor.execute(f"CREATE INDEX streams_geometry_geog_idx ON {quote_ident(output_schema)}.streams USING gist((geometry::geography))")
 
 	conn.commit()
 
-	cursor.execute(f"SELECT count(*) FROM {quote_ident(output_schema)}.all_structures WHERE snapped_geometry IS NULL")
+	cursor.execute(f"SELECT count(*) FROM {quote_ident(output_schema)}.all_barriers WHERE snapped_geometry IS NULL")
 	total_unsnapped = cursor.fetchone()[0]
 
 	print(f"Finding candidate edges for {total_unsnapped} unsnapped structure(s)...")
@@ -146,7 +147,8 @@ def snap_structures(conn, cursor, plan, srid):
 	unmatched_count = total_unsnapped - snapped_count
 
 	# create after the data is loaded so data loading isn't affected
-	cursor.execute(f"CREATE INDEX all_structures_snapped_edge_id_idx ON {quote_ident(output_schema)}.all_structures (snapped_edge_id);")
+	cursor.execute(f"CREATE INDEX all_barriers_downstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (downstream_edge_id);")
+	cursor.execute(f"CREATE INDEX all_barriers_upstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (upstream_edge_id);")
 
 	conn.commit()
 

@@ -7,7 +7,6 @@ README.md) -- never from a config file and never logged.
 """
 
 import argparse
-import configparser
 import json
 import math
 import re
@@ -24,7 +23,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPECIES_PARAMS_FILE = REPO_ROOT / "config" / "fish_species_parameters.yaml"
-DEFAULT_CONFIG_FILE = REPO_ROOT / "config" / "gradient_barriers.ini"
+DEFAULT_CONFIG_FILE = REPO_ROOT / "config" / "gradient_barriers.yaml"
 
 SHORT_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -54,23 +53,19 @@ def parse_args():
 
 def load_aoi_config(config_path):
 	"""Return the list of chyf_raw.aoi.short_name values to scope this run to, from the
-	[aoi] short_names setting in config_path. Returns [] (meaning: recompute the entire network) 
-	if config_path doesn't exist or	short_names is blank."""
+	aoi.short_names setting in config_path. Returns [] (meaning: recompute the entire network)
+	if config_path doesn't exist or	short_names is empty."""
 
 	if not config_path.is_file():
 		return []
 
-	parser = configparser.ConfigParser()
-	parser.read(config_path)
-	short_names = [
-		s.strip()
-		for s in parser.get("aoi", "short_names", fallback="").split(",")
-		if s.strip()
-	]
+	with open(config_path) as f:
+		data = yaml.safe_load(f) or {}
+	short_names = (data.get("aoi") or {}).get("short_names") or []
 
 	invalid = [s for s in short_names if not SHORT_NAME_RE.match(s)]
 	if invalid:
-		sys.exit(f"Invalid short_name(s) in [aoi] short_names: {', '.join(invalid)}")
+		sys.exit(f"Invalid short_name(s) in aoi.short_names: {', '.join(invalid)}")
 
 	return short_names
 

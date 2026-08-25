@@ -17,7 +17,7 @@ PASSABILITY_CODE_MAP = {
 	2: 0,  # Partial Barrier
 	3: 1,  # Passable
 	4: 0,  # Unknown
-	5: 1,  # NA - No Structure
+	5: 1,  # NA - No Structure (this shouldn't exist as they should be excluded from the analysis)
 	6: 1,  # NA - Decommissioned / Removed
 }
 
@@ -32,7 +32,7 @@ def map_passability(status_code):
 
 def _build_url(feature_type, short_names, base_url):
 	filter_value = ";".join(short_names)
-	return f"{base_url}features/{feature_type}?filter=nhn_watershed_id:in:{filter_value}"
+	return f"{base_url}features/{feature_type}?filter=passability_status_code:neq:5&filter=nhn_watershed_id:in:{filter_value}"
 
 
 def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_size=DEFAULT_CHUNK_SIZE, session=None):
@@ -44,7 +44,8 @@ def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_
 
 	Yields GeoJSON feature dicts one at a time, chunked by work-unit subgroup so each chunk's
 	response can be freed as soon as its features are consumed rather than holding every chunk's
-	features in one combined list.
+	features in one combined list. Features with properties.use_analysis == False are skipped;
+	features where it's True or missing/null are yielded.
 	"""
 	http = session or requests
 	for i in range(0, len(short_names), chunk_size):
@@ -64,4 +65,7 @@ def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_
 				f"{feature_type!r}, work units {chunk} -- this may be truncated at the "
 				f"{RESULT_CAP}-feature cap. Reduce chunk_size and retry."
 			)
-		yield from chunk_features
+		for feature in chunk_features:
+			if feature.get("properties", {}).get("use_analysis") is False:
+				continue
+			yield feature

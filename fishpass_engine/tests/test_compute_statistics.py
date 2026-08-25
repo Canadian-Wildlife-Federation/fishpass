@@ -72,7 +72,7 @@ class RunComponentStatisticsTests(unittest.TestCase):
 
 	def _fake_process_component(self, graph_id, edges, barriers, habitat_rows, plan, species_params):
 		eid = f"E{graph_id}"
-		return {eid: {}}, {eid: {}}, []
+		return {eid: {}}, [], {}
 
 	def test_bundles_components_and_batches_writes(self):
 		cursor = object()  # never touched directly -- every DB call is mocked out

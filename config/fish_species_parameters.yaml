@@ -26,8 +26,10 @@ species:
     strahler_order_spawning_max: 5
     strahler_order_rearing_min: 1
     strahler_order_rearing_max: 6
-    stream_order_1_weight: 0.2
-    stream_order_2_weight: 0.5
+    stream_order_1_spawning_weight: 0.2
+    stream_order_1_rearing_weight: 0.2
+    stream_order_2_spawning_weight: 0.5
+    stream_order_2_rearing_weight: 0.5
 
   - code: ae
     name: American Eel
@@ -50,5 +52,7 @@ species:
     strahler_order_spawning_max: 5
     strahler_order_rearing_min: 1
     strahler_order_rearing_max: 6
-    stream_order_1_weight: 0.3
-    stream_order_2_weight: 0.6
+    stream_order_1_spawning_weight: 0.3
+    stream_order_1_rearing_weight: 0.3
+    stream_order_2_spawning_weight: 0.6
+    stream_order_2_rearing_weight: 0.6

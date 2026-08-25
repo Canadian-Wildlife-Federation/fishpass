@@ -26,8 +26,10 @@ FIELDS = (
 	"strahler_order_spawning_max",
 	"strahler_order_rearing_min",
 	"strahler_order_rearing_max",
-	"stream_order_1_weight",
-	"stream_order_2_weight",
+	"stream_order_1_spawning_weight",
+	"stream_order_1_rearing_weight",
+	"stream_order_2_spawning_weight",
+	"stream_order_2_rearing_weight",
 )
 
 
@@ -85,15 +87,14 @@ def habitat_strahler_ok(params, lifecycle, strahler_order):
 	return min_v <= strahler_order < max_v
 
 
-def stream_order_weight(params, strahler_order):
+def stream_order_weight(params, lifecycle, strahler_order):
 	"""Weighted-length multiplier for strahler_order, per requirements.md Compute Statistics
-	step 9's documented formula: stream_order_1_weight/stream_order_2_weight from the species
-	parameter file for orders 1 and 2, 1.0 (no downweighting) for every order >= 3."""
+	step 9's documented formula: stream_order_{1,2}_{spawning,rearing}_weight from the species
+	parameter file for orders 1 and 2, 1.0 (no downweighting) for every order >= 3. lifecycle
+	must be "rear" or "spawn" -- weighted length is not computed for "spawnrear"."""
 
-	if strahler_order == 1:
-		weight = params.get("stream_order_1_weight")
-	elif strahler_order == 2:
-		weight = params.get("stream_order_2_weight")
-	else:
-		weight = None
+	if strahler_order not in (1, 2):
+		return 1.0
+	field_lifecycle = LIFECYCLE_STRAHLER_FIELD[lifecycle]
+	weight = params.get(f"stream_order_{strahler_order}_{field_lifecycle}_weight")
 	return 1.0 if weight is None else weight

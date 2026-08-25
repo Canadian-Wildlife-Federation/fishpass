@@ -47,7 +47,7 @@ class ExpandReportingValuesTests(unittest.TestCase):
 
 	def test_all_lifecycle(self):
 		result = mp.expand_reporting_values(["chn_all"], ["chn", "sth"], "plan.yaml")
-		self.assertEqual(result, [("chn", "general"), ("chn", "rear"), ("chn", "spawn")])
+		self.assertEqual(result, [("chn", "rear"), ("chn", "spawn"), ("chn", "spawnrear")])
 
 	def test_all_species(self):
 		result = mp.expand_reporting_values(["all_rear"], ["chn", "sth"], "plan.yaml")
@@ -89,6 +89,7 @@ class LoadModelPlanTests(unittest.TestCase):
 		self.assertEqual(plan["aoi_value"], ["03EBA001"])
 		self.assertFalse(plan["include_gradient_barriers"])
 		self.assertEqual(plan["impassable_threshold"], 1.0)
+		self.assertIsNone(plan["natural_feature_types_override"])
 
 	def test_impassable_threshold_override(self):
 		with tempfile.TemporaryDirectory() as tmp:
@@ -119,6 +120,28 @@ class LoadModelPlanTests(unittest.TestCase):
 			models_dir = write_plan(tmp, "myplan", extra_yaml="gradient_barriers_table: other.gb_table")
 			plan = mp.load_model_plan("myplan", models_dir=models_dir)
 		self.assertEqual(plan["gradient_barriers_table"], "other.gb_table")
+
+	def test_natural_feature_types_override_applied(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			models_dir = write_plan(
+				tmp, "myplan", extra_yaml="natural_feature_types_override:\n  - dams\n"
+			)
+			plan = mp.load_model_plan("myplan", models_dir=models_dir)
+		self.assertEqual(plan["natural_feature_types_override"], ["dams"])
+
+	def test_natural_feature_types_override_empty_list_allowed(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			models_dir = write_plan(tmp, "myplan", extra_yaml="natural_feature_types_override: []")
+			plan = mp.load_model_plan("myplan", models_dir=models_dir)
+		self.assertEqual(plan["natural_feature_types_override"], [])
+
+	def test_invalid_natural_feature_types_override_exits(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			models_dir = write_plan(
+				tmp, "myplan", extra_yaml="natural_feature_types_override: not_a_list"
+			)
+			with self.assertRaises(SystemExit):
+				mp.load_model_plan("myplan", models_dir=models_dir)
 
 	def test_code_mismatch_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:

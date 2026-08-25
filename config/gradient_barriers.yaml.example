@@ -1,0 +1,16 @@
+# Configuration for gradient_barriers/scripts/compute_barriers.py.
+# Copy this file to gradient_barriers.yaml and edit as needed.
+#
+# This file is optional. If it doesn't exist, or aoi.short_names is left
+# empty, compute_barriers.py recomputes the entire cached network (today's
+# default behavior).
+
+aoi:
+  # List of chyf_raw.aoi.short_name values to reprocess.
+  # Leave empty to recompute the entire network.
+  #
+  # A scoped run backs up the existing gradient_barriers rows for these AOI(s)
+  # to support.gradient_barriers_aoi_backup_<short_names>_<yyyymmdd>_<seq>,
+  # removes them from support.gradient_barriers, and recomputes just those
+  # AOI(s) -- see README.md for details.
+  short_names: []

@@ -40,15 +40,25 @@ class WriteBarrierStatTablesTests(unittest.TestCase):
 		bt.write_barrier_stat_tables(cursor, "model_test", [])
 		self.assertEqual(cursor.executemany_calls, [])
 
-	def test_updates_species_stats_on_all_structures(self):
+	def test_updates_species_stats_on_all_barriers(self):
 		cursor = FakeCursor()
-		rows = [{"id": "b1", "stats": {"es": {"upstream_natural_count": 0}}}]
+		rows = [{"id": "b1", "stats": {"es": {"upstream_natural_spawnrear_count": 0}}}]
 		bt.write_barrier_stat_tables(cursor, "model_test", rows)
 		self.assertEqual(len(cursor.executemany_calls), 1)
 		sql, params = cursor.executemany_calls[0]
-		self.assertIn("UPDATE \"model_test\".all_structures", sql)
+		self.assertIn("UPDATE \"model_test\".all_barriers", sql)
 		self.assertIn("SET species_stats = v.species_stats::jsonb", sql)
-		self.assertEqual(params, [(json.dumps({"es": {"upstream_natural_count": 0}}, default=str), "b1")])
+		self.assertEqual(params, [(json.dumps({"es": {"upstream_natural_spawnrear_count": 0}}, default=str), "b1")])
+
+	def test_stats_includes_upstream_length_fields(self):
+		cursor = FakeCursor()
+		rows = [{"id": "b1", "stats": {"es": {"upstream_accessible_length": 35.0, "rear_upstream_length": 35.0}}}]
+		bt.write_barrier_stat_tables(cursor, "model_test", rows)
+		_sql, params = cursor.executemany_calls[0]
+		self.assertEqual(
+			params,
+			[(json.dumps({"es": {"upstream_accessible_length": 35.0, "rear_upstream_length": 35.0}}, default=str), "b1")],
+		)
 
 class CreateAndPopulateGradientBarriersCacheTests(unittest.TestCase):
 	def test_filters_by_source(self):

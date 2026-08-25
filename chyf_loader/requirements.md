@@ -23,15 +23,15 @@ This will load required data from CHyF2 database into the chyf_raw schema using 
 
 #### Configuration File
 * GitHub
-* config/chyf_loader.ini
+* config/chyf_loader.yaml
 
 Contains any support parameters required for preprocessing including the AOI.
 
 Data will be managed by workunit (aoi). Currently we are only working in Atlantic Canada and for the purposes of space and performance we only want to cache data from those workunits. 
 
-You can reload an individual workunit by only specifying that workunit in the .ini file.  All existing cached data for a workunit(s) will be removed before copying over new data.
+You can reload an individual workunit by only specifying that workunit in the config file.  All existing cached data for a workunit(s) will be removed before copying over new data.
 
-Source and Target Database configurations should live in github secrets.  Not publicly available ini or other files.
+Source and Target Database configurations should live in github secrets.  Not publicly available config or other files.
 
 ### Fishpas Database Connection
 

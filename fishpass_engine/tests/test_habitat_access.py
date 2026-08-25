@@ -176,17 +176,17 @@ class ApplyHabitatAccessOverridesTests(unittest.TestCase):
 		self.assertFalse(self.habitat["es"]["rear"]["E3"])
 
 
-class DeriveGeneralHabitatTests(unittest.TestCase):
-	def test_general_is_union_of_rear_and_spawn(self):
+class DeriveSpawnrearHabitatTests(unittest.TestCase):
+	def test_spawnrear_is_union_of_rear_and_spawn(self):
 		habitat = {
 			"es": {
 				"rear": {"E1": True, "E2": False},
 				"spawn": {"E1": False, "E2": False},
 			},
 		}
-		ha.derive_general_habitat(habitat)
-		self.assertTrue(habitat["es"]["general"]["E1"])
-		self.assertFalse(habitat["es"]["general"]["E2"])
+		ha.derive_spawnrear_habitat(habitat)
+		self.assertTrue(habitat["es"]["spawnrear"]["E1"])
+		self.assertFalse(habitat["es"]["spawnrear"]["E2"])
 
 
 if __name__ == "__main__":

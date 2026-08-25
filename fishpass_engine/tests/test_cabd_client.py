@@ -54,6 +54,17 @@ class FetchFeatureTypeTests(unittest.TestCase):
 		with self.assertRaises(SystemExit):
 			list(cc.fetch_feature_type("dams", ["AOI1"], session=session))
 
+	def test_use_analysis_false_is_filtered_out(self):
+		session = FakeSession([[
+			{"id": 1, "properties": {"use_analysis": True}},
+			{"id": 2, "properties": {"use_analysis": False}},
+			{"id": 3, "properties": {"use_analysis": None}},
+			{"id": 4, "properties": {}},
+			{"id": 5},
+		]])
+		features = list(cc.fetch_feature_type("dams", ["AOI1"], session=session))
+		self.assertEqual([f["id"] for f in features], [1, 3, 4, 5])
+
 
 class MapPassabilityTests(unittest.TestCase):
 	def test_known_and_unknown_codes(self):

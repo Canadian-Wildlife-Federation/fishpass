@@ -25,8 +25,10 @@ This file describes the parameters for individual fish species. Historically thi
 | strahler\_order\_spawning\_max | Used when assigning habitat. If there is no habitat for this species/lifecycle then set the max \< min. |
 | strahler\_order\_rearing\_min | Used when assigning habitat. If there is no habitat for this species/lifecycle then set the max \< min. |
 | strahler\_order\_rearing\_max | Used when assigning habitat. If there is no habitat for this species/lifecycle then set the max \< min. |
-| stream\_order\_1\_weight | Downweighting value applied to habitat length calculations on first order streams. |
-| stream\_order\_2\_weight | Downweighting value applied to habitat length calculations on second order streams. |
+| stream\_order\_1\_spawning\_weight | Downweighting value applied to spawning habitat length calculations on first order streams. |
+| stream\_order\_1\_rearing\_weight | Downweighting value applied to rearing habitat length calculations on first order streams. |
+| stream\_order\_2\_spawning\_weight | Downweighting value applied to spawning habitat length calculations on second order streams. |
+| stream\_order\_2\_rearing\_weight | Downweighting value applied to rearing habitat length calculations on second order streams. |
 
 **Example:**
 
@@ -54,8 +56,10 @@ species:
     strahler_order_spawning_max: 5
     strahler_order_rearing_min: 1
     strahler_order_rearing_max: 6
-    stream_order_1_weight: 0.2
-    stream_order_2_weight: 0.5
+    stream_order_1_spawning_weight: 0.2
+    stream_order_1_rearing_weight: 0.2
+    stream_order_2_spawning_weight: 0.5
+    stream_order_2_rearing_weight: 0.5
 
   - code: sth
     name: Steelhead Trout
@@ -78,8 +82,10 @@ species:
     strahler_order_spawning_max: 4
     strahler_order_rearing_min: 1
     strahler_order_rearing_max: 5
-    stream_order_1_weight: 0.3
-    stream_order_2_weight: 0.6
+    stream_order_1_spawning_weight: 0.3
+    stream_order_1_rearing_weight: 0.3
+    stream_order_2_spawning_weight: 0.6
+    stream_order_2_rearing_weight: 0.6
 ```
 
 x

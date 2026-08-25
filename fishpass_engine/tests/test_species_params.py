@@ -25,8 +25,10 @@ species:
     strahler_order_rearing_max: 6
     strahler_order_spawning_min: 2
     strahler_order_spawning_max: 5
-    stream_order_1_weight: 0.2
-    stream_order_2_weight: 0.5
+    stream_order_1_spawning_weight: 0.1
+    stream_order_1_rearing_weight: 0.2
+    stream_order_2_spawning_weight: 0.4
+    stream_order_2_rearing_weight: 0.5
   - code: noh
     name: No Habitat Species
 """
@@ -99,17 +101,23 @@ class StreamOrderWeightTests(unittest.TestCase):
 			path = f.name
 		self.params = sp.load_species_params(path)
 
-	def test_order_1_weight(self):
-		self.assertEqual(sp.stream_order_weight(self.params["chn"], 1), 0.2)
+	def test_order_1_rearing_weight(self):
+		self.assertEqual(sp.stream_order_weight(self.params["chn"], "rear", 1), 0.2)
 
-	def test_order_2_weight(self):
-		self.assertEqual(sp.stream_order_weight(self.params["chn"], 2), 0.5)
+	def test_order_1_spawning_weight(self):
+		self.assertEqual(sp.stream_order_weight(self.params["chn"], "spawn", 1), 0.1)
+
+	def test_order_2_rearing_weight(self):
+		self.assertEqual(sp.stream_order_weight(self.params["chn"], "rear", 2), 0.5)
+
+	def test_order_2_spawning_weight(self):
+		self.assertEqual(sp.stream_order_weight(self.params["chn"], "spawn", 2), 0.4)
 
 	def test_order_3_defaults_to_one(self):
-		self.assertEqual(sp.stream_order_weight(self.params["chn"], 3), 1.0)
+		self.assertEqual(sp.stream_order_weight(self.params["chn"], "rear", 3), 1.0)
 
 	def test_missing_order_1_weight_defaults_to_one(self):
-		self.assertEqual(sp.stream_order_weight(self.params["noh"], 1), 1.0)
+		self.assertEqual(sp.stream_order_weight(self.params["noh"], "rear", 1), 1.0)
 
 
 if __name__ == "__main__":

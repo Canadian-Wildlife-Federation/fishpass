@@ -143,11 +143,11 @@ def apply_habitat_access_overrides(habitat, edges_by_id, predecessors, successor
 					habitat[species][lifecycle][eid] = flag
 
 
-def derive_general_habitat(habitat):
-	"""Add habitat[species]["general"] = rear OR spawn for every species, per requirements.md's
-	documented general = union(rear, spawn) resolution. Call this after all step 7/8
+def derive_spawnrear_habitat(habitat):
+	"""Add habitat[species]["spawnrear"] = rear OR spawn for every species, per requirements.md's
+	documented spawnrear = union(rear, spawn) resolution. Call this after all step 7/8
 	rear/spawn values (including overrides) are final."""
 
 	for species, lifecycles in habitat.items():
 		rear, spawn = lifecycles["rear"], lifecycles["spawn"]
-		lifecycles["general"] = {eid: rear.get(eid, False) or spawn.get(eid, False) for eid in set(rear) | set(spawn)}
+		lifecycles["spawnrear"] = {eid: rear.get(eid, False) or spawn.get(eid, False) for eid in set(rear) | set(spawn)}

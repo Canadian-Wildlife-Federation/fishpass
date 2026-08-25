@@ -483,24 +483,26 @@ species:
 class LoadAoiConfigTests(unittest.TestCase):
 
 	def test_missing_file_means_full_run(self):
-		self.assertEqual(cb.load_aoi_config(Path("/no/such/gradient_barriers.ini")), [])
+		self.assertEqual(cb.load_aoi_config(Path("/no/such/gradient_barriers.yaml")), [])
 
 	def test_blank_short_names_means_full_run(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			config_path = Path(tmp) / "gradient_barriers.ini"
-			config_path.write_text("[aoi]\nshort_names =\n")
+			config_path = Path(tmp) / "gradient_barriers.yaml"
+			config_path.write_text("aoi:\n  short_names: []\n")
 			self.assertEqual(cb.load_aoi_config(config_path), [])
 
 	def test_populated_short_names_are_parsed_and_stripped(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			config_path = Path(tmp) / "gradient_barriers.ini"
-			config_path.write_text("[aoi]\nshort_names = 08MF001, 08MF002\n")
+			config_path = Path(tmp) / "gradient_barriers.yaml"
+			config_path.write_text("aoi:\n  short_names: [08MF001, 08MF002]\n")
 			self.assertEqual(cb.load_aoi_config(config_path), ["08MF001", "08MF002"])
 
 	def test_invalid_short_name_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			config_path = Path(tmp) / "gradient_barriers.ini"
-			config_path.write_text("[aoi]\nshort_names = 08MF001; DROP TABLE support.gradient_barriers;\n")
+			config_path = Path(tmp) / "gradient_barriers.yaml"
+			config_path.write_text(
+				"aoi:\n  short_names: ['08MF001; DROP TABLE support.gradient_barriers;']\n"
+			)
 			with self.assertRaises(SystemExit):
 				cb.load_aoi_config(config_path)
 

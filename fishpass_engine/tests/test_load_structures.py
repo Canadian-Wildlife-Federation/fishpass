@@ -6,6 +6,7 @@ Run with: python -m unittest fishpass_engine.tests.test_load_structures
 
 import json
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -57,45 +58,59 @@ class BuildCabdRowTests(unittest.TestCase):
 		)
 
 
-class ExplodePassabilityTests(unittest.TestCase):
-	def test_key_without_lifestage_applies_to_both(self):
-		result = ls.explode_passability({"es": 0.25})
-		self.assertEqual(result, {"es_rear": 0.25, "es_spawn": 0.25})
+class ExplodeNewStructurePassabilityTests(unittest.TestCase):
+	def test_rear_only_key_leaves_spawn_defaulted(self):
+		result = ls.explode_new_structure_passability({"es": 1}, None, ["es"])
+		self.assertEqual(result, {"es_rear": 1, "es_spawn": 0})
 
-	def test_key_with_lifestage_kept_as_is(self):
-		result = ls.explode_passability({"es_rear": 1})
-		self.assertEqual(result, {"es_rear": 1})
-
-	def test_mixed_keys(self):
-		result = ls.explode_passability({"es": 0.5, "wl_spawn": 1})
-		self.assertEqual(result, {"es_rear": 0.5, "es_spawn": 0.5, "wl_spawn": 1})
-
-	def test_null_with_target_species_means_full_barrier(self):
-		result = ls.explode_passability(None, target_species=["chn", "sth"])
+	def test_both_columns_null_means_full_barrier(self):
+		result = ls.explode_new_structure_passability(None, None, ["chn", "sth"])
 		self.assertEqual(
 			result,
 			{"chn_rear": 0, "chn_spawn": 0, "sth_rear": 0, "sth_spawn": 0},
 		)
 
-	def test_null_without_target_species_returns_empty(self):
-		self.assertEqual(ls.explode_passability(None), {})
+	def test_species_not_in_target_species_ignored(self):
+		result = ls.explode_new_structure_passability({"es": 0.5, "wl": 1}, None, ["es"])
+		self.assertEqual(result, {"es_rear": 0.5, "es_spawn": 0})
 
-	def test_species_not_mentioned_defaults_to_impassable(self):
-		# partial update: a target species absent from the JSON is treated as a full barrier,
-		# per structure_new_dataset.md / structure_updates_dataset.md.
-		result = ls.explode_passability({"es_rear": 1}, target_species=["es", "wl"])
+	def test_species_missing_from_both_columns_defaults_to_impassable(self):
+		# a target species absent from both columns is treated as a full barrier, per
+		# structure_new_dataset.md.
+		result = ls.explode_new_structure_passability({"es": 1}, None, ["es", "wl"])
 		self.assertEqual(
 			result,
 			{"es_rear": 1, "es_spawn": 0, "wl_rear": 0, "wl_spawn": 0},
 		)
 
 
-class ClassifyStructuresLogicTests(unittest.TestCase):
-	def test_natural_feature_types(self):
-		self.assertIn("waterfalls", ls.NATURAL_FEATURE_TYPES)
-		self.assertIn("gradients", ls.NATURAL_FEATURE_TYPES)
-		self.assertNotIn("dams", ls.NATURAL_FEATURE_TYPES)
-		self.assertNotIn("stream_crossings", ls.NATURAL_FEATURE_TYPES)
+class LoadNaturalFeatureTypesTests(unittest.TestCase):
+	def _write_config(self, text):
+		f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+		f.write(text)
+		f.close()
+		return f.name
+
+	def test_reads_configured_list(self):
+		path = self._write_config(
+			"structure_classification:\n"
+			"  natural_feature_types:\n"
+			"    - waterfalls\n"
+			"    - gradients\n"
+		)
+		self.assertEqual(ls.load_natural_feature_types(path), {"waterfalls", "gradients"})
+
+	def test_empty_list_means_everything_anthropogenic(self):
+		path = self._write_config("structure_classification:\n  natural_feature_types: []\n")
+		self.assertEqual(ls.load_natural_feature_types(path), set())
+
+	def test_missing_key_means_everything_anthropogenic(self):
+		path = self._write_config("structure_classification: {}\n")
+		self.assertEqual(ls.load_natural_feature_types(path), set())
+
+	def test_missing_file_exits(self):
+		with self.assertRaises(SystemExit):
+			ls.load_natural_feature_types("/nonexistent/fishpass.yaml")
 
 
 class FakeCursor:
@@ -120,13 +135,37 @@ class FakeCursor:
 		return self._fetchone_results.pop(0) if self._fetchone_results else None
 
 
+class ExplodeStructureUpdateTests(unittest.TestCase):
+	def test_rear_only_sets_only_rear_key(self):
+		result = ls.explode_structure_update({"es": 0.5}, None, ["es"])
+		self.assertEqual(result, {"es_rear": 0.5})
+
+	def test_both_columns_set_both_keys(self):
+		result = ls.explode_structure_update({"es": 0.5}, {"es": 1}, ["es"])
+		self.assertEqual(result, {"es_rear": 0.5, "es_spawn": 1})
+
+	def test_species_not_in_target_species_ignored(self):
+		result = ls.explode_structure_update({"es": 0.5, "wl": 1}, None, ["es"])
+		self.assertEqual(result, {"es_rear": 0.5})
+
+	def test_both_columns_null_returns_empty(self):
+		self.assertEqual(ls.explode_structure_update(None, None, ["es"]), {})
+
+	def test_missing_species_omitted_not_defaulted(self):
+		# Unlike explode_passability, a species absent from both columns is simply omitted --
+		# it is not forced to impassable, so the caller's jsonb `||` merge leaves that species'
+		# existing default value (from CABD or new_structures) untouched.
+		result = ls.explode_structure_update({"es": 1}, None, ["es", "wl"])
+		self.assertEqual(result, {"es_rear": 1})
+
+
 class ApplyStructureUpdatesOrderingTests(unittest.TestCase):
 	def test_local_override_wins_over_authoritative(self):
 		# fetch_candidate rows arrive pre-ordered by the SQL (authoritative asc date, then
 		# local_override asc date) -- simulate that ordering directly.
 		rows = [
-			("f1", {"es_rear": 1}),  # authoritative
-			("f1", {"es_rear": 0}),  # local_override, applied after -- should win
+			("f1", {"es": 1}, None),  # authoritative
+			("f1", {"es": 0}, None),  # local_override, applied after -- should win
 		]
 		cursor = FakeCursor(fetch_results=[rows])
 		import load_structures as mod
@@ -138,7 +177,7 @@ class ApplyStructureUpdatesOrderingTests(unittest.TestCase):
 		self.assertEqual(updated, 1)
 		update_sql, update_params = cursor.executed[-1]
 		self.assertIn("species_passability_value || %s::jsonb", update_sql)
-		self.assertEqual(json.loads(update_params[0]), {"es_rear": 0, "es_spawn": 0})
+		self.assertEqual(json.loads(update_params[0]), {"es_rear": 0})
 		self.assertEqual(update_params[1], "f1")
 
 	def test_no_rows_returns_zero(self):
@@ -218,7 +257,7 @@ class PopulateCabdTableTests(unittest.TestCase):
 		self.assertEqual(len(cursor.executemany_calls), 1)
 		sql, params = cursor.executemany_calls[0]
 		self.assertIn("INSERT INTO \"model_test\".\"cabd_dams\"", sql)
-		self.assertNotIn("all_structures", sql)
+		self.assertNotIn("all_barriers", sql)
 		self.assertEqual(len(params), 1)
 		self.assertEqual(params[0][0], "f1")
 		self.assertEqual(params[0][2], 3)  # passability_status_code
@@ -240,7 +279,7 @@ class PopulateFromCabdRawCacheTests(unittest.TestCase):
 		self._orig_fetch_feature_type = ls.fetch_feature_type
 		self.addCleanup(setattr, ls, "fetch_feature_type", self._orig_fetch_feature_type)
 
-	def test_seeds_cabd_tables_before_all_structures_insert(self):
+	def test_seeds_cabd_tables_before_all_barriers_insert(self):
 		feature = {
 			"properties": {"cabd_id": "f1", "feature_type": "dams", "passability_status_code": 3},
 			"geometry": {"coordinates": [-63.5, 45.1]},
@@ -250,7 +289,7 @@ class PopulateFromCabdRawCacheTests(unittest.TestCase):
 		cursor = FakeCursor(fetch_results=[[("02YK000",)]])  # get_aoi_short_names
 		conn = FakeConn()
 		plan = {"structure_types": ["dams", "waterfalls"], "target_species": ["es"]}
-		# populate_from_cabd's return value is cursor.rowcount from the final all_structures
+		# populate_from_cabd's return value is cursor.rowcount from the final all_barriers
 		# INSERT -- FakeCursor.execute() sets rowcount=1 on every call as a simplistic stand-in
 		# for "one statement affected rows", so the returned count here reflects that stub
 		# convention rather than modelling real per-row affected-row counts.
@@ -265,11 +304,11 @@ class PopulateFromCabdRawCacheTests(unittest.TestCase):
 		self.assertIn("cabd_waterfalls", create_statements[1])
 
 		# cabd_dams and cabd_waterfalls are each populated via executemany (raw cache); confirm the
-		# raw cache inserts don't touch all_structures.
+		# raw cache inserts don't touch all_barriers.
 		self.assertEqual(len(cursor.executemany_calls), 2)
 		dams_sql, dams_params = cursor.executemany_calls[0]
 		self.assertIn("cabd_dams", dams_sql)
-		self.assertNotIn("all_structures", dams_sql)
+		self.assertNotIn("all_barriers", dams_sql)
 		self.assertEqual(len(dams_params), 1)
 		self.assertEqual(dams_params[0][0], "f1")
 
@@ -277,12 +316,12 @@ class PopulateFromCabdRawCacheTests(unittest.TestCase):
 		self.assertIn("cabd_waterfalls", waterfalls_sql)
 		self.assertEqual(waterfalls_params, [])
 
-		# all_structures is populated via a single execute() (UNION ALL over the cache tables), not
+		# all_barriers is populated via a single execute() (UNION ALL over the cache tables), not
 		# executemany -- it's the last statement executed.
-		all_structures_sql, all_structures_params = cursor.executed[-1]
-		self.assertIn("all_structures", all_structures_sql)
-		self.assertIn("UNION ALL", all_structures_sql)
-		self.assertEqual(all_structures_params, ["dams", "waterfalls"])
+		all_barriers_sql, all_barriers_params = cursor.executed[-1]
+		self.assertIn("all_barriers", all_barriers_sql)
+		self.assertIn("UNION ALL", all_barriers_sql)
+		self.assertEqual(all_barriers_params, ["dams", "waterfalls"])
 
 	def test_gradients_never_reach_cabd_table_creation(self):
 		ls.fetch_feature_type = lambda feature_type, short_names: (_ for _ in ()).throw(
@@ -323,7 +362,7 @@ class CreateCabdTableTests(unittest.TestCase):
 		self.assertIn("CREATE TABLE \"model_test\".\"cabd_dams\"", sql)
 		self.assertNotIn("source", sql)
 		self.assertIn("passability_status_code integer", sql)
-		self.assertNotIn("all_structures", sql)
+		self.assertNotIn("all_barriers", sql)
 
 	def test_rejects_unsafe_feature_type_name(self):
 		cursor = FakeCursor()

@@ -16,7 +16,7 @@ DEFAULT_MODELS_DIR = REPO_ROOT / "config" / "models"
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PLAN_CODE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
-LIFECYCLES = ("rear", "spawn", "general")
+LIFECYCLES = ("rear", "spawn", "spawnrear")
 
 DEFAULTS = {
 	"structure_snap_edge_distance_m": 100,
@@ -28,6 +28,7 @@ DEFAULTS = {
 	"habitat_update_table": "support.habitat_updates",
 	"gradient_barriers_table": "support.gradient_barriers",
 	"impassable_threshold": 1.0,
+	"natural_feature_types_override": None,
 }
 
 REQUIRED_FIELDS = (
@@ -75,8 +76,8 @@ def expand_reporting_values(reporting_values, target_species, plan_path):
 	"""Return a sorted list of (species_code, lifecycle) tuples, expanding 'all' in either
 	position of each '<species>_<lifecycle>' entry.
 
-	'general' is the union of 'rear' and 'spawn' everywhere it's computed (there is no
-	species-parameter or habitat_updates support for a distinct 'general' value) -- see
+	'spawnrear' is the union of 'rear' and 'spawn' everywhere it's computed (there is no
+	species-parameter or habitat_updates support for a distinct 'spawnrear' value) -- see
 	requirements.md's Outputs section.
 	"""
 
@@ -141,6 +142,12 @@ def load_model_plan(plan_code, models_dir=DEFAULT_MODELS_DIR):
 
 	if not isinstance(data["structure_types"], list) or not data["structure_types"]:
 		_fail(plan_path, "structure_types must be a non-empty list")
+
+	override = data.get("natural_feature_types_override")
+	if override is not None and (
+		not isinstance(override, list) or not all(isinstance(v, str) for v in override)
+	):
+		_fail(plan_path, "natural_feature_types_override must be a list of feature_type strings")
 
 	reporting_species_lifecycles = expand_reporting_values(
 		data["reporting_values"], data["target_species"], plan_path

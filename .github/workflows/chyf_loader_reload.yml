@@ -22,5 +22,8 @@ jobs:
       - name: Install postgresql-client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
+      - name: Install Python dependencies
+        run: pip install -r chyf_loader/scripts/requirements.txt
+
       - name: Run reload
         run: python chyf_loader/scripts/load.py

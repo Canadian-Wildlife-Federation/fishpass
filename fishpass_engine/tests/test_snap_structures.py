@@ -88,11 +88,11 @@ class WriteSnappedGeometriesTests(unittest.TestCase):
 		self.assertIn("VALUES (%s, %s, %s, %s)) AS v(x, y, edge_id, structure_id)", sql)
 		self.assertEqual(rows, [(-63.0, 45.0, "edge-1", "s1")])
 
-	def test_sets_snapped_edge_id_in_same_statement(self):
+	def test_sets_downstream_edge_id_in_same_statement(self):
 		cursor = FakeCursor()
 		ss.write_snapped_geometries(cursor, "model_test", 4617, [("s1", "edge-1", -63.0, 45.0, 0.0, 10.0)])
 		sql, _rows = cursor.executemany_calls[0]
-		self.assertIn("snapped_edge_id = v.edge_id", sql)
+		self.assertIn("downstream_edge_id = v.edge_id", sql)
 		self.assertEqual(cursor.executed, [])
 
 
