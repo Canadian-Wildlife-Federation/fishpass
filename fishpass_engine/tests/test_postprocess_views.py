@@ -149,13 +149,13 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		self.assertIn("(species_stats->'as'->>'spawnrear_functional_weighted_upstream_length')::double precision AS spawnrear_functional_weighted_upstream_length", sql)
 
 
-class CreateUnsnappedStructuresViewTests(unittest.TestCase):
-	def test_creates_unsnapped_structures_view(self):
+class CreateUnsnappedBarriersViewTests(unittest.TestCase):
+	def test_creates_unsnapped_barriers_view(self):
 		cursor = FakeCursor()
-		pv.create_unsnapped_structures_view(cursor, "model_test")
+		pv.create_unsnapped_barriers_view(cursor, "model_test")
 		self.assertEqual(len(cursor.executed), 1)
 		sql, _ = cursor.executed[0]
-		self.assertIn("CREATE VIEW \"model_test\".unsnapped_structures", sql)
+		self.assertIn("CREATE VIEW \"model_test\".unsnapped_barriers", sql)
 		self.assertIn("FROM \"model_test\".all_barriers", sql)
 		self.assertIn("WHERE snapped_geometry IS NULL", sql)
 
@@ -222,7 +222,7 @@ class CreateBarrierViewsOrchestratorTests(unittest.TestCase):
 		self.assertIn("CREATE VIEW \"model_test\".\"anthropogenic_barriers_as\"", executed_sql)
 		self.assertIn("CREATE VIEW \"model_test\".\"natural_barriers_ae\"", executed_sql)
 		self.assertIn("CREATE VIEW \"model_test\".\"anthropogenic_barriers_ae\"", executed_sql)
-		self.assertIn("CREATE VIEW \"model_test\".unsnapped_structures", executed_sql)
+		self.assertIn("CREATE VIEW \"model_test\".unsnapped_barriers", executed_sql)
 		self.assertIn("CREATE VIEW \"model_test\".\"streams_as\"", executed_sql)
 		self.assertIn("CREATE VIEW \"model_test\".\"streams_ae\"", executed_sql)
 		self.assertEqual(conn.commits, 2)

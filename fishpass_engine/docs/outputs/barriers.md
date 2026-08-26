@@ -66,6 +66,6 @@ This column contains the following fields for each species identifies in the mod
 Each output species there will be an anthropogenic_barriers and natural_barriers view that includes each of the statistics fields computed available as a column.
 
 
-### Views: `<output_schema>.unsnapped_structures`
+### Views: `<output_schema>.unsnapped_barriers`
 
 This table contains a list of all the barriers that could not be snapped to the stream network.

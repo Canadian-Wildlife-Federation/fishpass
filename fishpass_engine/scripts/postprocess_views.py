@@ -1,6 +1,6 @@
 """Postprocess phase (fishpass/docs/fishpass_docs.md's Outputs section): create the
 reporting views over <output_schema>.all_barriers/streams once Compute Statistics has
-populated species_stats -- natural_barriers/anthropogenic_barriers/unsnapped_structures/
+populated species_stats -- natural_barriers/anthropogenic_barriers/unsnapped_barriers/
 natural_barriers_<species>/anthropogenic_barriers_<species> (views over all_barriers, the latter
 pair with that species' species_stats fields -- including upstream length -- exploded to columns)
 and streams_<species> (view over streams, with species_stats exploded to columns).
@@ -94,13 +94,13 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			""")
 
 
-def create_unsnapped_structures_view(cursor, output_schema):
-	"""unsnapped_structures as a view over all_barriers, restricted to rows that never
+def create_unsnapped_barriers_view(cursor, output_schema):
+	"""unsnapped_barriers as a view over all_barriers, restricted to rows that never
 	snapped onto the stream network (snapped_geometry IS NULL -- see snap_structures.py)."""
 
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"""
-		CREATE VIEW {schema_ident}.unsnapped_structures AS
+		CREATE VIEW {schema_ident}.unsnapped_barriers AS
 		SELECT id, feature_id, feature_type, species_passability_value, source, structure_type, geometry
 		FROM {schema_ident}.all_barriers
 		WHERE snapped_geometry IS NULL
@@ -166,9 +166,9 @@ def create_barrier_views(conn, cursor, plan):
 
 	create_natural_anthropogenic_views(cursor, output_schema)
 	create_species_barrier_views(cursor, output_schema, plan["reporting_species_lifecycles"])
-	create_unsnapped_structures_view(cursor, output_schema)
+	create_unsnapped_barriers_view(cursor, output_schema)
 	conn.commit()
-	print("natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_structures: done.")
+	print("natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_barriers: done.")
 
 	create_species_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	conn.commit()
