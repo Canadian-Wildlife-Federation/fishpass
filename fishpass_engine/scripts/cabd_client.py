@@ -1,4 +1,4 @@
-"""Client for the CABD Barrier API (fishpass/requirements/requirements.md's "CABD Barrier API"
+"""Client for the CABD Barrier API (fishpass/docs/fishpass_docs.md's "CABD Barrier API"
 section).
 """
 

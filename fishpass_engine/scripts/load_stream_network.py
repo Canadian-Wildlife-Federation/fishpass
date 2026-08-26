@@ -1,4 +1,4 @@
-"""Load Stream Network phase (fishpass/requirements/requirements.md).
+"""Load Stream Network phase (fishpass/docs/fishpass_docs.md).
 
 Creates <output_schema>.aoi and <output_schema>.streams as copies of the relevant
 chyf_raw.aoi / chyf_raw.flowpath rows for the plan's aoi selection. <output_schema>.streams is

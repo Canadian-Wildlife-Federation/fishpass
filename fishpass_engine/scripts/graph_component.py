@@ -19,7 +19,7 @@ from graph_stats import (
 	compute_accessibility,
 	compute_barrier_here,
 	compute_barrier_stats,
-	compute_downstream_first_barrier_passability,
+	compute_downstream_first_anthropogenic_barrier_passability,
 	compute_habitat_assignment,
 	compute_route_measures,
 	downstream_order,
@@ -98,7 +98,7 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(
 		f"""
-		SELECT e.graph_id, s.id, s.downstream_edge_id, s.species_passability_value, s.structure_type
+		SELECT e.graph_id, s.id, s.downstream_edge_id, s.upstream_edge_id, s.species_passability_value, s.structure_type
 		FROM {schema_ident}.all_barriers s
 		JOIN {schema_ident}.streams e ON e.id = s.downstream_edge_id
 		WHERE e.graph_id = ANY(%s)
@@ -108,7 +108,10 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 	by_graph = {}
 	for graph_id, *row in cursor.fetchall():
 		by_graph.setdefault(graph_id, []).append(
-			{"id": row[0], "edge_id": row[1], "species_passability_value": row[2], "structure_type": row[3]}
+			{
+				"id": row[0], "edge_id": row[1], "upstream_edge_id": row[2],
+				"species_passability_value": row[3], "structure_type": row[4],
+			}
 		)
 	return by_graph
 
@@ -164,7 +167,8 @@ def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, ba
 		entry = {}
 		for species, lifecycles in species_lifecycles.items():
 			s = {
-				"accessibility": accessibility[species][eid],
+				"spawn_accessibility": accessibility[species]["spawn"][eid],
+				"rear_accessibility": accessibility[species]["rear"][eid],
 				"upstream_anthro_spawnrear_count": barrier_stats[species]["upstream_anthro_spawnrear_count"][eid],
 				"upstream_anthro_spawn_count": barrier_stats[species]["upstream_anthro_spawn_count"][eid],
 				"upstream_anthro_rear_count": barrier_stats[species]["upstream_anthro_rear_count"][eid],
@@ -177,8 +181,10 @@ def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, ba
 				"downstream_natural_spawnrear_count": barrier_stats[species]["downstream_natural_spawnrear_count"][eid],
 				"downstream_natural_spawn_count": barrier_stats[species]["downstream_natural_spawn_count"][eid],
 				"downstream_natural_rear_count": barrier_stats[species]["downstream_natural_rear_count"][eid],
-				"upstream_anthro_ids": barrier_stats[species]["upstream_anthro_ids"][eid],
-				"downstream_anthro_ids": barrier_stats[species]["downstream_anthro_ids"][eid],
+				"upstream_anthro_spawn_ids": barrier_stats[species]["upstream_anthro_spawn_ids"][eid],
+				"upstream_anthro_rear_ids": barrier_stats[species]["upstream_anthro_rear_ids"][eid],
+				"downstream_anthro_spawn_ids": barrier_stats[species]["downstream_anthro_spawn_ids"][eid],
+				"downstream_anthro_rear_ids": barrier_stats[species]["downstream_anthro_rear_ids"][eid],
 				"rear_habitat": habitat[species]["rear"][eid],
 				"spawn_habitat": habitat[species]["spawn"][eid],
 				"spawnrear_habitat": habitat[species]["spawnrear"][eid],
@@ -262,7 +268,7 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 	derive_spawnrear_habitat(habitat)
 
 	effective_length = {eid: edges_by_id[eid]["effective_length"] for eid in edge_ids}
-	downstream_first_barrier_passability = compute_downstream_first_barrier_passability(
+	downstream_first_barrier_passability = compute_downstream_first_anthropogenic_barrier_passability(
 		edge_ids, order_down, successor, barriers, species_list,
 	)
 	species_length_stats = compute_species_length_stats(

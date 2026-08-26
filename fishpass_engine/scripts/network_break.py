@@ -1,4 +1,4 @@
-"""Compute Statistics step 2 (fishpass/requirements/requirements.md): break the network at all
+"""Compute Statistics step 2 (fishpass/docs/fishpass_docs.md): break the network at all
 barrier and habitat points.
 
 Design: structure/habitat snapping (Load Structures step 5, Process Habitat step 2) already

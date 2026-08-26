@@ -1,4 +1,4 @@
-"""Load Structures step 5 (fishpass/requirements/requirements.md): snap
+"""Load Structures step 5 (fishpass/docs/fishpass_docs.md): snap
 <output_schema>.all_barriers to the <output_schema>.streams network.
 
 Candidate edge search (within structure_snap_edge_distance_m) uses PostGIS geography distance

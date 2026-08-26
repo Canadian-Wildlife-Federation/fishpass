@@ -66,7 +66,16 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 
 		sql_natural_as = next(sql for sql, _ in cursor.executed if "natural_barriers_as\"" in sql)
 		self.assertIn("WHERE structure_type = 'natural' AND species_stats IS NOT NULL", sql_natural_as)
-		self.assertIn("id, feature_id, feature_type, species_passability_value, geometry, snapped_geometry", sql_natural_as)
+		self.assertIn("id, feature_id, feature_type,", sql_natural_as)
+		self.assertIn(
+			"(species_passability_value->>'as_spawn')::double precision AS passability_status_spawn",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"(species_passability_value->>'as_rear')::double precision AS passability_status_rear",
+			sql_natural_as,
+		)
+		self.assertIn("geometry, snapped_geometry", sql_natural_as)
 		self.assertIn("(species_stats->'as'->>'upstream_natural_spawnrear_count')::int AS upstream_natural_spawnrear_count", sql_natural_as)
 		self.assertIn("(species_stats->'as'->>'upstream_anthro_spawnrear_count')::int AS upstream_anthro_spawnrear_count", sql_natural_as)
 		self.assertIn("(species_stats->'as'->>'downstream_natural_spawnrear_count')::int AS downstream_natural_spawnrear_count", sql_natural_as)
@@ -74,17 +83,41 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		self.assertIn("(species_stats->'as'->>'upstream_natural_spawn_count')::int AS upstream_natural_spawn_count", sql_natural_as)
 		self.assertIn("(species_stats->'as'->>'downstream_natural_rear_count')::int AS downstream_natural_rear_count", sql_natural_as)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_natural_ids'))::uuid[] "
-			"AS downstream_natural_ids",
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_natural_spawn_ids'))::uuid[] "
+			"AS downstream_natural_spawn_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_anthro_ids'))::uuid[] "
-			"AS downstream_anthro_ids",
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_natural_rear_ids'))::uuid[] "
+			"AS downstream_natural_rear_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'upstream_accessible_length')::double precision AS upstream_accessible_length",
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_anthro_spawn_ids'))::uuid[] "
+			"AS downstream_anthro_spawn_ids",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_anthro_rear_ids'))::uuid[] "
+			"AS downstream_anthro_rear_ids",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'upstream_anthro_spawn_ids'))::uuid[] "
+			"AS upstream_anthro_spawn_ids",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'upstream_anthro_rear_ids'))::uuid[] "
+			"AS upstream_anthro_rear_ids",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'spawn_upstream_accessible_length')::double precision AS spawn_upstream_accessible_length",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'rear_upstream_accessible_length')::double precision AS rear_upstream_accessible_length",
 			sql_natural_as,
 		)
 		self.assertIn("(species_stats->'as'->>'rear_upstream_length')::double precision AS rear_upstream_length", sql_natural_as)
@@ -105,13 +138,15 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		with self.assertRaises(SystemExit):
 			pv.create_species_barrier_views(cursor, "model_test", [("as; DROP TABLE x", "rear")])
 
-	def test_spawnrear_lifecycle_has_no_weighted_columns(self):
+	def test_spawnrear_lifecycle_has_weighted_columns(self):
+		# spawnrear has no raw weighted_length, but its weighted upstream aggregates (the per-edge
+		# spawn/rear maximum) are still exposed like every other lifecycle's.
 		cursor = FakeCursor()
 		pv.create_species_barrier_views(cursor, "model_test", [("as", "spawnrear")])
 		sql, _ = cursor.executed[0]
 		self.assertIn("(species_stats->'as'->>'spawnrear_upstream_length')::double precision AS spawnrear_upstream_length", sql)
-		self.assertNotIn("spawnrear_weighted_upstream_length", sql)
-		self.assertNotIn("spawnrear_functional_weighted_upstream_length", sql)
+		self.assertIn("(species_stats->'as'->>'spawnrear_weighted_upstream_length')::double precision AS spawnrear_weighted_upstream_length", sql)
+		self.assertIn("(species_stats->'as'->>'spawnrear_functional_weighted_upstream_length')::double precision AS spawnrear_functional_weighted_upstream_length", sql)
 
 
 class CreateUnsnappedStructuresViewTests(unittest.TestCase):
@@ -136,17 +171,24 @@ class CreateSpeciesViewsTests(unittest.TestCase):
 
 		self.assertIn("CREATE VIEW \"model_test\".\"streams_as\"", sql_as)
 		self.assertIn("id, geometry, length, strahler_order, effective_length, segment_gradient", sql_as)
-		self.assertIn("(species_stats->'as'->>'accessibility') AS accessibility", sql_as)
+		self.assertIn("(species_stats->'as'->>'spawn_accessibility') AS spawn_accessibility", sql_as)
+		self.assertIn("(species_stats->'as'->>'rear_accessibility') AS rear_accessibility", sql_as)
 		self.assertIn("(species_stats->'as'->>'upstream_natural_spawn_count')::int AS upstream_natural_spawn_count", sql_as)
 		self.assertIn("(species_stats->'as'->>'downstream_natural_rear_count')::int AS downstream_natural_rear_count", sql_as)
 		self.assertIn("(species_stats->'as'->>'upstream_anthro_spawnrear_count')::int AS upstream_anthro_spawnrear_count", sql_as)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'upstream_anthro_ids'))::uuid[] "
-			"AS upstream_anthro_ids",
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'upstream_anthro_spawn_ids'))::uuid[] "
+			"AS upstream_anthro_spawn_ids",
+			sql_as,
+		)
+		self.assertIn(
+			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'upstream_anthro_rear_ids'))::uuid[] "
+			"AS upstream_anthro_rear_ids",
 			sql_as,
 		)
 		self.assertNotIn("rear_upstream_length", sql_as)
-		self.assertNotIn("upstream_accessible_length", sql_as)
+		self.assertNotIn("spawn_upstream_accessible_length", sql_as)
+		self.assertNotIn("rear_upstream_accessible_length", sql_as)
 		self.assertIn("(species_stats->'as'->>'rear_weighted_length')::double precision AS rear_weighted_length", sql_as)
 		self.assertIn("(species_stats->'as'->>'spawn_weighted_length')::double precision AS spawn_weighted_length", sql_as)
 		self.assertIn("WHERE species_stats->'as' IS NOT NULL", sql_as)

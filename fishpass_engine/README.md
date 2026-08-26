@@ -3,7 +3,7 @@
 Runs a model plan end-to-end: loads a stream network, barriers, and habitat data for the plan's
 AOI, applies structure/habitat updates, snaps everything onto the network, and computes
 per-species/lifecycle accessibility, habitat, and upstream-length statistics. See
-[requirements.md](../fishpass/requirements/requirements.md) for the full requirements and design
+[fishpass_docs.md](../fishpass/docs/fishpass_docs.md) for the full requirements and design
 decisions behind this tool -- in particular its **Outstanding Decisions** section, which lists
 known gaps/assumptions not yet validated against a real database run.
 

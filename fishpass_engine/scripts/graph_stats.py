@@ -1,4 +1,4 @@
-"""Compute Statistics steps 5-7 (fishpass/requirements/requirements.md): the graph traversal
+"""Compute Statistics steps 5-7 (fishpass/docs/fishpass_docs.md): the graph traversal
 engine and the per-species barrier-count/accessibility/habitat-assignment statistics built on
 top of it.
 
@@ -256,9 +256,11 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 	'anthropogenic', per Load Structures step 7).
 
 	Returns {species: {"natural": {edge_id: 0/1}, "anthro": {edge_id: 0/1},
-	"natural_ids": {edge_id: [id,...]}, "anthro_ids": {edge_id: [id,...]},
+	"natural_spawn_ids"/"natural_rear_ids"/"anthro_spawn_ids"/"anthro_rear_ids": {edge_id: [id,...]},
 	"natural_spawn"/"natural_rear"/"anthro_spawn"/"anthro_rear": {edge_id: 0/1}}} -- "here" meaning
-	"at this edge's own start", per network_break.py's marker-attachment convention.
+	"at this edge's own start", per network_break.py's marker-attachment convention. A barrier's id
+	lands in a lifestage's id list iff it's impassable for that lifestage specifically -- a barrier
+	blocking both lifestages appears in both lists (no combined "spawnrear" id list is produced).
 
 	"natural"/"anthro" are impassable-for-either-lifestage (requirements.md step 5's combined
 	rule), equal to the OR of that type's own "_spawn"/"_rear" flags -- kept for backward
@@ -271,46 +273,49 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 			f"{struct}_{lc}": {eid: 0 for eid in edge_ids}
 			for struct in ("natural", "anthro") for lc in LIFESTAGES
 		}
-		natural_ids = {eid: [] for eid in edge_ids}
-		anthro_ids = {eid: [] for eid in edge_ids}
+		lifestage_ids = {
+			f"{struct}_{lc}_ids": {eid: [] for eid in edge_ids}
+			for struct in ("natural", "anthro") for lc in LIFESTAGES
+		}
 
 		for b in barriers:
 			eid = b["edge_id"]
-			if eid not in natural_ids:
+			if eid not in lifestage_flags["natural_spawn"]:
 				continue
 			struct = "natural" if b["structure_type"] == "natural" else "anthro"
-			impassable_here = False
 			for lc in LIFESTAGES:
 				if is_impassable(b["species_passability_value"], species, impassable_threshold, lifestage=lc):
 					lifestage_flags[f"{struct}_{lc}"][eid] = 1
-					impassable_here = True
-			if impassable_here:
-				(natural_ids if struct == "natural" else anthro_ids)[eid].append(b["id"])
+					lifestage_ids[f"{struct}_{lc}_ids"][eid].append(b["id"])
 
 		natural = {eid: int(bool(lifestage_flags["natural_spawn"][eid] or lifestage_flags["natural_rear"][eid])) for eid in edge_ids}
 		anthro = {eid: int(bool(lifestage_flags["anthro_spawn"][eid] or lifestage_flags["anthro_rear"][eid])) for eid in edge_ids}
 
 		result[species] = {
 			"natural": natural, "anthro": anthro,
-			"natural_ids": natural_ids, "anthro_ids": anthro_ids,
-			**lifestage_flags,
+			**lifestage_flags, **lifestage_ids,
 		}
 	return result
 
 
 def compute_barrier_stats(order_up, order_down, predecessors, successor, barrier_here_by_species):
 	"""Returns {species: {upstream_natural_spawnrear_count, downstream_natural_spawnrear_count,
-	upstream_anthro_spawnrear_count, downstream_anthro_spawnrear_count, upstream_anthro_ids,
-	downstream_anthro_ids, downstream_natural_ids, and the same upstream_/downstream_ counts split
-	by structure type (natural/anthro) x lifestage (spawn/rear/spawnrear) -- 12 count fields total,
-	all following <direction>_<type>_<lifestage>_count}} (requirements.md's streams output only
-	wants anthropogenic id lists; the natural_barriers/anthropogenic_barriers output tables want
-	downstream ids of both types -- see the Outputs section -- hence downstream_natural_ids is
-	included here too, but not upstream_natural_ids, which nothing needs).
+	upstream_anthro_spawnrear_count, downstream_anthro_spawnrear_count, and the same
+	upstream_/downstream_ counts split by structure type (natural/anthro) x lifestage
+	(spawn/rear/spawnrear) -- 12 count fields total, all following
+	<direction>_<type>_<lifestage>_count}}, plus per-lifestage (spawn/rear, no combined
+	"spawnrear") id lists: upstream_anthro_spawn_ids, upstream_anthro_rear_ids,
+	downstream_anthro_spawn_ids, downstream_anthro_rear_ids, downstream_natural_spawn_ids,
+	downstream_natural_rear_ids (requirements.md's streams output only wants anthropogenic id
+	lists; the natural_barriers/anthropogenic_barriers output tables want downstream ids of both
+	types plus upstream anthro ids -- see the Outputs section -- hence downstream_natural_*_ids is
+	included here too, but not upstream_natural_*_ids, which nothing needs).
 
 	"_spawnrear_count" fields mean "impassable for either lifestage" (requirements.md step 5's
 	combined rule); "_spawn_count"/"_rear_count" mean impassable for that lifestage specifically,
-	independent of the other."""
+	independent of the other. The id-list fields have no "_spawnrear_" variant -- a barrier's id
+	lands in a lifestage's list iff it's impassable for that lifestage specifically, so a barrier
+	blocking both lifestages appears in both lists."""
 
 	up_zeros = {}
 	up_local = {}
@@ -331,26 +336,27 @@ def compute_barrier_stats(order_up, order_down, predecessors, successor, barrier
 				up_local.setdefault(eid, {})[f"{species}:upstream_{count_key}_count"] = v
 				down_local.setdefault(eid, {})[f"{species}:downstream_{count_key}_count"] = v
 
-		up_zeros[f"{species}:upstream_anthro_ids"] = []
-		down_zeros[f"{species}:downstream_anthro_ids"] = []
-		down_zeros[f"{species}:downstream_natural_ids"] = []
+		for lc in LIFESTAGES:
+			up_zeros[f"{species}:upstream_anthro_{lc}_ids"] = []
+			down_zeros[f"{species}:downstream_anthro_{lc}_ids"] = []
+			down_zeros[f"{species}:downstream_natural_{lc}_ids"] = []
 
-		for eid, v in data["anthro_ids"].items():
-			up_local.setdefault(eid, {})[f"{species}:upstream_anthro_ids"] = v
-			down_local.setdefault(eid, {})[f"{species}:downstream_anthro_ids"] = v
-		for eid, v in data["natural_ids"].items():
-			down_local.setdefault(eid, {})[f"{species}:downstream_natural_ids"] = v
+			for eid, v in data[f"anthro_{lc}_ids"].items():
+				up_local.setdefault(eid, {})[f"{species}:upstream_anthro_{lc}_ids"] = v
+				down_local.setdefault(eid, {})[f"{species}:downstream_anthro_{lc}_ids"] = v
+			for eid, v in data[f"natural_{lc}_ids"].items():
+				down_local.setdefault(eid, {})[f"{species}:downstream_natural_{lc}_ids"] = v
 
 	up_acc = propagate_upstream_multi(order_up, predecessors, up_local, up_zeros)
 	down_acc = propagate_downstream_multi(order_down, successor, down_local, down_zeros)
 
 	stats = {}
 	for species in barrier_here_by_species:
-		species_stats = {
-			"upstream_anthro_ids": {eid: v[f"{species}:upstream_anthro_ids"] for eid, v in up_acc.items()},
-			"downstream_anthro_ids": {eid: v[f"{species}:downstream_anthro_ids"] for eid, v in down_acc.items()},
-			"downstream_natural_ids": {eid: v[f"{species}:downstream_natural_ids"] for eid, v in down_acc.items()},
-		}
+		species_stats = {}
+		for lc in LIFESTAGES:
+			species_stats[f"upstream_anthro_{lc}_ids"] = {eid: v[f"{species}:upstream_anthro_{lc}_ids"] for eid, v in up_acc.items()}
+			species_stats[f"downstream_anthro_{lc}_ids"] = {eid: v[f"{species}:downstream_anthro_{lc}_ids"] for eid, v in down_acc.items()}
+			species_stats[f"downstream_natural_{lc}_ids"] = {eid: v[f"{species}:downstream_natural_{lc}_ids"] for eid, v in down_acc.items()}
 		for _data_key, count_key in count_keys:
 			species_stats[f"upstream_{count_key}_count"] = {eid: v[f"{species}:upstream_{count_key}_count"] for eid, v in up_acc.items()}
 			species_stats[f"downstream_{count_key}_count"] = {eid: v[f"{species}:downstream_{count_key}_count"] for eid, v in down_acc.items()}
@@ -358,17 +364,19 @@ def compute_barrier_stats(order_up, order_down, predecessors, successor, barrier
 	return stats
 
 
-def compute_downstream_first_barrier_passability(edge_ids, order_down, successor, barriers, species_list):
+def compute_downstream_first_anthropogenic_barrier_passability(edge_ids, order_down, successor, barriers, species_list):
 	"""For each species and lifestage (spawn, rear), {edge_id: that lifestage's raw
-	species_passability_value at the nearest ("first") barrier downstream of edge_id, of any
-	structure_type (natural or anthropogenic)}. Unlike is_impassable's threshold check, this uses
-	each barrier's raw fractional value as-is (e.g. 0.25, not a binary impassable/passable flag) --
-	a missing species_lifestage key is still treated as 0.0 (full barrier), consistent with
-	is_impassable's "missing = full barrier" convention. An edge with no downstream barriers at all
-	gets 1.0 (no degradation). If multiple barriers are snapped to the same (nearest) edge, their
-	raw values combine by product for that location, same as compute_barrier_here's per-location
-	stacking -- but barriers further downstream than the nearest one are ignored entirely (this is
-	the nearest barrier's value only, not a product across every downstream barrier).
+	species_passability_value at the nearest ("first") downstream anthropogenic barrier that is not
+	fully passable (value < 1) for that species/lifestage}. Natural barriers are skipped entirely
+	(never considered), and a fully-passable anthropogenic barrier (value == 1.0) is also skipped
+	when searching downstream -- walking continues past it looking for a further, degrading
+	anthropogenic barrier. A missing species_lifestage key on a barrier is treated as 0 (full
+	barrier), consistent with is_impassable's "missing = full barrier" convention -- it always
+	qualifies as < 1. An edge with no qualifying downstream barrier at all gets 1.0 (no
+	degradation). If multiple anthropogenic, value < 1 barriers are snapped to the same nearest
+	qualifying location, their raw values combine by product for that location (natural barriers
+	and any fully-passable anthropogenic barrier at that same location are excluded from the
+	product).
 
 	Returns {species: {"spawn": {edge_id: float}, "rear": {edge_id: float}}}."""
 
@@ -376,25 +384,29 @@ def compute_downstream_first_barrier_passability(edge_ids, order_down, successor
 	ones = {key: 1.0 for key in keys}
 
 	local_by_edge = {eid: dict(ones) for eid in edge_ids}
-	has_barrier = {eid: False for eid in edge_ids}
+	qualifies = {eid: {key: False for key in keys} for eid in edge_ids}
 	for b in barriers:
+		if b["structure_type"] == "natural":
+			continue
 		eid = b["edge_id"]
 		if eid not in local_by_edge:
 			continue
-		has_barrier[eid] = True
 		for species, lifestage in keys:
 			value = b["species_passability_value"].get(f"{species}_{lifestage}", 0)
-			local_by_edge[eid][(species, lifestage)] *= value
+			if value < 1:
+				local_by_edge[eid][(species, lifestage)] *= value
+				qualifies[eid][(species, lifestage)] = True
 
 	acc = {}
 	for eid in order_down:
 		succ = successor.get(eid)
 		if succ is None:
 			acc[eid] = dict(ones)
-		elif has_barrier[succ]:
-			acc[eid] = dict(local_by_edge[succ])
 		else:
-			acc[eid] = acc[succ]
+			acc[eid] = {
+				key: local_by_edge[succ][key] if qualifies[succ][key] else acc[succ][key]
+				for key in keys
+			}
 
 	result = {species: {lifestage: {} for lifestage in LIFESTAGES} for species in species_list}
 	for eid, values in acc.items():
@@ -408,27 +420,31 @@ ACCESSIBILITY_INACCESSIBLE = "naturally_inaccessible"
 
 
 def compute_accessibility(edge_ids, barrier_stats):
-	"""requirements.md Compute Statistics step 6: an edge is naturally accessible for a species if
-	it has 0 downstream natural barriers impassable for the spawn lifestage -- anthropogenic
-	barriers and rear-only impassability don't factor in.
+	"""requirements.md Compute Statistics step 6: an edge is naturally accessible for a species/
+	lifestage if it has 0 downstream natural barriers impassable for that lifestage --
+	anthropogenic barriers never factor in, and spawn/rear are computed independently of each
+	other (a barrier impassable only for rear does not affect spawn_accessibility, and vice versa).
 
-	Returns {species: {edge_id: accessibility_string}}."""
+	Returns {species: {"spawn": {edge_id: accessibility_string}, "rear": {edge_id: accessibility_string}}}."""
 
 	result = {}
 	for species, stats in barrier_stats.items():
-		accessibility = {}
+		spawn = {}
+		rear = {}
 		for eid in edge_ids:
-			spawn_nat = stats["downstream_natural_spawn_count"][eid]
-			accessibility[eid] = ACCESSIBILITY_ACCESSIBLE if spawn_nat == 0 else ACCESSIBILITY_INACCESSIBLE
-		result[species] = accessibility
+			spawn[eid] = ACCESSIBILITY_ACCESSIBLE if stats["downstream_natural_spawn_count"][eid] == 0 else ACCESSIBILITY_INACCESSIBLE
+			rear[eid] = ACCESSIBILITY_ACCESSIBLE if stats["downstream_natural_rear_count"][eid] == 0 else ACCESSIBILITY_INACCESSIBLE
+		result[species] = {"spawn": spawn, "rear": rear}
 	return result
 
 
 def compute_habitat_assignment(edge_ids, species_list, accessibility, edge_gradient, edge_strahler, species_params_by_code):
 	"""requirements.md Compute Statistics step 7. edge_gradient/edge_strahler:
-	{edge_id: value or None}. Returns {species: {"rear": {edge_id: bool}, "spawn": {edge_id: bool}}}
-	-- "spawnrear" is derived by the caller as the union of rear/spawn (see requirements.md's
-	documented spawnrear = rear OR spawn resolution)."""
+	{edge_id: value or None}. accessibility is compute_accessibility's output -- rear habitat gates
+	on accessibility[species]["rear"], spawn habitat gates on accessibility[species]["spawn"],
+	independently of each other. Returns {species: {"rear": {edge_id: bool}, "spawn": {edge_id:
+	bool}}} -- "spawnrear" is derived by the caller as the union of rear/spawn (see
+	requirements.md's documented spawnrear = rear OR spawn resolution)."""
 
 	result = {}
 	for species in species_list:
@@ -436,12 +452,13 @@ def compute_habitat_assignment(edge_ids, species_list, accessibility, edge_gradi
 		rear = {}
 		spawn = {}
 		for eid in edge_ids:
-			accessible = accessibility[species][eid] == ACCESSIBILITY_ACCESSIBLE
+			rear_accessible = accessibility[species]["rear"][eid] == ACCESSIBILITY_ACCESSIBLE
+			spawn_accessible = accessibility[species]["spawn"][eid] == ACCESSIBILITY_ACCESSIBLE
 			gradient = edge_gradient.get(eid)
 			strahler = edge_strahler.get(eid)
-			rear[eid] = accessible and sp_mod.habitat_gradient_ok(params, "rear", gradient) and \
+			rear[eid] = rear_accessible and sp_mod.habitat_gradient_ok(params, "rear", gradient) and \
 				sp_mod.habitat_strahler_ok(params, "rear", strahler)
-			spawn[eid] = accessible and sp_mod.habitat_gradient_ok(params, "spawn", gradient) and \
+			spawn[eid] = spawn_accessible and sp_mod.habitat_gradient_ok(params, "spawn", gradient) and \
 				sp_mod.habitat_strahler_ok(params, "spawn", strahler)
 		result[species] = {"rear": rear, "spawn": spawn}
 	return result

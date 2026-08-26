@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a FishPass model plan (fishpass/requirements/requirements.md).
+"""Run a FishPass model plan (fishpass/docs/fishpass_docs.md).
 
 Database connection details come from environment variables only (see README.md) -- never
 from the plan file and never logged.

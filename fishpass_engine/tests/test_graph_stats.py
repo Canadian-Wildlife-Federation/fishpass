@@ -242,8 +242,10 @@ class ComputeBarrierHereTests(unittest.TestCase):
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
 		self.assertEqual(result["es"]["natural"]["E3"], 1)
 		self.assertEqual(result["es"]["anthro"]["E1"], 1)
-		self.assertEqual(result["es"]["natural_ids"]["E3"], ["b1"])
-		self.assertEqual(result["es"]["anthro_ids"]["E1"], ["b2"])
+		self.assertEqual(result["es"]["natural_spawn_ids"]["E3"], ["b1"])
+		self.assertEqual(result["es"]["natural_rear_ids"]["E3"], ["b1"])
+		self.assertEqual(result["es"]["anthro_spawn_ids"]["E1"], ["b2"])
+		self.assertEqual(result["es"]["anthro_rear_ids"]["E1"], ["b2"])
 		self.assertEqual(result["es"]["natural"]["E1"], 0)
 
 	def test_passable_barrier_not_counted(self):
@@ -269,10 +271,11 @@ class ComputeBarrierHereTests(unittest.TestCase):
 		self.assertEqual(result["es"]["natural_spawn"]["E3"], 0)
 		# combined "natural" is still the OR of both lifestages, unchanged from before
 		self.assertEqual(result["es"]["natural"]["E3"], 1)
-		self.assertEqual(result["es"]["natural_ids"]["E3"], ["b1"])
+		self.assertEqual(result["es"]["natural_rear_ids"]["E3"], ["b1"])
+		self.assertEqual(result["es"]["natural_spawn_ids"]["E3"], [])
 
 
-class ComputeDownstreamFirstBarrierPassabilityTests(unittest.TestCase):
+class ComputeDownstreamFirstAnthropogenicBarrierPassabilityTests(unittest.TestCase):
 	def setUp(self):
 		self.edges = make_confluence_edges()
 		self.successor, self.predecessors, self.roots = gs.build_graph(self.edges)
@@ -281,7 +284,7 @@ class ComputeDownstreamFirstBarrierPassabilityTests(unittest.TestCase):
 		self.edge_ids = [e["id"] for e in self.edges]
 
 	def test_no_barriers_gives_full_passability(self):
-		result = gs.compute_downstream_first_barrier_passability(self.edge_ids, self.order_down, self.successor, [], ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, [], ["es"])
 		for eid in self.edge_ids:
 			self.assertEqual(result["es"]["rear"][eid], 1.0)
 			self.assertEqual(result["es"]["spawn"][eid], 1.0)
@@ -291,27 +294,40 @@ class ComputeDownstreamFirstBarrierPassabilityTests(unittest.TestCase):
 		barriers = [
 			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.25, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
 		]
-		result = gs.compute_downstream_first_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
 		self.assertEqual(result["es"]["rear"]["E1"], 0.25)
 		self.assertEqual(result["es"]["rear"]["E2"], 0.25)
 		self.assertEqual(result["es"]["rear"]["E3"], 1.0)
 		self.assertEqual(result["es"]["rear"]["E4"], 1.0)
 		self.assertEqual(result["es"]["spawn"]["E1"], 1.0)
 
-	def test_natural_barrier_now_included(self):
-		# unlike the old anthropogenic-only multiplier, a natural barrier is a valid "first
-		# downstream barrier" too.
+	def test_natural_barrier_skipped_entirely(self):
+		# unlike a general "nearest barrier of any type" lookup, a natural barrier is never
+		# considered -- it does not degrade the weighted length, and searching continues past it.
 		barriers = [
 			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.25, "es_spawn": 0.25}, "structure_type": "natural", "id": "b1"},
 		]
-		result = gs.compute_downstream_first_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
-		self.assertEqual(result["es"]["rear"]["E1"], 0.25)
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		self.assertEqual(result["es"]["rear"]["E1"], 1.0)
+		self.assertEqual(result["es"]["rear"]["E3"], 1.0)
+
+	def test_fully_passable_anthropogenic_barrier_skipped(self):
+		# a fully-passable anthropogenic barrier (value 1.0) at the nearest edge is walked past --
+		# it neither degrades the value nor stops the search -- so a further downstream
+		# anthropogenic barrier with value < 1 supplies the degradation instead.
+		barriers = [
+			{"edge_id": "E3", "species_passability_value": {"es_rear": 1.0, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
+			{"edge_id": "E4", "species_passability_value": {"es_rear": 0.4, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b2"},
+		]
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		self.assertEqual(result["es"]["rear"]["E1"], 0.4)
+		self.assertEqual(result["es"]["rear"]["E3"], 0.4)
 
 	def test_missing_species_lifestage_key_treated_as_full_barrier(self):
 		barriers = [
 			{"edge_id": "E3", "species_passability_value": {}, "structure_type": "anthropogenic", "id": "b1"},
 		]
-		result = gs.compute_downstream_first_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
 		self.assertEqual(result["es"]["rear"]["E1"], 0.0)
 
 	def test_only_nearest_downstream_barrier_applies(self):
@@ -321,20 +337,31 @@ class ComputeDownstreamFirstBarrierPassabilityTests(unittest.TestCase):
 			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
 			{"edge_id": "E4", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b2"},
 		]
-		result = gs.compute_downstream_first_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
 		self.assertEqual(result["es"]["rear"]["E1"], 0.5)
 		self.assertEqual(result["es"]["rear"]["E3"], 0.5)
 		self.assertEqual(result["es"]["rear"]["E4"], 1.0)
 
-	def test_multiple_barriers_at_same_nearest_edge_multiply_together(self):
-		# two barriers stacked at the same (nearest) edge still combine by product for that
-		# location.
+	def test_multiple_anthropogenic_barriers_at_same_nearest_edge_multiply_together(self):
+		# two qualifying (anthropogenic, value < 1) barriers stacked at the same (nearest) edge
+		# still combine by product for that location.
 		barriers = [
 			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "natural", "id": "b2"},
+			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b2"},
 		]
-		result = gs.compute_downstream_first_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
 		self.assertAlmostEqual(result["es"]["rear"]["E1"], 0.25)
+
+	def test_natural_and_fully_passable_barriers_excluded_from_colocated_product(self):
+		# at the same nearest edge: a natural barrier and a fully-passable anthropogenic barrier
+		# must not contribute to the product -- only the qualifying anthropogenic barrier does.
+		barriers = [
+			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
+			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.1, "es_spawn": 1.0}, "structure_type": "natural", "id": "b2"},
+			{"edge_id": "E3", "species_passability_value": {"es_rear": 1.0, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b3"},
+		]
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		self.assertEqual(result["es"]["rear"]["E1"], 0.5)
 
 
 class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
@@ -358,14 +385,16 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		self.assertEqual(stats["es"]["upstream_anthro_spawnrear_count"]["E4"], 1)
 		self.assertEqual(stats["es"]["downstream_anthro_spawn_count"]["E1"], 1)
 		self.assertEqual(stats["es"]["downstream_anthro_rear_count"]["E1"], 1)
-		self.assertEqual(stats["es"]["downstream_anthro_ids"]["E1"], ["b1"])
+		self.assertEqual(stats["es"]["downstream_anthro_spawn_ids"]["E1"], ["b1"])
+		self.assertEqual(stats["es"]["downstream_anthro_rear_ids"]["E1"], ["b1"])
 
 		# an anthropogenic-only barrier no longer affects accessibility at all under the new rules
 		accessibility = gs.compute_accessibility(self.edge_ids, stats)
-		self.assertEqual(accessibility["es"]["E1"], gs.ACCESSIBILITY_ACCESSIBLE)
-		self.assertEqual(accessibility["es"]["E2"], gs.ACCESSIBILITY_ACCESSIBLE)
-		self.assertEqual(accessibility["es"]["E3"], gs.ACCESSIBILITY_ACCESSIBLE)
-		self.assertEqual(accessibility["es"]["E4"], gs.ACCESSIBILITY_ACCESSIBLE)
+		for lc in ("spawn", "rear"):
+			self.assertEqual(accessibility["es"][lc]["E1"], gs.ACCESSIBILITY_ACCESSIBLE)
+			self.assertEqual(accessibility["es"][lc]["E2"], gs.ACCESSIBILITY_ACCESSIBLE)
+			self.assertEqual(accessibility["es"][lc]["E3"], gs.ACCESSIBILITY_ACCESSIBLE)
+			self.assertEqual(accessibility["es"][lc]["E4"], gs.ACCESSIBILITY_ACCESSIBLE)
 
 	def test_multi_species_barriers_dont_leak_between_species(self):
 		# es is blocked at E3, wl is blocked at E1 -- since compute_barrier_stats now runs both
@@ -379,7 +408,8 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
 
 		self.assertEqual(stats["es"]["downstream_anthro_spawnrear_count"]["E1"], 1)
-		self.assertEqual(stats["es"]["downstream_anthro_ids"]["E1"], ["b_es"])
+		self.assertEqual(stats["es"]["downstream_anthro_spawn_ids"]["E1"], ["b_es"])
+		self.assertEqual(stats["es"]["downstream_anthro_rear_ids"]["E1"], ["b_es"])
 		self.assertEqual(stats["es"]["downstream_natural_spawnrear_count"]["E1"], 0)
 		self.assertEqual(stats["es"]["upstream_anthro_spawnrear_count"]["E1"], 0)  # es not blocked at E1
 
@@ -388,25 +418,29 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		self.assertEqual(stats["wl"]["downstream_natural_spawnrear_count"]["E1"], 0)  # barrier is at E1's own start
 		self.assertEqual(stats["wl"]["downstream_anthro_spawnrear_count"]["E1"], 0)  # wl not blocked at E3
 
-	def test_natural_barrier_impassable_for_spawn_makes_downstream_inaccessible(self):
+	def test_natural_barrier_impassable_for_spawn_makes_downstream_spawn_inaccessible_only(self):
+		# spawn_accessibility and rear_accessibility are computed independently: a barrier
+		# impassable only for spawn flips spawn_accessibility but leaves rear_accessibility alone.
 		barriers = [
 			{"edge_id": "E3", "species_passability_value": {"es_rear": 1, "es_spawn": 0}, "structure_type": "natural", "id": "b1"},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)
 		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
 		accessibility = gs.compute_accessibility(self.edge_ids, stats)
-		self.assertEqual(accessibility["es"]["E1"], gs.ACCESSIBILITY_INACCESSIBLE)
+		self.assertEqual(accessibility["es"]["spawn"]["E1"], gs.ACCESSIBILITY_INACCESSIBLE)
+		self.assertEqual(accessibility["es"]["rear"]["E1"], gs.ACCESSIBILITY_ACCESSIBLE)
 
-	def test_natural_barrier_impassable_for_rear_only_stays_accessible(self):
-		# key behavior change: the old min(rear, spawn) rule would have made this inaccessible too;
-		# the new rule only cares about the spawn lifestage.
+	def test_natural_barrier_impassable_for_rear_only_makes_downstream_rear_inaccessible_only(self):
+		# mirror of the spawn-only case: a barrier impassable only for rear now flips
+		# rear_accessibility (unlike the old collapsed single-flag rule) but leaves spawn alone.
 		barriers = [
 			{"edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 1}, "structure_type": "natural", "id": "b1"},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)
 		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
 		accessibility = gs.compute_accessibility(self.edge_ids, stats)
-		self.assertEqual(accessibility["es"]["E1"], gs.ACCESSIBILITY_ACCESSIBLE)
+		self.assertEqual(accessibility["es"]["rear"]["E1"], gs.ACCESSIBILITY_INACCESSIBLE)
+		self.assertEqual(accessibility["es"]["spawn"]["E1"], gs.ACCESSIBILITY_ACCESSIBLE)
 
 
 class ComputeHabitatAssignmentTests(unittest.TestCase):
@@ -422,7 +456,12 @@ class ComputeHabitatAssignmentTests(unittest.TestCase):
 		}
 
 	def test_habitat_true_when_all_conditions_met(self):
-		accessibility = {"es": {"E1": gs.ACCESSIBILITY_ACCESSIBLE, "E2": gs.ACCESSIBILITY_INACCESSIBLE}}
+		accessibility = {
+			"es": {
+				"spawn": {"E1": gs.ACCESSIBILITY_ACCESSIBLE, "E2": gs.ACCESSIBILITY_INACCESSIBLE},
+				"rear": {"E1": gs.ACCESSIBILITY_ACCESSIBLE, "E2": gs.ACCESSIBILITY_INACCESSIBLE},
+			}
+		}
 		gradient = {"E1": 1.0, "E2": 1.0}
 		strahler = {"E1": 2, "E2": 2}
 		result = gs.compute_habitat_assignment(self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params)
@@ -430,19 +469,44 @@ class ComputeHabitatAssignmentTests(unittest.TestCase):
 		self.assertTrue(result["es"]["spawn"]["E1"])
 
 	def test_habitat_false_when_inaccessible(self):
-		accessibility = {"es": {"E1": gs.ACCESSIBILITY_INACCESSIBLE, "E2": gs.ACCESSIBILITY_ACCESSIBLE}}
+		accessibility = {
+			"es": {
+				"spawn": {"E1": gs.ACCESSIBILITY_INACCESSIBLE, "E2": gs.ACCESSIBILITY_ACCESSIBLE},
+				"rear": {"E1": gs.ACCESSIBILITY_INACCESSIBLE, "E2": gs.ACCESSIBILITY_ACCESSIBLE},
+			}
+		}
 		gradient = {"E1": 1.0, "E2": 1.0}
 		strahler = {"E1": 2, "E2": 2}
 		result = gs.compute_habitat_assignment(self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params)
 		self.assertFalse(result["es"]["rear"]["E1"])
 
 	def test_habitat_false_when_gradient_out_of_spawn_range(self):
-		accessibility = {"es": {"E1": gs.ACCESSIBILITY_ACCESSIBLE, "E2": gs.ACCESSIBILITY_ACCESSIBLE}}
+		accessibility = {
+			"es": {
+				"spawn": {"E1": gs.ACCESSIBILITY_ACCESSIBLE, "E2": gs.ACCESSIBILITY_ACCESSIBLE},
+				"rear": {"E1": gs.ACCESSIBILITY_ACCESSIBLE, "E2": gs.ACCESSIBILITY_ACCESSIBLE},
+			}
+		}
 		gradient = {"E1": 3.0, "E2": 3.0}  # ok for rear (0-5) but not spawn (0-2)
 		strahler = {"E1": 2, "E2": 2}
 		result = gs.compute_habitat_assignment(self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params)
 		self.assertTrue(result["es"]["rear"]["E1"])
 		self.assertFalse(result["es"]["spawn"]["E1"])
+
+	def test_habitat_gates_independently_on_own_lifecycle_accessibility(self):
+		# spawn accessible but rear inaccessible at E1 -- spawn habitat should be unaffected by
+		# rear's inaccessibility, and vice versa.
+		accessibility = {
+			"es": {
+				"spawn": {"E1": gs.ACCESSIBILITY_ACCESSIBLE},
+				"rear": {"E1": gs.ACCESSIBILITY_INACCESSIBLE},
+			}
+		}
+		gradient = {"E1": 1.0}
+		strahler = {"E1": 2}
+		result = gs.compute_habitat_assignment(["E1"], ["es"], accessibility, gradient, strahler, self.species_params)
+		self.assertTrue(result["es"]["spawn"]["E1"])
+		self.assertFalse(result["es"]["rear"]["E1"])
 
 
 if __name__ == "__main__":

@@ -12,216 +12,72 @@ Every job has a 6-hour max execution time on GitHub-hosted runners, regardless o
 
 If these limitations prevent us from using a GitHub job, we can containerize the process and run it in the Azure environment.
 
-## Input Data Sources
 
-### 1. FishPass Database
+## FishPass Database
 
 The database connection uses the `FISHPASS_HOST/PORT/DBNAME/USER/PASSWORD` environment variable / GitHub secrets.
-
-### 2. CABD Barrier API
-
-Base URL: `https://cabd-web.azurewebsites.net/cabd-api/`
-
-Feature Type Endpoint: `https://cabd-web.azurewebsites.net/cabd-api/features/<feature_type>/`
-
-Returns a GeoJSON feature collection for the requested `<feature_type>` (e.g. `dams`, `waterfalls`, `stream_crossings`).
-
-**Filtering**
-
-Results can be filtered with one or more `filter=<field>:in:<value1>;<value2>` query parameters, combined with `&`. Two filters are relevant here:
-
-* `nhn_watershed_id` — filters by AOI (workunit short name)
-* `feature_type` — filters by structure type (only needed if not already filtering via the feature type endpoint above)
-
-Example — waterfalls, dams, and stream crossings in watersheds `02PH002` and `02PH001`:
-
-```text
-https://cabd-web.azurewebsites.net/cabd-api/features/waterfalls?filter=nhn_watershed_id:in:02PH002;02PH001&filter=feature_type:in:dams;stream_crossings
-```
-
-Full documentation: https://cabd-docs.netlify.app/docs_tech/docs_tech_arch_api
-
-**Result cap:** a single query is capped at 50,000 features. Structure loading calls the API once
-per feature type by default, which normally keeps each call under the cap. If a single feature
-type's query for the requested AOI(s) still exceeds 50,000 features, that request must be further
-split by work-unit subgroup. A response of exactly 50,000 features should be treated as a signal
-the result was truncated, not assumed to be a complete result.
-
 
 ## Input Datasets
 
 | Dataset | Details |
 | :---- | :---- |
-| Model Plan File | fishpass/requirements/inputs/model_plan_file.md |
-| Fish Species Parameters | docs/fish_species_parameter_file.md |
-| Stream Network | See below |
-| Barriers | See below |
-| Gradient Barriers | See below |
-| Habitat Updates | fishpass/requirements/inputs/habitat_updates_dataset.md |
-| Structure Updates | fishpass/requirements/inputs/structure_updates_dataset.md |
-| New Structures | fishpass/requirements/inputs/structure_new_dataset.md |
-
-### CHyF Stream Network
-
-Source: FishPass Database
-
-Table: chyf_raw.flowpath
-
-Loaded using the chyf_loader tools.
-
-### Structure Barriers
-
-Source: CABD API
-
-### Gradient Barriers
-
-Source: FishPass Database
-
-Table: support.gradient_barriers
-
-Loaded using the gradient_barriers tools.
-
-## Outputs
-
-Each model run will generate its own schema for the output. The schema name is defined in the model plan parameters file (`output_schema`). If the output schema already exists, the existing schema will be dropped and a new one created.
-
-**Table:** <output_schema>.streams
-
-This is the single output table for the stream network. It is created directly from `chyf_raw.flowpath`
-during Load Stream Network (see below), then is maniuplated to have vertices inserted during the snapping phases, and
-edges split during the network breaking phases. The output statistics columns below populated on this data. Due to the snapping and breaking there will be more edges in the output table than the raw input table.
-
-The output statistics are stored in a single jsonb column.
-
-For each species/lifecycle identified in the reporting_values:
-
-* supports_species - true/false if species is applicable for this stream segment (based on fish species model aoi)
-* number of impassable anthropogenic barriers upstream of the stream edge (spawnrear)
-* number of impassable anthropogenic barriers downstream of the stream edge (spawnrear)
-* number of impassable natural barriers upstream of the stream edge (spawnrear)
-* number of impassable natural barriers downstream of the stream edge (spawnrear)
-* for each lifestage (spawn, rear): number of impassable anthropogenic barriers upstream of the stream edge
-* for each lifestage (spawn, rear): number of impassable anthropogenic barriers downstream of the stream edge
-* for each lifestage (spawn, rear): number of impassable natural barriers upstream of the stream edge
-* for each lifestage (spawn, rear): number of impassable natural barriers downstream of the stream edge
-* the ids of the impassable anthropogenic barriers upstream of the stream edge
-* the ids of the impassable anthropogenic barriers downstream of the stream edge
-* accessibility - naturally accessible, naturally inaccessible (see Compute Statistics step 6)
-* \<lifecycle\>_habitat - true/false if habitat for given species
-* for each lifestage (spawn, rear): weighted_length - see Compute Statistics step 9's
-  `weighted_length` formula, degraded by the passability of the nearest ("first") downstream
-  barrier of any type (natural or anthropogenic)
-
-`spawnrear` is not a lifecycle tracked by the fish species parameter file or the habitat_updates
-dataset (neither has a `spawnrear` value). `spawnrear` habitat values are computed as the union of
-`rear` and `spawn`: an edge is `spawnrear` habitat for a species if it is `rear` habitat or `spawn`
-habitat.
-
-Upstream length aggregates (accessible length, and per-lifecycle upstream/functional
-upstream/weighted upstream/functional weighted upstream length) are not stored per stream edge --
-they are computed per edge internally but only written out at each barrier's own position (see the
-`natural_barriers`/`anthropogenic_barriers` Outputs entries below), since the values are of
-interest relative to a barrier, not per-edge. `weighted_length` (singular, per lifestage) is the
-exception: unlike those aggregates, it's already a per-edge, non-aggregate quantity, so it's
-written to every stream edge's own `species_stats` in addition to being surfaced at barrier
-positions.
+| Model Plan File | [inputs/model_plan_file.md](./inputs/model_plan_file.md) |
+| Fish Species Parameters | [fish_species_parameter_file.md](../../docs/fish_species_parameter_file.md) |
+| Stream Network | [inputs/stream_network.md](./inputs/chyf_stream_network.md) |
+| CABD Barriers | [inputs/cabd_barriers.md](./inputs/cabd_barriers.md) |
+| Gradient Barriers | [inputs/gradient_barriers.md](./inputs/gradient_barriers.md)|
+| Habitat Updates | [inputs/habitat_updates_dataset.md](./inputs/habitat_updates_dataset.md) |
+| Structure Updates | [inputs/structure_updates_dataset.md](./inputs/structure_updates_dataset.md) |
+| New Structures | [inputs/structure_new_dataset.md](./structure_new_dataset/cabd_barriers.md) |
 
 
-**View:** <output_schema>.natural_barriers
+## Output Datasets
 
-A view over `<output_schema>.all_barriers` (`WHERE structure_type = 'natural' AND species_stats
-IS NOT NULL` -- the latter restricts it to structures that snapped onto a processed edge, the same
-row set the table version held), exposing:
+Each model run will generate its own schema for the output. The schema name is defined in the model parameters (`output_schema`). **If the output schema already exists, the existing schema will be dropped and a new one created.**
 
-* Passability status per species
-* Number of impassable upstream anthropogenic barriers (spawnrear)
-* Number of impassable upstream natural barriers (spawnrear)
-* Number of impassable downstream anthropogenic barriers (spawnrear)
-* Number of impassable downstream natural barriers (spawnrear)
-* For each lifestage (spawn, rear): number of impassable upstream anthropogenic barriers
-* For each lifestage (spawn, rear): number of impassable upstream natural barriers
-* For each lifestage (spawn, rear): number of impassable downstream anthropogenic barriers
-* For each lifestage (spawn, rear): number of impassable downstream natural barriers
-* The ids of the impassable downstream anthropogenic barriers
-* The ids of the impassable downstream natural barriers
-* Per reporting species: upstream accessible length - the upstream accessible length value (see
-  Compute Statistics step 9) at the barrier's own position
-* Per reporting species, per lifecycle: upstream \<lifecycle\> length, functional upstream
-  \<lifecycle\> length, and (spawn/rear only) weighted upstream \<lifecycle\> length/functional
-  weighted upstream \<lifecycle\> length -- the corresponding step 9 value at the barrier's own
-  position, taken as-is (no adjustment for the barrier's own edge)
-* Per reporting species, per lifestage (spawn, rear only): weighted length, degraded by the
-  passability of the nearest ("first") downstream barrier of any type (see step 9's
-  `weighted_length` bullet) -- also taken as-is at the barrier's own position
+| Dataset | Details |
+| :---- | :---- |
+| Streams | [outputs/streams.md](./outputs/streams.md) |
+| Barriers | [outputs/barriers.md](./outputs/barriers.md) |
+| CABD Features | [outputs/cabd_features.md](./outputs/cabd_features.md) |
+| Gradient Barriers | [outputs/gradient_barriers.md](./outputs/gradient_barriers.md) |
+| Habitat Updates | `<output_schema>.habitat_updates`  A copy of the habitat updates table that only includes the rows used for this model. |
 
-**View:** <output_schema>.anthropogenic_barriers
 
-Same as `natural_barriers` above, but `WHERE structure_type = 'anthropogenic' AND species_stats IS
-NOT NULL`:
+## Computations
 
-* Passability status per species
-* Number of impassable upstream anthropogenic barriers (spawnrear)
-* Number of impassable upstream natural barriers (spawnrear)
-* Number of impassable downstream anthropogenic barriers (spawnrear)
-* Number of impassable downstream natural barriers (spawnrear)
-* For each lifestage (spawn, rear): number of impassable upstream anthropogenic barriers
-* For each lifestage (spawn, rear): number of impassable upstream natural barriers
-* For each lifestage (spawn, rear): number of impassable downstream anthropogenic barriers
-* For each lifestage (spawn, rear): number of impassable downstream natural barriers
-* The ids of the impassable downstream anthropogenic barriers
-* The ids of the impassable downstream natural barriers
-* Per reporting species: upstream accessible length, and per lifecycle the same upstream length
-  figures as `natural_barriers` above
+### Accessibility
 
-**View:** <output_schema>.unsnapped_structures
+* IF (the species if valid for that edge) AND (downstream natural impassable barrier for species/lifecycle count = 0) THEN 
+    * NATURALLY ACCESSIBLE 
+* ELSE
+    * NATURALLY INACCESSIBLE 
 
-A view over `<output_schema>.all_barriers` (`WHERE snapped_geometry IS NULL`), exposing all
-structures that never snapped onto the stream network.
+### Habitat
 
-**Table:** <output_schema>.cabd_<feature_type>
+* TRUE when:
+  * species accessibility = ‘NATURALLY ACCESSIBLE ’
+  * AND 
+  * (segment_gradient >= min_\<lc>\_gradient and segment_gradient < max_\<lc>\_gradient)
+  * AND
+  * (strahler_order >=  min_\<lc>\_strahler_order and strahler_order <  max_\<lc>\_strahler_order)
+* FALSE otherwise
 
-Cached raw values of the barrier as imported from CABD, before any structure_updates,
-new_structures, gradient, classification, or snapping logic is applied -- an immutable record of
-the source data, distinct from `all_barriers` which holds the working/modelled values used
-throughout the rest of the pipeline. For each <feature_type> included in the plan (excluding
-`gradients`).
 
-| Field | Type | Comment |
-| :---- | :---- | :---- |
-| cabd_id | uuid | cabd_id for the feature; primary key |
-| species_passability_value | jsonb | as computed in Load Structures step 2, before any later updates |
-| passability_status_code | integer | raw passability_status_code as returned by CABD, unmapped |
-| geometry | point | original location of barrier, as returned by CABD |
+### Stream Length Attributes
 
-(No `source` column here -- every row in this table came from CABD by construction, so a column
-that would always read `'cabd'` was dropped. No `feature_type` column either -- the table is
-already scoped to a single feature type via its `<feature_type>`-suffixed name.)
+Each stream edge will have the following length fields added:
+* Length - raw length in meters of the edge segments
+* Effective Length - raw length except of skeleton edges that are not associated with the longest mainstem in the waterbody (connector skeleton edges don’t contribute to total length of calculations)
+* <species> <lifestage> Weighted Length 
+  * If the edge is not habit for <species> <lifestage> then 0
+  * If the edge is not naturally accessible for <species> <lifestage> then 0
+  * Otherwise the effective length * (<species> <lifestage> strahler order weighting) * (<species> <lifestage> passability status of the first not-passable anthropogenic downstream barrier) 
+  * Note: Only need spawning and rearing as lifestage, NOT combined
 
-**Table:** <output_schema>.gradient_barriers
-
-Cached version of gradient barriers containing only barriers used in this analysis, with their
-snapped location. Unlike `cabd_<feature_type>`, this is not an immutable pre-processing copy of
-the source table -- it is created and populated during Compute Statistics (after Add Gradient
-Barriers and Snap to the CHyF Network have already run), by copying the relevant rows back out of
-`all_barriers` (`WHERE source = 'gradient_barriers'`). Only created when the plan's
-`structure_types` list contains `gradients`.
-
-| Field | Type | Comment |
-| :---- | :---- | :---- |
-| id | uuid | system generated primary key, copied from `all_barriers.id` |
-| feature_id | uuid | id of the source row in the gradient barriers table |
-| species_passability_value | jsonb | as computed in Add Gradient Barriers |
-| geometry | point | original location of barrier |
-| snapped_geometry | point (4617) | point snapped to the chyf stream network |
-
-**Table:** <output_schema>.all_barriers
-
-All structures used in the analysis, including those loaded from the CABD database, the gardient barriers table, and the new structures table. This table
-will contain all the updates applied to the structures and used in the modelling.  
-
-**Table:** <output_schema>.habitat_updates
-
-A copy of the habitat updates table that only includes the rows used for this model.
+### 'Functional' Upstream Length
+ * A barrier ‘resets’ the upstream length calculation when the barrier is a non-passable anthropogenic barrier.
+ 
 
 
 ## Processing
@@ -598,26 +454,31 @@ than repeating the traversal once per species/lifecycle combination in `reportin
     * For each species and lifestage (spawn, rear), number of impassable natural barriers upstream of the stream edge
     * For each species and lifestage (spawn, rear), number of impassable natural barriers downstream of the stream edge
 
-"impassable" (spawnrear) = passability_status_value < impassable_threshold for either lifestage,
+    "impassable" (spawnrear) = passability_status_value < impassable_threshold for either lifestage,
 where impassable_threshold is a model plan parameter (see model_plan_file.md), default 1.0 -- i.e.
 by default anything short of fully passable (0, or a fractional partial-passability value such as
 0.25) counts as impassable. "impassable" for a specific lifestage (spawn or rear) checks only that
 lifestage's passability_status_value against the same threshold, independent of the other
 lifestage's value.
 
-6. compute accessibility; Adds the following values to each stream network edge: For each species, the accessibility based on:
-    * If downstream natural spawn barrier count = 0 then NATURALLY ACCESSIBLE
+6. compute accessibility; Adds the following values to each stream network edge: For each species
+   and lifestage (spawn, rear), that lifestage's accessibility based on:
+    * If downstream natural <lifestage> barrier count = 0 then NATURALLY ACCESSIBLE
     * Else NATURALLY INACCESSIBLE
 
-    Only natural barriers that are impassable for the spawn lifestage count -- anthropogenic
-    barriers and rear-only impassability do not affect accessibility.
+    spawn_accessibility is driven by downstream_natural_spawn_count; rear_accessibility is driven
+    by downstream_natural_rear_count -- the two are computed independently of each other. Only
+    natural barriers count -- anthropogenic barriers never affect accessibility of either lifestage.
 
 7. Assign Habitat - This script computes habitat possibility for each stream network edge for each species/lifestage:
-   * (species accessibility = ‘NATURALLY ACCESSIBLE’)
+   * (species <lc>_accessibility = ‘NATURALLY ACCESSIBLE’)
  AND 
 (segment_gradient >= min_<lc>_gradient and segment_gradient < max_<lc>_gradient)
 AND
 (strahler_order >=  min_<lc>_strahler_order and strahler_order <  max_<lc>_strahler_order)
+
+   rear habitat gates on rear_accessibility, spawn habitat gates on spawn_accessibility -- each
+   lifestage's habitat assignment uses only its own accessibility value.
 
 8. Process Habitat Access - upddate the species accessiblity values with the data in the habitat_updates table.
     * For habitat updates with only up_points this will flag all upstream stream segments from that point along the mainstem as habitat (or not habitat) for the identified species and lifecycles.  
@@ -631,66 +492,30 @@ AND
     point -- this differs from how "upstream"/"downstream" are used elsewhere in Compute
     Statistics (steps 5, 9), which do walk the full branching network across all tributaries.
 
-9. Compute Barrier Upstream Values
-    * all length computations should use effective_length
-    * For each stream edge, for each reporting species, compute (internally -- not stored per
-      edge, only surfaced at each barrier's position, see below):
-      * Upstream accessible length - sum of all upstream edge lengths that are accessible or potentially accessible habitat
-      * Upstream <lifecycle> length - sum of all upstream edge lengths that are <lifecycle> habitat
-      * Functional upstream <lifecycle> length - sum of the upstream edge lengths between barriers that are <lifecycle> habitat
-      * Weighted upstream <lifecycle> length - sum of all upstream edge weighted lengths (see
-        `weighted_length` below, already degraded by each edge's own nearest downstream barrier)
-        that are <lifecycle> habitat
-      * Functional weighted upstream <lifecycle> length - sum of the upstream weighted edge lengths
-        (same degraded `weighted_length` values) between barriers that are <lifecycle> habitat
+9. Compute Stream Length
 
-    * For each barrier and each species compute:
-      * Number of impassable upstream anthropogenic barriers (spawnrear)
-      * Number of impassable upstream natural barriers (spawnrear)
-      * Number of impassable downstream anthropogenic barriers (spawnrear)
-      * Number of impassable downstream natural barriers (spawnrear)
-      * The id’s of the impassable downstream natural barriers
-      * The id’s of the impassable downstream anthropogenic barriers
-      * For each lifestage (spawn, rear): number of impassable upstream anthropogenic barriers
-      * For each lifestage (spawn, rear): number of impassable upstream natural barriers
-      * For each lifestage (spawn, rear): number of impassable downstream anthropogenic barriers
-      * For each lifestage (spawn, rear): number of impassable downstream natural barriers
-      * The upstream accessible length and per-lifecycle upstream/functional upstream/weighted
-        upstream/functional weighted upstream length values above, read at the barrier's own
-        snapped edge, taken as-is (unlike the barrier counts above, there is no subtraction of the
-        barrier's own edge from the length figures)
+    Each stream edge will have the following length fields added:
 
-    * Weighted length - computed based on the species, lifecycle and stream order as specified in the stream parameter file. Only computed for the spawn/rear lifecycles -- not computed for spawnrear.
+    * **Length** - raw length in meters of the edge segment
+    * **Effective Length** - raw length, except skeleton edges that are not associated with the
+  longest mainstem in their waterbody (connector skeleton edges don't contribute to total
+  length calculations)
+    * **\<species\> \<lifestage\> Weighted Length**
+      * if the edge is not `<lifecycle>` habitat for the species (`<lifecycle>_habitat = false`) then `weighted_length = 0`
+      * if the edge's own-lifestage accessibility (`spawn_accessibility` for the spawn `weighted_length`, `rear_accessibility` for the rear `weighted_length`) is not `naturally accessible` then `weighted_length = 0`
+      * Otherwise,  `effective_length * weight[lifestage][strahler_order] *
+        downstream_first_anthropogenic_not_passability_barrier[species][lifestage]`
+      * Notes:
+        * only spawning and rearing are computed as lifestages here, NOT the combined
+    `spawnrear` lifestage
+        * `downstream_first_anthropogenic_not_passability_barrier` is that qualifying barrier's raw `species_passability_value` for the given species/lifestage -- e.g. if th  nearest downstream qualifying barrier has a passability of 0.25 for a species/lifestage, that edge's weighted length gets a 0.25 multiplier, regardless of any barriers further downstream.
+        * If multiple qualifying (anthropogenic, passability < 1) barriers are snapped to the same  location, their raw values combine by product for that location, same as step 5's per-location stacking convention -- natural barriers and fully-passable anthropogenic barriers at that same location are excluded from the product.
+        * An edge with no qualifying downstream barrier at all gets a multiplier of 1.0 (no degradation).
+        * A missing species_lifestage key on a barrier is treated as 0.0 (full barrier), consistent with step 5's "missing = full barrier" convention -- it always qualifies as passability < 1.
+        * This value (not itself an upstream aggregate) is stored per stream edge and feeds the weighted upstream \<lifecycle\> length / functional weighted upstream \<lifecycle\> length aggregates for barriers
 
-      Formula: `weighted_length = length * weight[lifecycle][strahler_order]`, where
-      `weight["spawn"][1]`/`weight["spawn"][2]` come from the species parameter file's
-      `stream_order_1_spawning_weight`/`stream_order_2_spawning_weight`,
-      `weight["rear"][1]`/`weight["rear"][2]` come from `stream_order_1_rearing_weight`/
-      `stream_order_2_rearing_weight` (see docs/fish_species_parameter_file.md), and
-      `weight[lifecycle][n] = 1.0` (no downweighting) for every `strahler_order >= 3`, since the
-      parameter file documents no weight beyond order 2. There is no `weight["spawnrear"]` --
-      "spawnrear" is a union of rear/spawn habitat rather than its own habitat purpose, and has no
-      dedicated weight field, so weighted length is not computed for it.
+10. Compute Stream and Barrier output Statistics
 
-      This per-edge weighted length is further degraded by the passability of the nearest ("first")
-      barrier downstream of the edge, of any structure type (natural or anthropogenic -- not
-      anthropogenic-only): `weighted_length = effective_length * weight[lifestage][strahler_order] *
-      downstream_first_barrier_passability[species][lifestage]`, where
-      `downstream_first_barrier_passability` is that barrier's raw (not threshold-based)
-      `species_passability_value` for the given species/lifestage -- e.g. if the nearest downstream
-      barrier has a passability of 0.25 for a species/lifestage, that edge's weighted length gets a
-      0.25 multiplier, regardless of any barriers further downstream. If multiple barriers are
-      snapped to that nearest location, their raw values combine by product for that location, same
-      as step 5's per-location stacking convention. An edge with no downstream barrier at all gets a
-      multiplier of 1.0 (no degradation). A missing species_lifestage key on a barrier is treated as
-      0.0 (full barrier), consistent with step 5's "missing = full barrier" convention. This is a
-      per-edge value (not masked to habitat edges, and not itself an upstream aggregate) -- it is
-      stored per stream edge (see the streams Outputs entry above) as well as surfaced at each
-      barrier's position (see the natural_barriers/anthropogenic_barriers Outputs entries), and also
-      feeds the Weighted upstream <lifecycle> length / Functional weighted upstream <lifecycle>
-      length aggregates above (habitat-masked).
-
-     * Functional Values: A barrier ‘resets’ the upstream length calculation.
 
 ## Outstanding Decisions
 

@@ -96,12 +96,16 @@ class FetchBundleEdgesTests(unittest.TestCase):
 
 class FetchBundleBarriersTests(unittest.TestCase):
 	def test_groups_by_graph_id(self):
-		cursor = FakeCursor(fetch_results=[[(5, "b1", "e1", {"es_rear": 0}, "natural")]])
+		cursor = FakeCursor(fetch_results=[[(5, "b1", "e1", "e0", {"es_rear": 0}, "natural")]])
 		result = gc.fetch_bundle_barriers(cursor, "model_test", [5, 6])
 		self.assertEqual(result, {
-			5: [{"id": "b1", "edge_id": "e1", "species_passability_value": {"es_rear": 0}, "structure_type": "natural"}],
+			5: [{
+				"id": "b1", "edge_id": "e1", "upstream_edge_id": "e0",
+				"species_passability_value": {"es_rear": 0}, "structure_type": "natural",
+			}],
 		})
 		sql, params = cursor.executed[0]
+		self.assertIn("s.upstream_edge_id", sql)
 		self.assertIn("WHERE e.graph_id = ANY(%s)", sql)
 		self.assertEqual(params, ([5, 6],))
 
@@ -192,7 +196,7 @@ class AssembleEdgeJsonTests(unittest.TestCase):
 	def test_species_stats_shape(self):
 		edge_ids = ["E1"]
 		reporting = [("es", "rear"), ("es", "spawnrear")]
-		accessibility = {"es": {"E1": "naturally_accessible"}}
+		accessibility = {"es": {"spawn": {"E1": "naturally_accessible"}, "rear": {"E1": "naturally_inaccessible"}}}
 		barrier_stats = {"es": {
 			"upstream_anthro_spawnrear_count": {"E1": 0}, "downstream_anthro_spawnrear_count": {"E1": 0},
 			"upstream_anthro_spawn_count": {"E1": 0}, "upstream_anthro_rear_count": {"E1": 0},
@@ -200,16 +204,19 @@ class AssembleEdgeJsonTests(unittest.TestCase):
 			"upstream_natural_spawnrear_count": {"E1": 0}, "downstream_natural_spawnrear_count": {"E1": 0},
 			"upstream_natural_spawn_count": {"E1": 0}, "upstream_natural_rear_count": {"E1": 0},
 			"downstream_natural_spawn_count": {"E1": 0}, "downstream_natural_rear_count": {"E1": 0},
-			"upstream_anthro_ids": {"E1": []}, "downstream_anthro_ids": {"E1": []},
+			"upstream_anthro_spawn_ids": {"E1": []}, "upstream_anthro_rear_ids": {"E1": []},
+			"downstream_anthro_spawn_ids": {"E1": []}, "downstream_anthro_rear_ids": {"E1": []},
 		}}
 		habitat = {"es": {"rear": {"E1": True}, "spawn": {"E1": False}, "spawnrear": {"E1": True}}}
 		species_length_stats = {"es": {"rear_weighted_length": {"E1": 3.5}}}
 
 		species_stats = gc.assemble_edge_json(edge_ids, reporting, accessibility, barrier_stats, habitat, species_length_stats)
-		self.assertEqual(species_stats["E1"]["es"]["accessibility"], "naturally_accessible")
+		self.assertEqual(species_stats["E1"]["es"]["spawn_accessibility"], "naturally_accessible")
+		self.assertEqual(species_stats["E1"]["es"]["rear_accessibility"], "naturally_inaccessible")
 		self.assertTrue(species_stats["E1"]["es"]["rear_habitat"])
 		self.assertNotIn("rear_upstream_length", species_stats["E1"]["es"])
-		self.assertNotIn("upstream_accessible_length", species_stats["E1"]["es"])
+		self.assertNotIn("spawn_upstream_accessible_length", species_stats["E1"]["es"])
+		self.assertNotIn("rear_upstream_accessible_length", species_stats["E1"]["es"])
 		# "rear" was requested (reporting includes ("es", "rear")), so its weighted_length is written...
 		self.assertEqual(species_stats["E1"]["es"]["rear_weighted_length"], 3.5)
 		# ...but "spawn" was never requested, so no spawn_weighted_length is written (and
@@ -254,9 +261,14 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		self.assertEqual(route_measures["E1"], (8.0, 18.0))
 		self.assertEqual(route_measures["E2"], (0.0, 20.0))  # tributary mainstem, resets at its own mouth
 
-	def test_natural_spawn_barrier_blocks_upstream_accessibility(self):
+	def test_natural_spawn_barrier_blocks_upstream_spawn_accessibility_only(self):
 		plan, species_params = self._plan_and_species_params()
-		barriers = [{"id": "b1", "edge_id": "E3", "species_passability_value": {"es_rear": 1, "es_spawn": 0}, "structure_type": "natural"}]
+		# edge_id="E3" sits at the E1/E2 confluence, so upstream_edge_id is ambiguous/None here
+		# (see network_break.py's marker-attachment convention).
+		barriers = [{
+			"id": "b1", "edge_id": "E3", "upstream_edge_id": None,
+			"species_passability_value": {"es_rear": 1, "es_spawn": 0}, "structure_type": "natural",
+		}]
 
 		species_stats, barrier_rows, _route_measures = gc.process_component(
 			1, self._edges(), barriers, [], plan, species_params,
@@ -266,8 +278,193 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		self.assertEqual(barrier_rows[0]["id"], "b1")
 		self.assertIn("es", barrier_rows[0]["stats"])
 		self.assertIn("rear_upstream_length", barrier_rows[0]["stats"]["es"])
-		self.assertIn("upstream_accessible_length", barrier_rows[0]["stats"]["es"])
-		self.assertEqual(species_stats["E1"]["es"]["accessibility"], "naturally_inaccessible")
+		self.assertIn("spawn_upstream_accessible_length", barrier_rows[0]["stats"]["es"])
+		self.assertIn("rear_upstream_accessible_length", barrier_rows[0]["stats"]["es"])
+		# spawn-impassable natural barrier flips spawn_accessibility upstream of it...
+		self.assertEqual(species_stats["E1"]["es"]["spawn_accessibility"], "naturally_inaccessible")
+		# ...but rear_accessibility is unaffected, since this barrier is fully passable for rear
+		self.assertEqual(species_stats["E1"]["es"]["rear_accessibility"], "naturally_accessible")
+
+	def test_natural_rear_barrier_blocks_upstream_rear_accessibility_only(self):
+		plan, species_params = self._plan_and_species_params()
+		barriers = [{"id": "b1", "edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 1}, "structure_type": "natural"}]
+
+		species_stats, _barrier_rows, _route_measures = gc.process_component(
+			1, self._edges(), barriers, [], plan, species_params,
+		)
+
+		# rear-impassable natural barrier flips rear_accessibility upstream of it...
+		self.assertEqual(species_stats["E1"]["es"]["rear_accessibility"], "naturally_inaccessible")
+		# ...but spawn_accessibility is unaffected, since this barrier is fully passable for spawn
+		self.assertEqual(species_stats["E1"]["es"]["spawn_accessibility"], "naturally_accessible")
+
+
+class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
+	"""Branching network: (E1,E2)->E5, (E3,E4)->E6, (E5,E6)->E7->E8->E9 (outlet). E1/E2 are order-1
+	tributary pairs, E5/E6 order-2, E7/E8/E9 an order-3 mainstem chain. E1's gradient is too steep
+	for both rear and spawn habitat; E2's is too steep for rear only. Two anthropogenic dams: B1 at
+	the E7/E8 boundary (edge_id="E8", upstream_edge_id="E7"), B2 at the E8/E9 boundary
+	(edge_id="E9", upstream_edge_id="E8"). Exercises gradient-driven habitat exclusion, order 1/2
+	downweighting, and downstream-first-barrier degradation together in one component."""
+
+	def _edges(self):
+		fields = ("id", "from_nexus_id", "to_nexus_id", "mainstem_id", "length", "effective_length", "segment_gradient", "strahler_order")
+		rows = [
+			("E1", "N1", "N7", "M1", 100.0, 100.0, 9.0, 1),
+			("E2", "N2", "N7", "M1", 100.0, 100.0, 6.0, 1),
+			("E3", "N3", "N8", "M1", 100.0, 100.0, 1.0, 1),
+			("E4", "N4", "N8", "M1", 100.0, 100.0, 1.0, 1),
+			("E5", "N7", "N10", "M1", 100.0, 100.0, 1.0, 2),
+			("E6", "N8", "N10", "M1", 100.0, 100.0, 1.0, 2),
+			("E7", "N10", "N11", "M1", 100.0, 100.0, 1.0, 3),
+			("E8", "N11", "N12", "M1", 100.0, 100.0, 1.0, 3),
+			("E9", "N12", "N13", "M1", 100.0, 100.0, 1.0, 3),
+		]
+		return [dict(zip(fields, row)) for row in rows]
+
+	def _barriers(self):
+		return [
+			{
+				"id": "b1", "edge_id": "E8", "upstream_edge_id": "E7",
+				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0}, "structure_type": "anthropogenic",
+			},
+			{
+				"id": "b2", "edge_id": "E9", "upstream_edge_id": "E8",
+				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0.25}, "structure_type": "anthropogenic",
+			},
+		]
+
+	def _plan_and_species_params(self):
+		plan = {
+			"reporting_species_lifecycles": [("es", "rear"), ("es", "spawn"), ("es", "spawnrear")],
+			"impassable_threshold": 1.0,
+		}
+		species_params = {"es": {
+			"rear_gradient_min": 0.0, "rear_gradient_max": 5.0,
+			"spawn_gradient_min": 0.0, "spawn_gradient_max": 8.0,
+			"strahler_order_rearing_min": 1, "strahler_order_rearing_max": 10,
+			"strahler_order_spawning_min": 1, "strahler_order_spawning_max": 10,
+			"stream_order_1_rearing_weight": 0.5, "stream_order_1_spawning_weight": 0.25,
+			"stream_order_2_rearing_weight": 0.75, "stream_order_2_spawning_weight": 0.25,
+		}}
+		return plan, species_params
+
+	def setUp(self):
+		plan, species_params = self._plan_and_species_params()
+		self.species_stats, barrier_rows, _route_measures = gc.process_component(
+			1, self._edges(), self._barriers(), [], plan, species_params,
+		)
+		self.barrier_rows_by_id = {b["id"]: b for b in barrier_rows}
+
+	def test_no_natural_barriers_so_every_edge_is_naturally_accessible(self):
+		for eid in ("E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9"):
+			self.assertEqual(self.species_stats[eid]["es"]["spawn_accessibility"], "naturally_accessible")
+			self.assertEqual(self.species_stats[eid]["es"]["rear_accessibility"], "naturally_accessible")
+
+	def test_gradient_drives_habitat_exclusions(self):
+		expected = {
+			"E1": (False, False, False),
+			"E2": (False, True, True),
+			"E3": (True, True, True),
+			"E4": (True, True, True),
+			"E5": (True, True, True),
+			"E6": (True, True, True),
+			"E7": (True, True, True),
+			"E8": (True, True, True),
+			"E9": (True, True, True),
+		}
+		for eid, (rear, spawn, spawnrear) in expected.items():
+			stats = self.species_stats[eid]["es"]
+			self.assertEqual(stats["rear_habitat"], rear, eid)
+			self.assertEqual(stats["spawn_habitat"], spawn, eid)
+			self.assertEqual(stats["spawnrear_habitat"], spawnrear, eid)
+
+	def test_weighted_length_reflects_order_downweight_and_nearest_barrier(self):
+		expected = {
+			"E1": (0.0, 0.0),
+			"E2": (0.0, 12.5),
+			"E3": (0.0, 12.5),
+			"E4": (0.0, 12.5),
+			"E5": (0.0, 12.5),
+			"E6": (0.0, 12.5),
+			"E7": (0.0, 50.0),
+			"E8": (25.0, 50.0),
+			"E9": (100.0, 100.0),
+		}
+		for eid, (rear_weighted, spawn_weighted) in expected.items():
+			stats = self.species_stats[eid]["es"]
+			self.assertEqual(stats["rear_weighted_length"], rear_weighted, eid)
+			self.assertEqual(stats["spawn_weighted_length"], spawn_weighted, eid)
+
+	def test_barrier_b1_stats_read_at_its_upstream_edge_e7(self):
+		stats = self.barrier_rows_by_id["b1"]["stats"]["es"]
+
+		self.assertEqual(stats["upstream_anthro_spawn_count"], 0)
+		self.assertEqual(stats["upstream_anthro_rear_count"], 0)
+		self.assertEqual(stats["upstream_anthro_spawnrear_count"], 0)
+		self.assertEqual(stats["downstream_anthro_spawn_count"], 1)
+		self.assertEqual(stats["downstream_anthro_rear_count"], 1)
+		self.assertEqual(stats["downstream_anthro_spawnrear_count"], 1)
+		self.assertEqual(stats["upstream_natural_spawn_count"], 0)
+		self.assertEqual(stats["upstream_natural_rear_count"], 0)
+		self.assertEqual(stats["upstream_natural_spawnrear_count"], 0)
+		self.assertEqual(stats["downstream_natural_spawn_count"], 0)
+		self.assertEqual(stats["downstream_natural_rear_count"], 0)
+		self.assertEqual(stats["downstream_natural_spawnrear_count"], 0)
+		self.assertEqual(stats["downstream_anthro_spawn_ids"], ["b2"])
+		self.assertEqual(stats["downstream_anthro_rear_ids"], ["b2"])
+		self.assertEqual(stats["downstream_natural_spawn_ids"], [])
+		self.assertEqual(stats["downstream_natural_rear_ids"], [])
+
+		self.assertEqual(stats["spawn_upstream_accessible_length"], 700.0)
+		self.assertEqual(stats["rear_upstream_accessible_length"], 700.0)
+		self.assertEqual(stats["rear_upstream_length"], 500.0)
+		self.assertEqual(stats["rear_functional_upstream_length"], 500.0)
+		self.assertEqual(stats["rear_weighted_upstream_length"], 0.0)
+		self.assertEqual(stats["rear_functional_weighted_upstream_length"], 0.0)
+		self.assertEqual(stats["spawn_upstream_length"], 600.0)
+		self.assertEqual(stats["spawn_functional_upstream_length"], 600.0)
+		self.assertEqual(stats["spawn_weighted_upstream_length"], 112.5)
+		self.assertEqual(stats["spawn_functional_weighted_upstream_length"], 112.5)
+		self.assertEqual(stats["spawnrear_upstream_length"], 600.0)
+		self.assertEqual(stats["spawnrear_functional_upstream_length"], 600.0)
+		self.assertEqual(stats["spawnrear_weighted_upstream_length"], 112.5)
+		self.assertEqual(stats["spawnrear_functional_weighted_upstream_length"], 112.5)
+
+	def test_barrier_b2_stats_read_at_its_upstream_edge_e8(self):
+		stats = self.barrier_rows_by_id["b2"]["stats"]["es"]
+
+		self.assertEqual(stats["upstream_anthro_spawn_count"], 1)
+		self.assertEqual(stats["upstream_anthro_rear_count"], 1)
+		self.assertEqual(stats["upstream_anthro_spawnrear_count"], 1)
+		self.assertEqual(stats["downstream_anthro_spawn_count"], 0)
+		self.assertEqual(stats["downstream_anthro_rear_count"], 0)
+		self.assertEqual(stats["downstream_anthro_spawnrear_count"], 0)
+		self.assertEqual(stats["upstream_natural_spawn_count"], 0)
+		self.assertEqual(stats["upstream_natural_rear_count"], 0)
+		self.assertEqual(stats["upstream_natural_spawnrear_count"], 0)
+		self.assertEqual(stats["downstream_natural_spawn_count"], 0)
+		self.assertEqual(stats["downstream_natural_rear_count"], 0)
+		self.assertEqual(stats["downstream_natural_spawnrear_count"], 0)
+		self.assertEqual(stats["downstream_anthro_spawn_ids"], [])
+		self.assertEqual(stats["downstream_anthro_rear_ids"], [])
+		self.assertEqual(stats["downstream_natural_spawn_ids"], [])
+		self.assertEqual(stats["downstream_natural_rear_ids"], [])
+
+		self.assertEqual(stats["spawn_upstream_accessible_length"], 800.0)
+		self.assertEqual(stats["rear_upstream_accessible_length"], 800.0)
+		self.assertEqual(stats["rear_upstream_length"], 600.0)
+		self.assertEqual(stats["rear_functional_upstream_length"], 100.0)
+		self.assertEqual(stats["rear_weighted_upstream_length"], 25.0)
+		self.assertEqual(stats["rear_functional_weighted_upstream_length"], 25.0)
+		self.assertEqual(stats["spawn_upstream_length"], 700.0)
+		self.assertEqual(stats["spawn_functional_upstream_length"], 100.0)
+		self.assertEqual(stats["spawn_weighted_upstream_length"], 162.5)
+		self.assertEqual(stats["spawn_functional_weighted_upstream_length"], 50.0)
+		self.assertEqual(stats["spawnrear_upstream_length"], 700.0)
+		self.assertEqual(stats["spawnrear_functional_upstream_length"], 100.0)
+		self.assertEqual(stats["spawnrear_weighted_upstream_length"], 162.5)
+		self.assertEqual(stats["spawnrear_functional_weighted_upstream_length"], 50.0)
 
 
 if __name__ == "__main__":

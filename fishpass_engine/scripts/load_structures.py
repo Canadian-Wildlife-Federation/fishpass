@@ -1,4 +1,4 @@
-"""Load Structures phase (fishpass/requirements/requirements.md Load Structures, steps 1-4,
+"""Load Structures phase (fishpass/docs/fishpass_docs.md Load Structures, steps 1-4,
 6-7). Step 5 (snap to the CHyF network) is implemented separately in snap_structures.py.
 
 Design note / deviation from the literal requirements.md wording: requirements.md describes

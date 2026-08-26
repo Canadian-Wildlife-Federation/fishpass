@@ -1,4 +1,4 @@
-"""Postprocess phase (fishpass/requirements/requirements.md's Outputs section): create the
+"""Postprocess phase (fishpass/docs/fishpass_docs.md's Outputs section): create the
 reporting views over <output_schema>.all_barriers/streams once Compute Statistics has
 populated species_stats -- natural_barriers/anthropogenic_barriers/unsnapped_structures/
 natural_barriers_<species>/anthropogenic_barriers_<species> (views over all_barriers, the latter
@@ -46,7 +46,11 @@ BARRIER_STAT_FIELDS = (
 	"downstream_natural_spawnrear_count", "downstream_natural_spawn_count", "downstream_natural_rear_count",
 	"downstream_anthro_spawnrear_count", "downstream_anthro_spawn_count", "downstream_anthro_rear_count",
 )
-BARRIER_STAT_ID_FIELDS = ("downstream_natural_ids", "downstream_anthro_ids")
+BARRIER_STAT_ID_FIELDS = (
+	"downstream_natural_spawn_ids", "downstream_natural_rear_ids",
+	"downstream_anthro_spawn_ids", "downstream_anthro_rear_ids",
+	"upstream_anthro_spawn_ids", "upstream_anthro_rear_ids",
+)
 
 
 def create_species_barrier_views(cursor, output_schema, reporting_species_lifecycles):
@@ -68,10 +72,10 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'{field}'))::uuid[] AS {field}"
 			for field in BARRIER_STAT_ID_FIELDS
 		]
-		columns.append(f"({stats}->>'upstream_accessible_length')::double precision AS upstream_accessible_length")
+		columns.append(f"({stats}->>'spawn_upstream_accessible_length')::double precision AS spawn_upstream_accessible_length")
+		columns.append(f"({stats}->>'rear_upstream_accessible_length')::double precision AS rear_upstream_accessible_length")
 		for lc in sorted(lifecycles):
-			fields = SPECIES_LIFECYCLE_FIELDS if lc == "spawnrear" else SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS
-			for field in fields:
+			for field in SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS:
 				column_name = f"{lc}_{field}"
 				columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
 		column_sql = ",\n\t\t\t".join(columns)
@@ -80,7 +84,10 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			view_ident = quote_ident(f"{table_prefix}_{species}")
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
-				SELECT id, feature_id, feature_type, species_passability_value, geometry, snapped_geometry,
+				SELECT id, feature_id, feature_type,
+				(species_passability_value->>'{species}_spawn')::double precision AS passability_status_spawn,
+				(species_passability_value->>'{species}_rear')::double precision AS passability_status_rear,
+				geometry, snapped_geometry,
 				{column_sql}
 				FROM {schema_ident}.all_barriers
 				WHERE structure_type = '{structure_type}' AND species_stats IS NOT NULL
@@ -113,7 +120,8 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 
 		stats = f"species_stats->'{species}'"
 		columns = [
-			f"({stats}->>'accessibility') AS accessibility",
+			f"({stats}->>'spawn_accessibility') AS spawn_accessibility",
+			f"({stats}->>'rear_accessibility') AS rear_accessibility",
 			f"({stats}->>'upstream_anthro_spawnrear_count')::int AS upstream_anthro_spawnrear_count",
 			f"({stats}->>'upstream_anthro_spawn_count')::int AS upstream_anthro_spawn_count",
 			f"({stats}->>'upstream_anthro_rear_count')::int AS upstream_anthro_rear_count",
@@ -126,8 +134,10 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 			f"({stats}->>'downstream_natural_spawnrear_count')::int AS downstream_natural_spawnrear_count",
 			f"({stats}->>'downstream_natural_spawn_count')::int AS downstream_natural_spawn_count",
 			f"({stats}->>'downstream_natural_rear_count')::int AS downstream_natural_rear_count",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_ids'))::uuid[] AS upstream_anthro_ids",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_ids'))::uuid[] AS downstream_anthro_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_spawn_ids'))::uuid[] AS upstream_anthro_spawn_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_rear_ids'))::uuid[] AS upstream_anthro_rear_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_spawn_ids'))::uuid[] AS downstream_anthro_spawn_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_rear_ids'))::uuid[] AS downstream_anthro_rear_ids",
 			f"({stats}->>'rear_habitat')::boolean AS rear_habitat",
 			f"({stats}->>'spawn_habitat')::boolean AS spawn_habitat",
 			f"({stats}->>'spawnrear_habitat')::boolean AS spawnrear_habitat",

@@ -1,4 +1,4 @@
-"""Process Habitat phase (fishpass/requirements/requirements.md Process Habitat, steps 1-2).
+"""Process Habitat phase (fishpass/docs/fishpass_docs.md Process Habitat, steps 1-2).
 
 Step 2's per-point resolution has two cases -- a specific chyf_<end>_edge_id, or no edge id (use
 the nearest streams edge instead) -- that otherwise share the same resolution logic: project the

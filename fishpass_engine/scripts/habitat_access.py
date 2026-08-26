@@ -1,4 +1,4 @@
-"""Compute Statistics step 8 (fishpass/requirements/requirements.md): override species/lifecycle
+"""Compute Statistics step 8 (fishpass/docs/fishpass_docs.md): override species/lifecycle
 habitat flags from <output_schema>.habitat_updates.
 
 Per your decision recorded in requirements.md, "along the mainstem" is literal: flagging walks
