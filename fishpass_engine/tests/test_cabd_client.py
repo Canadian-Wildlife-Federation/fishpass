@@ -40,7 +40,7 @@ class FetchFeatureTypeTests(unittest.TestCase):
 		session = FakeSession([[{"id": 1}, {"id": 2}]])
 		features = list(cc.fetch_feature_type("dams", ["AOI1", "AOI2"], session=session))
 		self.assertEqual(features, [{"id": 1}, {"id": 2}])
-		self.assertIn("features/dams/", session.urls[0])
+		self.assertIn("features/dams", session.urls[0])
 		self.assertIn("nhn_watershed_id:in:AOI1;AOI2", session.urls[0])
 
 	def test_chunks_by_chunk_size(self):

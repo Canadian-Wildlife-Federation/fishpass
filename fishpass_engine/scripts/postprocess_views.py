@@ -1,6 +1,6 @@
-"""Postprocess phase (fishpass/requirements/requirements.md's Outputs section): create the
+"""Postprocess phase (fishpass/docs/fishpass_docs.md's Outputs section): create the
 reporting views over <output_schema>.all_barriers/streams once Compute Statistics has
-populated species_stats -- natural_barriers/anthropogenic_barriers/unsnapped_structures/
+populated species_stats -- natural_barriers/anthropogenic_barriers/unsnapped_barriers/
 natural_barriers_<species>/anthropogenic_barriers_<species> (views over all_barriers, the latter
 pair with that species' species_stats fields -- including upstream length -- exploded to columns)
 and streams_<species> (view over streams, with species_stats exploded to columns).
@@ -46,7 +46,11 @@ BARRIER_STAT_FIELDS = (
 	"downstream_natural_spawnrear_count", "downstream_natural_spawn_count", "downstream_natural_rear_count",
 	"downstream_anthro_spawnrear_count", "downstream_anthro_spawn_count", "downstream_anthro_rear_count",
 )
-BARRIER_STAT_ID_FIELDS = ("downstream_natural_ids", "downstream_anthro_ids")
+BARRIER_STAT_ID_FIELDS = (
+	"downstream_natural_spawn_ids", "downstream_natural_rear_ids",
+	"downstream_anthro_spawn_ids", "downstream_anthro_rear_ids",
+	"upstream_anthro_spawn_ids", "upstream_anthro_rear_ids",
+)
 
 
 def create_species_barrier_views(cursor, output_schema, reporting_species_lifecycles):
@@ -68,10 +72,10 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'{field}'))::uuid[] AS {field}"
 			for field in BARRIER_STAT_ID_FIELDS
 		]
-		columns.append(f"({stats}->>'upstream_accessible_length')::double precision AS upstream_accessible_length")
+		columns.append(f"({stats}->>'spawn_upstream_accessible_length')::double precision AS spawn_upstream_accessible_length")
+		columns.append(f"({stats}->>'rear_upstream_accessible_length')::double precision AS rear_upstream_accessible_length")
 		for lc in sorted(lifecycles):
-			fields = SPECIES_LIFECYCLE_FIELDS if lc == "spawnrear" else SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS
-			for field in fields:
+			for field in SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS:
 				column_name = f"{lc}_{field}"
 				columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
 		column_sql = ",\n\t\t\t".join(columns)
@@ -80,20 +84,23 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			view_ident = quote_ident(f"{table_prefix}_{species}")
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
-				SELECT id, feature_id, feature_type, species_passability_value, geometry, snapped_geometry,
+				SELECT id, feature_id, feature_type,
+				(species_passability_value->>'{species}_spawn')::double precision AS passability_status_spawn,
+				(species_passability_value->>'{species}_rear')::double precision AS passability_status_rear,
+				geometry, snapped_geometry,
 				{column_sql}
 				FROM {schema_ident}.all_barriers
 				WHERE structure_type = '{structure_type}' AND species_stats IS NOT NULL
 			""")
 
 
-def create_unsnapped_structures_view(cursor, output_schema):
-	"""unsnapped_structures as a view over all_barriers, restricted to rows that never
+def create_unsnapped_barriers_view(cursor, output_schema):
+	"""unsnapped_barriers as a view over all_barriers, restricted to rows that never
 	snapped onto the stream network (snapped_geometry IS NULL -- see snap_structures.py)."""
 
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"""
-		CREATE VIEW {schema_ident}.unsnapped_structures AS
+		CREATE VIEW {schema_ident}.unsnapped_barriers AS
 		SELECT id, feature_id, feature_type, species_passability_value, source, structure_type, geometry
 		FROM {schema_ident}.all_barriers
 		WHERE snapped_geometry IS NULL
@@ -113,7 +120,8 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 
 		stats = f"species_stats->'{species}'"
 		columns = [
-			f"({stats}->>'accessibility') AS accessibility",
+			f"({stats}->>'spawn_accessibility') AS spawn_accessibility",
+			f"({stats}->>'rear_accessibility') AS rear_accessibility",
 			f"({stats}->>'upstream_anthro_spawnrear_count')::int AS upstream_anthro_spawnrear_count",
 			f"({stats}->>'upstream_anthro_spawn_count')::int AS upstream_anthro_spawn_count",
 			f"({stats}->>'upstream_anthro_rear_count')::int AS upstream_anthro_rear_count",
@@ -126,8 +134,10 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 			f"({stats}->>'downstream_natural_spawnrear_count')::int AS downstream_natural_spawnrear_count",
 			f"({stats}->>'downstream_natural_spawn_count')::int AS downstream_natural_spawn_count",
 			f"({stats}->>'downstream_natural_rear_count')::int AS downstream_natural_rear_count",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_ids'))::uuid[] AS upstream_anthro_ids",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_ids'))::uuid[] AS downstream_anthro_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_spawn_ids'))::uuid[] AS upstream_anthro_spawn_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_rear_ids'))::uuid[] AS upstream_anthro_rear_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_spawn_ids'))::uuid[] AS downstream_anthro_spawn_ids",
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_rear_ids'))::uuid[] AS downstream_anthro_rear_ids",
 			f"({stats}->>'rear_habitat')::boolean AS rear_habitat",
 			f"({stats}->>'spawn_habitat')::boolean AS spawn_habitat",
 			f"({stats}->>'spawnrear_habitat')::boolean AS spawnrear_habitat",
@@ -150,15 +160,15 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 
 def create_barrier_views(conn, cursor, plan):
 	"""Postprocess phase entry point: create the reporting views over all_barriers/streams
-	(requirements.md's Outputs section) once Compute Statistics has populated species_stats."""
+	(the Outputs section) once Compute Statistics has populated species_stats."""
 
 	output_schema = plan["output_schema"]
 
 	create_natural_anthropogenic_views(cursor, output_schema)
 	create_species_barrier_views(cursor, output_schema, plan["reporting_species_lifecycles"])
-	create_unsnapped_structures_view(cursor, output_schema)
+	create_unsnapped_barriers_view(cursor, output_schema)
 	conn.commit()
-	print("natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_structures: done.")
+	print("natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_barriers: done.")
 
 	create_species_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	conn.commit()

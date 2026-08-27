@@ -52,12 +52,12 @@ class WriteBarrierStatTablesTests(unittest.TestCase):
 
 	def test_stats_includes_upstream_length_fields(self):
 		cursor = FakeCursor()
-		rows = [{"id": "b1", "stats": {"es": {"upstream_accessible_length": 35.0, "rear_upstream_length": 35.0}}}]
+		rows = [{"id": "b1", "stats": {"es": {"spawn_upstream_accessible_length": 30.0, "rear_upstream_accessible_length": 35.0, "rear_upstream_length": 35.0}}}]
 		bt.write_barrier_stat_tables(cursor, "model_test", rows)
 		_sql, params = cursor.executemany_calls[0]
 		self.assertEqual(
 			params,
-			[(json.dumps({"es": {"upstream_accessible_length": 35.0, "rear_upstream_length": 35.0}}, default=str), "b1")],
+			[(json.dumps({"es": {"spawn_upstream_accessible_length": 30.0, "rear_upstream_accessible_length": 35.0, "rear_upstream_length": 35.0}}, default=str), "b1")],
 		)
 
 class CreateAndPopulateGradientBarriersCacheTests(unittest.TestCase):

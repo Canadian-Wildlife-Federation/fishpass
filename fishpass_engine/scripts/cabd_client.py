@@ -1,4 +1,4 @@
-"""Client for the CABD Barrier API (fishpass/requirements/requirements.md's "CABD Barrier API"
+"""Client for the CABD Barrier API (fishpass/docs/fishpass_docs.md's "CABD Barrier API"
 section).
 """
 
@@ -7,24 +7,24 @@ import sys
 import requests
 
 CABD_BASE_URL = "https://cabd-web.azurewebsites.net/cabd-api/"
-RESULT_CAP = 50_000  # confirmed API limit -- see requirements.md
+RESULT_CAP = 50_000  # confirmed API limit
 DEFAULT_CHUNK_SIZE = 25  # work units per request, kept comfortably under the 50,000 cap
 REQUEST_TIMEOUT_S = 120
 
-# requirements.md Load Structures step 2: passability_status_code -> 0/1 passability value.
+# Load Structures step 2: passability_status_code -> 0/1 passability value.
 PASSABILITY_CODE_MAP = {
 	1: 0,  # Barrier
 	2: 0,  # Partial Barrier
 	3: 1,  # Passable
 	4: 0,  # Unknown
-	5: 1,  # NA - No Structure (this shouldn't exist as they should be excluded from the analysis)
+	5: 1,  # Should not exist - these are excluded from analysis
 	6: 1,  # NA - Decommissioned / Removed
 }
 
 
 def map_passability(status_code):
 	"""Map a CABD passability_status_code to a 0/1 passability value. A missing/unrecognized
-	code is treated the same as 4 (Unknown) -> 0 (impassable), the conservative default."""
+	code is treated as 0 (impassable)"""
 	if status_code is None:
 		return 0
 	return PASSABILITY_CODE_MAP.get(status_code, 0)
@@ -38,9 +38,9 @@ def _build_url(feature_type, short_names, base_url):
 def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_size=DEFAULT_CHUNK_SIZE, session=None):
 	"""Fetch every CABD feature of `feature_type` within the given chyf_raw.aoi.short_name
 	work units, chunking requests by work-unit subgroup to stay under the API's 50,000-feature
-	cap (requirements.md's "CABD Barrier API" section). A chunk response that hits the cap is
+	cap. A chunk response that hits the cap is
 	treated as a signal of truncation, not a complete result, and aborts the run rather than
-	silently returning partial data -- see requirements.md.
+	silently returning partial data.
 
 	Yields GeoJSON feature dicts one at a time, chunked by work-unit subgroup so each chunk's
 	response can be freed as soon as its features are consumed rather than holding every chunk's

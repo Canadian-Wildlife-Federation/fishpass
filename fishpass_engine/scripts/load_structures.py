@@ -1,14 +1,14 @@
-"""Load Structures phase (fishpass/requirements/requirements.md Load Structures, steps 1-4,
+"""Load Structures phase (fishpass/docs/fishpass_docs.md Load Structures, steps 1-4,
 6-7). Step 5 (snap to the CHyF network) is implemented separately in snap_structures.py.
 
-Design note / deviation from the literal requirements.md wording: requirements.md describes
+Design note / deviation from the literal spec wording: the requirements describe
 all_barriers as potentially having multiple rows per feature_id, merging/splitting rows as
 species share or diverge in passability value. This module instead keeps exactly one
 all_barriers row per feature_id, with species_passability_value holding the complete
 <species>_<lifestage> -> value map for that feature. This is query-equivalent (every downstream
 lookup is by species_lifestage jsonb key, which works identically either way) and much simpler
 to build/update correctly; flagged here in case the row-per-species-group shape turns out to
-matter for a reason not captured in requirements.md.
+matter for a reason not captured here.
 """
 
 import json
@@ -29,7 +29,7 @@ DEFAULT_CLASSIFICATION_CONFIG = REPO_ROOT / "config" / "fishpass.yaml"
 
 
 def load_natural_feature_types(config_path=DEFAULT_CLASSIFICATION_CONFIG):
-	"""requirements.md Classify Structures. Returns the set of feature_type values classified as
+	"""Classify Structures. Returns the set of feature_type values classified as
 	'natural' -- any feature_type not in this set is classified as 'anthropogenic' (see
 	classify_structures). See config/fishpass.yaml."""
 
@@ -138,7 +138,7 @@ def get_aoi_short_names(cursor, output_schema):
 
 def build_cabd_row(feature, target_species):
 	"""Return (cabd_id, species_passability_value_json, passability_status_code, lon, lat) for one
-	CABD GeoJSON feature, per requirements.md Load Structures step 2's field mapping."""
+	CABD GeoJSON feature, per Load Structures step 2's field mapping."""
 
 	props = feature["properties"]
 	cabd_id = props["cabd_id"]
@@ -273,7 +273,7 @@ def apply_structure_updates(cursor, output_schema, plan):
 	update_date) and folded into one map per feature_id in that order, so a later dict.update()
 	naturally wins over an earlier one for any species/lifestage key both touch -- giving
 	exactly the authoritative-then-local_override, earlier-then-later precedence
-	requirements.md specifies.
+	specified.
 
 	Species with no entry in a given row's passability_status_rear/_spawn are omitted from that
 	row's exploded map (see explode_structure_update), so the species_passability_value || %s::jsonb
