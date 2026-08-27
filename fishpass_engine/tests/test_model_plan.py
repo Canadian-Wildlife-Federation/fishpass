@@ -111,7 +111,7 @@ class LoadModelPlanTests(unittest.TestCase):
 
 	def test_gradient_barriers_opt_in(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(tmp, "myplan", extra_yaml="structure_types:\n  - dams\n  - gradient_barriers")
+			models_dir = write_plan(tmp, "myplan", extra_yaml="structure_types:\n  - dams\n  - gradients")
 			plan = mp.load_model_plan("myplan", models_dir=models_dir)
 		self.assertTrue(plan["include_gradient_barriers"])
 

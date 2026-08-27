@@ -1,4 +1,4 @@
-"""Load Structures step 5 (fishpass/requirements/requirements.md): snap
+"""Load Structures step 5 (fishpass/docs/fishpass_docs.md): snap
 <output_schema>.all_barriers to the <output_schema>.streams network.
 
 Candidate edge search (within structure_snap_edge_distance_m) uses PostGIS geography distance
@@ -58,8 +58,8 @@ def group_by_edge(matches):
 
 def write_snapped_geometries(cursor, output_schema, srid, all_results):
 	"""all_results: list of (structure_id, edge_id, x, y, z, m) across one or more edges.
-	snapped_geometry (for reporting) is stored in SNAPPED_GEOMETRY_SRID (4617, per
-	requirements.md), reprojected from the streams SRID. network_vertex_x/y store the same
+	snapped_geometry (for reporting) is stored in SNAPPED_GEOMETRY_SRID (4617),
+	reprojected from the streams SRID. network_vertex_x/y store the same
 	location in the streams table's native SRID (no reprojection), so Compute Statistics'
 	network-breaking step can match it against streams vertices exactly. downstream_edge_id
 	records which streams edge the structure landed on (network_break.py later splits that

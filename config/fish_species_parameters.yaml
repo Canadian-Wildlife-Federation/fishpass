@@ -1,9 +1,5 @@
 # Fish species parameters, as documented in docs/fish_species_parameter_file.md.
-# accessibility_gradient_spawning_max / accessibility_gradient_rearing_max are the only fields
-# used by gradient_barriers/scripts/compute_barriers.py; the rest support other FishPass process
-# steps and are kept here so this file matches the full documented schema.
-#
-# PLACEHOLDER VALUES -- replace with real per-species parameters before running in production.
+
 species:
   - code: as
     name: Atlantic Salmon

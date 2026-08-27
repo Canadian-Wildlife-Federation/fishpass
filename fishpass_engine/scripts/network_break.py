@@ -1,7 +1,6 @@
-"""Compute Statistics step 2 (fishpass/requirements/requirements.md): break the network at all
-barrier and habitat points.
+"""Break the network at all barrier and habitat points.
 
-Design: structure/habitat snapping (Load Structures step 5, Process Habitat step 2) already
+Design: structure/habitat snapping already
 inserted a real vertex into <output_schema>.streams' geometry at every barrier/habitat location
 that needed one -- so breaking never has to locate an arbitrary point along a line, only find
 which *existing* vertex of an edge a marker sits on, and split the edge's row there.

@@ -1,4 +1,4 @@
-"""Process Habitat phase (fishpass/requirements/requirements.md Process Habitat, steps 1-2).
+"""Process Habitat phase (fishpass/docs/fishpass_docs.md Process Habitat, steps 1-2).
 
 Step 2's per-point resolution has two cases -- a specific chyf_<end>_edge_id, or no edge id (use
 the nearest streams edge instead) -- that otherwise share the same resolution logic: project the
@@ -172,11 +172,11 @@ def resolve_point(cursor, output_schema, edge_cache, srid, xy, edge_distance_m, 
 	"""Resolve one habitat point (upstream or downstream role, `end`) to (edge_id, (x, y, z, m)).
 
 	If specific_edge_id is given, the point is projected onto that edge and must be within
-	edge_distance_m of the edge itself (not a specific vertex). Exits (per requirements.md) if the
+	edge_distance_m of the edge itself (not a specific vertex). Exits if the
 	edge doesn't exist or the point is too far from it.
 
 	Otherwise, searches for the nearest streams edge within edge_distance_m. Returns None
-	(meaning: this point is ignored, per requirements.md) if no edge is in range.
+	(meaning: this point is ignored) if no edge is in range.
 
 	Either way, once an edge and a projected point on it are known, the point snaps to an
 	existing vertex on that edge (within vertex_distance_m) or a new vertex is inserted.
@@ -206,7 +206,7 @@ def resolve_point(cursor, output_schema, edge_cache, srid, xy, edge_distance_m, 
 
 
 def points_for_role(location_type, coords, habitat_id):
-	"""Return [(end, xy), ...] to resolve for this row, per requirements.md's per-location_type
+	"""Return [(end, xy), ...] to resolve for this row, per the per-location_type
 	point-count rules (points[0] is always the upstream point, points[1] the downstream point,
 	for a 'between' row)."""
 

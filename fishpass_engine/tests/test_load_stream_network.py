@@ -84,7 +84,7 @@ class CopyStreamsTests(unittest.TestCase):
 		lsn.copy_streams(cursor, "model_test", ["id-a", "id-b"])
 		sql, params = cursor.executed[0]
 		self.assertIn('INSERT INTO "model_test".streams', sql)
-		self.assertIn("WHERE aoi_id = ANY(%s)", sql)
+		self.assertIn("WHERE aoi_id = ANY (%s)", sql)
 		self.assertEqual(params, (["id-a", "id-b"],))
 
 	def test_no_filter_when_aoi_ids_none(self):

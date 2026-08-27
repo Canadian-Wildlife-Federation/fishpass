@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run a FishPass model plan (fishpass/requirements/requirements.md).
+"""Run a FishPass model plan (fishpass/docs/fishpass_docs.md).
 
 Database connection details come from environment variables only (see README.md) -- never
 from the plan file and never logged.
 
 Status: all phases (Initialize, Load Stream Network, Load Structures, Process Habitat, Compute
-Statistics) are implemented. See requirements.md's "Outstanding Decisions" section for known
+Statistics) are implemented. See the "Outstanding Decisions" section for known
 gaps/assumptions (supports_species, AOI-boundary graph_id handling, and others) that haven't
 been validated against a real database run yet.
 """

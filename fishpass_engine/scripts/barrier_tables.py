@@ -1,6 +1,5 @@
-"""Populate the remaining Compute Statistics output tables (requirements.md's Outputs section):
-the cached <output_schema>.cabd_<feature_type> tables (one per plan structure_types entry), and
-<output_schema>.gradient_barriers.
+""" Writes the computed barriers statistic to the all_barriers table. Creates the cached
+version of the gradient barrers (if required).
 """
 
 import json
@@ -13,13 +12,9 @@ from model_plan import IDENTIFIER_RE
 
 
 def write_barrier_stat_tables(cursor, output_schema, barrier_rows):
-	"""barrier_rows: the list returned by graph_component.process_component -- barrier dicts
-	with "id" and "stats" ({species: {...}}, from length_stats.compute_barrier_upstream_downstream_stats,
-	including each species' upstream length figures at the barrier). Writes each barrier's stats
-	into all_barriers.species_stats -- only structures that
+	"""Writes each barrier's stats into all_barriers.species_stats -- only structures that
 	successfully snapped onto a processed edge appear here, so species_stats stays NULL for
-	every other row (see postprocess_views.create_natural_anthropogenic_views, which relies on
-	that to reproduce the previous natural_barriers/anthropogenic_barriers row set)."""
+	those rows """
 
 	if not barrier_rows:
 		return

@@ -2,9 +2,9 @@
 -- support.structure_updates, support.new_structures, support.habitat_updates.
 --
 -- See:
---   fishpass_engine/requirements/inputs/structure_updates_dataset.md
---   fishpass_engine/requirements/inputs/structure_new_dataset.md
---   fishpass_engine/requirements/inputs/habitat_updates_dataset.md
+--   fishpass_engine/docs/inputs/structure_updates_dataset.md
+--   fishpass_engine/docs/inputs/structure_new_dataset.md
+--   fishpass_engine/docs/inputs/habitat_updates_dataset.md
 --
 -- Run by hand against the target FishPass database, e.g.:
 --   psql "host=... dbname=... user=..." -f init/database/support_tables.sql

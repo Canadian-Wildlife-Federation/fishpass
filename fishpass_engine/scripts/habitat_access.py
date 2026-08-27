@@ -1,7 +1,7 @@
-"""Compute Statistics step 8 (fishpass/requirements/requirements.md): override species/lifecycle
+"""Compute Statistics step 8 (fishpass/docs/fishpass_docs.md): override species/lifecycle
 habitat flags from <output_schema>.habitat_updates.
 
-Per your decision recorded in requirements.md, "along the mainstem" is literal: flagging walks
+Per your decision, "along the mainstem" is literal: flagging walks
 only the single mainstem_id chain through the habitat update's snapped point(s), not the full
 upstream/downstream network graph_stats.py's engine otherwise uses -- a tributary joining
 partway along a flagged stretch is not flagged even though it's hydrologically upstream.
@@ -100,7 +100,7 @@ def mainstem_segments_between(edges_by_id, predecessors, downstream_edge_id, ups
 def resolve_segments(row, edges_by_id, predecessors, successor):
 	"""Return the list of edge ids a habitat_updates row's location_type/snapped edges resolve
 	to, or None if the point(s) needed weren't snapped (Process Habitat step 2 left them
-	unresolved -- per requirements.md, such a point is simply ignored, not an error here)."""
+	unresolved -- such a point is simply ignored, not an error here)."""
 
 	location_type = row["location_type"]
 	up_id = row["upstream_snapped_edge_id"]
@@ -144,7 +144,7 @@ def apply_habitat_access_overrides(habitat, edges_by_id, predecessors, successor
 
 
 def derive_spawnrear_habitat(habitat):
-	"""Add habitat[species]["spawnrear"] = rear OR spawn for every species, per requirements.md's
+	"""Add habitat[species]["spawnrear"] = rear OR spawn for every species, per the
 	documented spawnrear = union(rear, spawn) resolution. Call this after all step 7/8
 	rear/spawn values (including overrides) are final."""
 
