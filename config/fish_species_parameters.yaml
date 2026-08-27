@@ -7,7 +7,7 @@ species:
     accessibility_gradient_rearing_max: 0.3
     fall_height_threshold: 5
     spawn_gradient_min: 0.0
-    spawn_gradient_max: 0.008
+    spawn_gradient_max: 0.03
     rear_gradient_min: 0.0
     rear_gradient_max: 0.03
     spawn_discharge_min: 0
@@ -18,14 +18,14 @@ species:
     spawn_channel_confinement_max: 100
     rear_channel_confinement_min: 0
     rear_channel_confinement_max: 100
-    strahler_order_spawning_min: 2
-    strahler_order_spawning_max: 5
+    strahler_order_spawning_min: 1
+    strahler_order_spawning_max: 7
     strahler_order_rearing_min: 1
-    strahler_order_rearing_max: 6
-    stream_order_1_spawning_weight: 0.2
-    stream_order_1_rearing_weight: 0.2
-    stream_order_2_spawning_weight: 0.5
-    stream_order_2_rearing_weight: 0.5
+    strahler_order_rearing_max: 7
+    stream_order_1_spawning_weight: 0.25
+    stream_order_1_rearing_weight: 0.25
+    stream_order_2_spawning_weight: 0.75
+    stream_order_2_rearing_weight: 0.75
 
   - code: ae
     name: American Eel
