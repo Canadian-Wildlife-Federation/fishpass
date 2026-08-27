@@ -160,7 +160,7 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 
 def create_barrier_views(conn, cursor, plan):
 	"""Postprocess phase entry point: create the reporting views over all_barriers/streams
-	(requirements.md's Outputs section) once Compute Statistics has populated species_stats."""
+	(the Outputs section) once Compute Statistics has populated species_stats."""
 
 	output_schema = plan["output_schema"]
 

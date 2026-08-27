@@ -1,5 +1,5 @@
 """Shared geometry helpers for snapping points onto <output_schema>.streams edges, used by both
-snap_structures.py (Load Structures step 5) and load_habitat.py (Process Habitat step 2).
+snap_structures.py and load_habitat.py.
 
 Each caller's own SQL finds the candidate edge *and* the closest point on it (via
 ST_LineLocatePoint/ST_LineInterpolatePoint), since the two callers query different source tables

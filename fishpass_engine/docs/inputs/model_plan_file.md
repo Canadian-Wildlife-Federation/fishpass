@@ -25,7 +25,7 @@ Any number of files can exist. These are stored in GitHub at `config/models/<pla
 | gradient_barriers_table | Optional. Defaults to `support.gradient_barriers`. |
 | update_scope | Optional. Defaults to the plan's `code` value. Used to filter structure and habitat updates. |
 | impassable_threshold | Optional. Default: `1.0`. A structure/barrier is treated as impassable for a given species/lifestage if its `passability_status_value` is less than this threshold. Default means anything short of fully passable (`1.0`) -- including a fractional partial-passability value like `0.25` -- counts as impassable. |
-| natural_feature_types_override | Optional. List of `feature_type` values to classify as `natural` for this plan only. When present, it entirely replaces (not merges with) `config/fishpass.yaml`'s `structure_classification.natural_feature_types` list for this run; when omitted, that config file's list is used. **Any `feature_type` not in the effective list -- whether from this override or from `config/fishpass.yaml` -- is classified as `anthropogenic`.** This is a deliberate fail-safe default: an empty list (`[]`) or a typo'd/unrecognized feature type both fall back to `anthropogenic`. See Classify Structures in requirements.md and [config/fishpass.yaml](../../../config/fishpass.yaml). |
+| natural_feature_types_override | Optional. List of `feature_type` values to classify as `natural` for this plan only. When present, it entirely replaces (not merges with) `config/fishpass.yaml`'s `structure_classification.natural_feature_types` list for this run; when omitted, that config file's list is used. **Any `feature_type` not in the effective list -- whether from this override or from `config/fishpass.yaml` -- is classified as `anthropogenic`.** This is a deliberate fail-safe default: an empty list (`[]`) or a typo'd/unrecognized feature type both fall back to `anthropogenic`. See Classify Structures in fishpass_docs.md and [config/fishpass.yaml](../../../config/fishpass.yaml). |
 
 ## AOI Options
 
@@ -48,7 +48,7 @@ aoi:
     - ns
 ```
 
-**upstream_of** — run on the network upstream of one or more CHyF stream edge ids. If a given edge id doesn't exist, the software will abort. *(Not yet supported — see requirements.md.)*
+**upstream_of** — run on the network upstream of one or more CHyF stream edge ids. If a given edge id doesn't exist, the software will abort. *(Not yet supported)*
 
 ```yaml
 aoi:

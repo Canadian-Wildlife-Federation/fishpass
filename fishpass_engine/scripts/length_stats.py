@@ -3,7 +3,7 @@ aggregates and per-barrier upstream/downstream counts (the latter now also carry
 upstream length figures, read from the per-species length aggregates at the barrier's snapped
 edge).
 
-All length computations use effective_length, per requirements.md.
+All length computations use effective_length.
 
 The per-edge `<lc>_weighted_length` value (and the raw stream-order-weight formula behind it) is
 only computed for the "rear" and "spawn" lifecycles -- the species parameter file has no
@@ -35,7 +35,7 @@ def masked_local_value(edge_ids, effective_length, flag):
 
 def downstream_degraded_weighted_length(edge_ids, effective_length, strahler_order, species_params, lifecycle, downstream_first_barrier_passability, habitat_flag, accessible):
 	"""{edge_id: effective_length * stream_order_weight * downstream_first_barrier_passability} --
-	the base weighted-length formula (requirements.md step 9), degraded by each edge's nearest
+	the base weighted-length formula (step 9), degraded by each edge's nearest
 	("first") downstream anthropogenic barrier that is not fully passable (graph_stats.
 	compute_downstream_first_anthropogenic_barrier_passability) -- natural barriers, and
 	fully-passable anthropogenic barriers, are skipped over when searching downstream. This is a
@@ -112,7 +112,7 @@ def compute_species_length_stats(
 				plain_local[eid][accessible_field] = accessible_local[eid]
 
 		is_barrier = {
-			eid: bool(barrier_here_by_species[species]["natural"].get(eid) or barrier_here_by_species[species]["anthro"].get(eid))
+			eid: bool(barrier_here_by_species[species]["anthro"].get(eid))
 			for eid in edge_ids
 		}
 		lifecycles = {lc for sp, lc in reporting_species_lifecycles if sp == species}
@@ -185,7 +185,7 @@ def compute_species_length_stats(
 
 
 def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats):
-	"""requirements.md step 9's third bullet group: for each barrier and each species,
+	"""Step 9's third bullet group: for each barrier and each species,
 	upstream/downstream natural/anthropogenic counts (downstream ids of both types, plus upstream
 	anthro ids -- natural_barriers_<species>/anthropogenic_barriers_<species> want upstream anthro
 	ids too, alongside the downstream ids of both types -- each split into per-lifestage

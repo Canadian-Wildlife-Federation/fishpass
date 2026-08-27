@@ -145,9 +145,11 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		self.assertAlmostEqual(result["es"]["spawnrear_weighted_upstream_length"]["E3"], 6 + 10 + 4.5)
 		self.assertAlmostEqual(result["es"]["spawnrear_functional_weighted_upstream_length"]["E3"], 6 + 10 + 4.5)
 
-	def test_functional_length_resets_at_barrier(self):
+	def test_functional_length_resets_at_anthro_barrier(self):
+		# E3 has predecessors E1/E2, so a barrier there is observable at E4: with a reset,
+		# E4's functional total should only include E3's and E4's own length, not E1/E2's.
 		barrier_here = {
-			"es": {"natural": {**{eid: 0 for eid in self.edge_ids}, "E1": 1}, "anthro": {eid: 0 for eid in self.edge_ids}},
+			"es": {"natural": {eid: 0 for eid in self.edge_ids}, "anthro": {**{eid: 0 for eid in self.edge_ids}, "E3": 1}},
 		}
 		result = ls.compute_species_length_stats(
 			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
@@ -155,9 +157,22 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			[("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
-		# E1 is a barrier at its own start (no predecessors so no difference for E1 itself),
-		# but E1's own length should still count toward E3's functional total
-		self.assertEqual(result["es"]["rear_functional_upstream_length"]["E3"], 5 + 10 + 20)
+		self.assertEqual(result["es"]["rear_functional_upstream_length"]["E4"], 5 + 3)
+		# the plain (non-reset) total is unaffected by the barrier
+		self.assertEqual(result["es"]["rear_upstream_length"]["E4"], 10 + 20 + 5 + 3)
+
+	def test_functional_length_does_not_reset_at_natural_barrier(self):
+		# Same placement as the anthro case above, but as a natural barrier -- it must not reset.
+		barrier_here = {
+			"es": {"natural": {**{eid: 0 for eid in self.edge_ids}, "E3": 1}, "anthro": {eid: 0 for eid in self.edge_ids}},
+		}
+		result = ls.compute_species_length_stats(
+			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
+			self.accessibility, self.habitat, barrier_here, SPECIES_PARAMS,
+			[("es", "rear")],
+			self.downstream_first_barrier_passability,
+		)
+		self.assertEqual(result["es"]["rear_functional_upstream_length"]["E4"], 10 + 20 + 5 + 3)
 
 	def test_weighted_length_masked_by_habitat(self):
 		# E2 is not spawn habitat, so its weighted_length must be zeroed out.

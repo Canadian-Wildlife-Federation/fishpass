@@ -25,8 +25,6 @@ This column contains the following fields for each species identifies in the mod
 
 | Field Name | Type | Description |
 | :---- | :---- | :---- |
-| passability\_status\_spawn | double | Value between 0 (not passable) and 1 (fully passable) |
-| passability\_status\_rear | double |  |
 | upstream\_anthro\_spawn\_count  | int | Number of spawning impassable anthropogenic barriers upstream of the stream segment edge |
 | upstream\_anthro\_rear\_count  | int | Number of rearing impassable anthropogenic barriers upstream of the stream segment edge |
 | upstream\_anthro\_spawnrear\_count  |  |  |
@@ -49,16 +47,17 @@ This column contains the following fields for each species identifies in the mod
 | rear\_upstream\_accessible\_length  | double | The sum of the effective length of any edges upstream flagged as naturally accessible for spawning. |
 | spawn\_upstream\_length  | double | The sum of the effective length of any upstream edges flagged as spawning habitat. |
 | rear\_upstream\_length  | double | The sum of the effective length of any upstream edges flagged as rearing habitat. |
-| spawn\_functional\_upstream\_length  | double | The sum of all the effective length of all upstream edges flagged as spawning habitat  stopping at the first impossible barrier. |
-| rear\_functional\_upstream\_length  | double | The sum of all the effective length of all downstream edges flagged as spawning habitat  stopping at the first impossible barrier. |
-| spawnrear\_functional\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear functional length or spawn functional length for all upstream edges |
+ |spawnrear_upstream_length | double | The sum of the effective length of any upstream edges flagged as spawning or rearing habitat. Each edge is only counted once. |
+| spawn\_functional\_upstream\_length  | double | The sum of all the effective length of all upstream edges flagged as spawning habitat  stopping at the first impassible anthropogenic barrier. |
+| rear\_functional\_upstream\_length  | double | The sum of all the effective length of all upstream edges flagged as rearing habitat stopping at the first impassible anthropogenic barrier. |
+| spawnrear\_functional\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear functional length or spawn functional length for all upstream edges stopping at the first impassible anthropogenic barrier. |
 | spawn\_weighted\_upstream\_length  | double | The sum of the spawn weighted length for all upstream edges. |
 | rear\_weighted\_upstream\_length  | double | The sum of the rear weighted length for all upstream edges. |
 | spawnrear\_weighted\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted length or spawn weighted length for all upstream edges |
-| spawn\_functional\_weighted\_upstream\_length  | double | The sum of all the  spawn weighted length of all upstream edges stopping at the first impossible barrier. |
-| rear\_functional\_weighted\_upstream\_length  | double | The sum of all the  rear weighted length of all upstream edges stopping at the first impossible barrier. |
-| spawnrear\_functional\_weighted\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted functional length or spawn weighted functional length for all upstream edges |
-| | |
+| spawn\_functional\_weighted\_upstream\_length  | double | The sum of all the  spawn weighted length of all upstream edges stopping at the first impassible anthropogenic barrier. |
+| rear\_functional\_weighted\_upstream\_length  | double | The sum of all the  rear weighted length of all upstream edges stopping at the first impassible anthropogenic barrier. |
+| spawnrear\_functional\_weighted\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted functional length or spawn weighted functional length for all upstream edges stopped at the first impassible anthropogenic barrier. |
+
 
 
 ### Views: `<output_schema>.anthropogenic_barriers_<species>` and `<output_schema>.natural_barriers_<species>`

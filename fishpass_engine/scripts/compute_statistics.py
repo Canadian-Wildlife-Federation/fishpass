@@ -1,6 +1,6 @@
 """Compute Statistics phase (fishpass/docs/fishpass_docs.md), orchestrator.
 
-See network_break.py's module docstring and requirements.md for the two-pass, graph_id-
+See network_break.py's module docstring for the two-pass, graph_id-
 partitioned design behind steps 5-9, and graph_component.py's module docstring for the current
 AOI-boundary caveat.
 """

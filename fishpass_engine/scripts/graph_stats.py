@@ -1,4 +1,4 @@
-"""Compute Statistics steps 5-7 (fishpass/docs/fishpass_docs.md): the graph traversal
+"""Compute statistics (fishpass/docs/fishpass_docs.md): the graph traversal
 engine and the per-species barrier-count/accessibility/habitat-assignment statistics built on
 top of it.
 
@@ -7,10 +7,6 @@ is_isolated edges) passed in as a plain list of edge dicts -- the DB I/O (fetchi
 post-break edges, writing results back) lives in compute_statistics.py, kept separate so this
 module's logic is fully unit-testable on small synthetic graphs with no database.
 
-Known gap: requirements.md's `supports_species` output field is described as being "based on
-the fish species model aoi", a concept not defined anywhere in the provided requirements docs
-(no species-range/AOI dataset is documented). It is not computed or written anywhere in this
-module -- see requirements.md's Outstanding Decisions section.
 """
 
 import species_params as sp_mod
@@ -101,9 +97,8 @@ def propagate_downstream(order_down, successor, local_value, combine, zero):
 def propagate_upstream_with_reset(order_up, predecessors, local_value, is_reset, zero=0.0):
 	"""acc[E] = local_value[E] + (zero if is_reset[E] else sum(acc[P] for P in predecessors[E])).
 
-	Used for "functional" length aggregates, where a barrier resets the upstream accumulation
-	(requirements.md Compute Statistics step 9: "A barrier 'resets' the upstream length
-	calculation"). is_reset[E] means "a barrier sits at E's own start" (network_break.py's
+	Used for "functional" length aggregates, where a barrier resets the upstream accumulation.
+	is_reset[E] means "a barrier sits at E's own start" (network_break.py's
 	marker-attachment convention) -- i.e. between E and E's own predecessors. That barrier
 	blocks E from reaching *its own* predecessors, so E's predecessors' accumulated totals are
 	excluded when is_reset[E] is true -- but E's own local_value is always included regardless,
@@ -232,7 +227,7 @@ LIFESTAGES = ("spawn", "rear")
 
 
 def is_impassable(species_passability_value, species, impassable_threshold, lifestage=None):
-	"""requirements.md Compute Statistics step 5: impassable for `species` if either lifestage's
+	"""Compute statistics impassable for `species` if either lifestage's
 	value is below impassable_threshold. A missing species_lifestage key is treated as 0
 	(impassable), consistent with new_structures' "missing = full barrier" convention (see
 	load_structures.explode_new_structure_passability).
@@ -262,9 +257,10 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 	lands in a lifestage's id list iff it's impassable for that lifestage specifically -- a barrier
 	blocking both lifestages appears in both lists (no combined "spawnrear" id list is produced).
 
-	"natural"/"anthro" are impassable-for-either-lifestage (requirements.md step 5's combined
-	rule), equal to the OR of that type's own "_spawn"/"_rear" flags -- kept for backward
-	compatibility with length_stats.py's functional-reset logic.
+	"natural"/"anthro" are impassable-for-either-lifestage (step 5's combined
+	rule), equal to the OR of that type's own "_spawn"/"_rear" flags. "anthro" drives
+	length_stats.py's functional-reset logic (only non-passable anthropogenic barriers reset
+	functional upstream length); "natural" is used for barrier-count/id outputs only.
 	"""
 
 	result = {}
@@ -306,12 +302,12 @@ def compute_barrier_stats(order_up, order_down, predecessors, successor, barrier
 	<direction>_<type>_<lifestage>_count}}, plus per-lifestage (spawn/rear, no combined
 	"spawnrear") id lists: upstream_anthro_spawn_ids, upstream_anthro_rear_ids,
 	downstream_anthro_spawn_ids, downstream_anthro_rear_ids, downstream_natural_spawn_ids,
-	downstream_natural_rear_ids (requirements.md's streams output only wants anthropogenic id
+	downstream_natural_rear_ids (the streams output only wants anthropogenic id
 	lists; the natural_barriers/anthropogenic_barriers output tables want downstream ids of both
 	types plus upstream anthro ids -- see the Outputs section -- hence downstream_natural_*_ids is
 	included here too, but not upstream_natural_*_ids, which nothing needs).
 
-	"_spawnrear_count" fields mean "impassable for either lifestage" (requirements.md step 5's
+	"_spawnrear_count" fields mean "impassable for either lifestage" (step 5's
 	combined rule); "_spawn_count"/"_rear_count" mean impassable for that lifestage specifically,
 	independent of the other. The id-list fields have no "_spawnrear_" variant -- a barrier's id
 	lands in a lifestage's list iff it's impassable for that lifestage specifically, so a barrier
@@ -420,7 +416,7 @@ ACCESSIBILITY_INACCESSIBLE = "naturally_inaccessible"
 
 
 def compute_accessibility(edge_ids, barrier_stats):
-	"""requirements.md Compute Statistics step 6: an edge is naturally accessible for a species/
+	"""Compute Statistics step 6: an edge is naturally accessible for a species/
 	lifestage if it has 0 downstream natural barriers impassable for that lifestage --
 	anthropogenic barriers never factor in, and spawn/rear are computed independently of each
 	other (a barrier impassable only for rear does not affect spawn_accessibility, and vice versa).
@@ -439,12 +435,12 @@ def compute_accessibility(edge_ids, barrier_stats):
 
 
 def compute_habitat_assignment(edge_ids, species_list, accessibility, edge_gradient, edge_strahler, species_params_by_code):
-	"""requirements.md Compute Statistics step 7. edge_gradient/edge_strahler:
+	"""Compute Statistics step 7. edge_gradient/edge_strahler:
 	{edge_id: value or None}. accessibility is compute_accessibility's output -- rear habitat gates
 	on accessibility[species]["rear"], spawn habitat gates on accessibility[species]["spawn"],
 	independently of each other. Returns {species: {"rear": {edge_id: bool}, "spawn": {edge_id:
-	bool}}} -- "spawnrear" is derived by the caller as the union of rear/spawn (see
-	requirements.md's documented spawnrear = rear OR spawn resolution)."""
+	bool}}} -- "spawnrear" is derived by the caller as the union of rear/spawn (see the
+	documented spawnrear = rear OR spawn resolution)."""
 
 	result = {}
 	for species in species_list:

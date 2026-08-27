@@ -1,12 +1,10 @@
-"""DB I/O for Compute Statistics steps 5-9: fetch one graph_id connected component's data from
+"""DB I/O for computing statistics: fetch one graph_id connected component's data from
 <output_schema>.streams/all_barriers/habitat_updates, run it through the pure engine
 (graph_stats.py, habitat_access.py, length_stats.py), and assemble the per-edge JSON to write
 back to streams.species_stats and the per-barrier JSON to write back to all_barriers.species_stats.
 
-Caveat (see requirements.md's Outstanding Decisions): for an AOI-scoped run, a graph_id's edges
-here are only whatever fell inside the requested AOI(s) during Load Stream Network -- this
-module does not reach across into chyf_raw for the rest of a component that crosses an AOI
-boundary. See requirements.md for the accuracy implication and recommendation.
+Caveat (see the Outstanding Decisions section): for an AOI-scoped run, a graph_id's edges
+here are only whatever falls inside the requested AOI(s) during load stream network.
 """
 
 import json
@@ -39,7 +37,7 @@ STREAM_STAT_FIELDS = (
 
 def fetch_graph_id_counts(cursor, output_schema):
 	"""(graph_id, edge_count) for every graph_id among non-isolated streams edges, largest first --
-	the unit of work for Compute Statistics steps 5-9 (requirements.md: graph_id groups with
+	the unit of work for compute statistics (graph_id groups with
 	is_isolated edges are skipped entirely). Ordering largest-first lets build_graph_id_bundles
 	isolate big components into their own bundle before packing small ones together."""
 
@@ -118,11 +116,8 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 
 def fetch_bundle_habitat_updates(cursor, output_schema, graph_ids):
 	"""{graph_id: [habitat update dicts]} for every habitat_updates row whose upstream or
-	downstream snapped edge falls in any of graph_ids. Each graph_id's list stays ordered by
-	update_date ascending -- habitat_access.apply_habitat_access_overrides requires this so later
-	rows win on overlap (see its module docstring) -- because the single query below is ordered
-	that way and grouping preserves fetchall()'s row order within each graph_id bucket. A row
-	whose two endpoints fall in different components is attached under both graph_ids."""
+	downstream snapped edge falls in any of graph_ids. Each list stays ordered by
+	update_date ascending so later rows win on overlap."""
 
 	schema_ident = quote_ident(output_schema)
 	graph_id_list = list(graph_ids)
@@ -150,13 +145,12 @@ def fetch_bundle_habitat_updates(cursor, output_schema, graph_ids):
 
 
 def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats):
-	"""Returns species_stats, {edge_id: {...}} ready for json.dumps, matching requirements.md's
+	"""Returns species_stats, {edge_id: {...}} ready for json.dumps, matching the
 	Outputs section fields for <output_schema>.streams. Upstream length fields (accessible
 	length, and per-lifecycle upstream/functional upstream/weighted upstream/functional weighted
-	upstream length) live on barriers instead (see
-	length_stats.compute_barrier_upstream_downstream_stats) -- but the per-edge, non-aggregate
+	upstream length) live on barriers, but the per-edge, non-aggregate
 	"<lc>_weighted_length" (rear/spawn only) IS written here too, since unlike the aggregates it's
-	already a per-edge quantity (see length_stats.compute_species_length_stats)."""
+	already a per-edge quantity."""
 
 	species_lifecycles = {}
 	for sp, lc in reporting_species_lifecycles:
@@ -236,13 +230,12 @@ def flush_stats_writes(cursor, output_schema, rows):
 
 
 def process_component(graph_id, edges, barriers, habitat_rows, plan, species_params_by_code):
-	"""Run Compute Statistics steps 5-9 for one graph_id component's already-fetched data (edges,
+	"""Run compute statistics for one graph_id component's already-fetched data (edges,
 	barriers, habitat_rows -- see fetch_bundle_edges/fetch_bundle_barriers/
 	fetch_bundle_habitat_updates). Returns (species_stats, barrier_rows, route_measures):
 	species_stats and route_measures are both ready for build_stats_write_rows, and barrier_rows
-	is barriers annotated with "stats" (for write_barrier_tables to use as the working set for the
-	natural_barriers/anthropogenic_barriers output tables -- including each barrier's upstream
-	length figures)."""
+	is barriers annotated with "stats" including each barrier's upstream
+	length figures (for write_barrier_tables to use)."""
 
 	edges_by_id = {e["id"]: e for e in edges}
 	edge_ids = list(edges_by_id.keys())

@@ -1,5 +1,5 @@
 """Load and validate a model plan YAML file, as documented in
-fishpass/requirements/inputs/model_plan_file.md.
+docs/inputs/model_plan_file.md.
 """
 
 import re
@@ -48,7 +48,7 @@ def _fail(plan_path, message):
 def _validate_aoi(aoi, plan_path):
 	"""Return (aoi_kind, aoi_value) -- aoi_kind is one of 'workunit', 'province',
 	'upstream_of'. Exits if not exactly one is given, or if upstream_of is used (not yet
-	supported -- see requirements.md)."""
+	supported)."""
 
 	if not isinstance(aoi, dict):
 		_fail(plan_path, "'aoi' must be a mapping with exactly one of workunit/province/upstream_of")
@@ -78,7 +78,7 @@ def expand_reporting_values(reporting_values, target_species, plan_path):
 
 	'spawnrear' is the union of 'rear' and 'spawn' everywhere it's computed (there is no
 	species-parameter or habitat_updates support for a distinct 'spawnrear' value) -- see
-	requirements.md's Outputs section.
+	the Outputs section.
 	"""
 
 	result = set()

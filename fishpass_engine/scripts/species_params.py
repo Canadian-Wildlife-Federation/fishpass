@@ -1,9 +1,4 @@
 """Load the fish species parameter file (docs/fish_species_parameter_file.md).
-
-gradient_barriers/scripts/compute_barriers.py has its own loader, but only reads the two
-accessibility_gradient_* fields it needs. Compute Statistics steps 7 and 9 need the rest of the
-documented schema (habitat gradient/strahler-order thresholds, stream-order length weights), so
-this is a separate, fuller loader rather than a shared one.
 """
 
 import sys
@@ -17,7 +12,6 @@ DEFAULT_SPECIES_PARAMS_FILE = REPO_ROOT / "config" / "fish_species_parameters.ya
 FIELDS = (
 	"accessibility_gradient_spawning_max",
 	"accessibility_gradient_rearing_max",
-	"fall_height_threshold",
 	"spawn_gradient_min",
 	"spawn_gradient_max",
 	"rear_gradient_min",
@@ -57,9 +51,9 @@ def load_species_params(params_path=DEFAULT_SPECIES_PARAMS_FILE):
 
 
 def habitat_gradient_ok(params, lifecycle, segment_gradient):
-	"""requirements.md Compute Statistics step 7: min_<lc>_gradient <= segment_gradient <
+	"""Used in compute statistics: min_<lc>_gradient <= segment_gradient <
 	max_<lc>_gradient. False if segment_gradient is None, or either bound is missing/max<min
-	(no habitat for this species/lifecycle -- see docs/fish_species_parameter_file.md)."""
+	"""
 
 	if segment_gradient is None:
 		return False
@@ -74,7 +68,7 @@ LIFECYCLE_STRAHLER_FIELD = {"rear": "rearing", "spawn": "spawning"}
 
 
 def habitat_strahler_ok(params, lifecycle, strahler_order):
-	"""requirements.md Compute Statistics step 7: min_<lc>_strahler_order <= strahler_order <
+	"""Unsed in compute statistics: min_<lc>_strahler_order <= strahler_order <
 	max_<lc>_strahler_order. False if strahler_order is None, or either bound is missing/max<min."""
 
 	if strahler_order is None:
@@ -88,8 +82,8 @@ def habitat_strahler_ok(params, lifecycle, strahler_order):
 
 
 def stream_order_weight(params, lifecycle, strahler_order):
-	"""Weighted-length multiplier for strahler_order, per requirements.md Compute Statistics
-	step 9's documented formula: stream_order_{1,2}_{spawning,rearing}_weight from the species
+	"""Weighted-length multiplier for strahler_order (used in compute statistics): 
+	stream_order_{1,2}_{spawning,rearing}_weight from the species
 	parameter file for orders 1 and 2, 1.0 (no downweighting) for every order >= 3. lifecycle
 	must be "rear" or "spawn" -- weighted length is not computed for "spawnrear"."""
 

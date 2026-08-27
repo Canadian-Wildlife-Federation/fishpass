@@ -3,7 +3,7 @@
 Runs a model plan end-to-end: loads a stream network, barriers, and habitat data for the plan's
 AOI, applies structure/habitat updates, snaps everything onto the network, and computes
 per-species/lifecycle accessibility, habitat, and upstream-length statistics. See
-[fishpass_docs.md](../fishpass/docs/fishpass_docs.md) for the full requirements and design
+[fishpass_docs.md](docs/fishpass_docs.md) for the full requirements and design
 decisions behind this tool -- in particular its **Outstanding Decisions** section, which lists
 known gaps/assumptions not yet validated against a real database run.
 
@@ -13,7 +13,7 @@ known gaps/assumptions not yet validated against a real database run.
 * [gradient_barriers](../gradient_barriers/README.md) must have already populated
   `support.gradient_barriers`, if the plan's `structure_types` includes `gradient_barriers`.
 * A model plan file at `config/models/<plan_code>.yaml` -- see
-  [model_plan_file.md](../fishpass/requirements/inputs/model_plan_file.md) and
+  [model_plan_file.md](docs/inputs/model_plan_file.md) and
   [config/models/example.yaml](../config/models/example.yaml).
 * [config/fishpass.yaml](../config/fishpass.yaml) -- natural/anthropogenic structure
   classification. Any `feature_type` not listed there (or in a plan's
@@ -28,8 +28,8 @@ recreated from scratch every run -- nothing in it survives between runs.
 connected components by `graph_id` and computes upstream/downstream statistics using only the
 edges already loaded into the output schema. For a plan whose AOI selection is cut by a
 `graph_id` that extends into a non-requested AOI, statistics near that boundary will undercount
-barriers/lengths from the excluded portion of the network. See requirements.md's Outstanding
-Decisions for detail; running with `aoi: workunit: all` avoids this.
+barriers/lengths from the excluded portion of the network; running with `aoi: workunit: all`
+avoids this.
 
 **CABD API's 50,000-feature cap.** Structure loading chunks CABD requests by work-unit subgroup
 to stay under this, but a single feature type that's dense across a huge AOI selection could
