@@ -48,7 +48,7 @@ Each model run will generate its own schema for the output. The schema name is d
 
 ### Accessibility
 
-* IF (the species if valid for that edge) AND (downstream natural impassable barrier for species/lifecycle count = 0) THEN 
+* IF (downstream natural impassable barrier for species/lifecycle count = 0) THEN 
     * NATURALLY ACCESSIBLE 
 * ELSE
     * NATURALLY INACCESSIBLE 
