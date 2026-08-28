@@ -40,7 +40,7 @@ Actions secrets and are injected as environment variables. They are never stored
 To change which workunit(s) get reloaded, edit `config/chyf_loader.yaml` and commit the change
 (see [`chyf_loader.yaml.example`](../config/chyf_loader.yaml.example) for the documented format).
 
-## WARNING: workunits are not independent
+## WARNING: workunits are connected
 
-`graph_id` (and the mainstem computations derived from it) in CHyF2 is **global** — a single graph can span multiple workunits/AOIs. When reloading AOI's if you exclude connected workunits, `is_isolated` may not be computed correctly.  
+Users must be aware of interactions between workunit data and must ensure all appropriate workunits are loaded together; otherwise results of the analysis will not be accurate.  For example, mainstems will cross work unit boundaries; if mainstems are recomputed then all workunits must be reloaded - you cannot reload an individual work unit or the mainstems will not be contiguous across the boundaries. Additionally if you exclude connected workunits, `is_isolated` may not be computed correctly.
 
