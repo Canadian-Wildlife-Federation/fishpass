@@ -30,8 +30,12 @@ This column contains the following fields for each species identifies in the mod
 
 | Field Name | Type | Description |
 | :---- | :---- | :---- |
-| spawn\_weighted\_length  | double | See "Compute Weighted Length for Stream Edges" section below for how this is computed.  For accessible, habitat this is the effective length \* the stream order weighting \* spawn passability status of the first non-passable downstream anthropogenic barrier. |
+| spawn\_weighted\_length  | double | For accessible, spawning habitat this is the effective length \* the spawn stream order weighting. See "Stream Length Attributes" in fishpass_docs.md for more details.  |
 | rear\_weighted\_length  | double | Same as spawn weighted length but using rear attributes. |
+| spawn\_weighted\_connected\_length  | double | spawn\_weighted\_length \* the spawn passability status of the first non-passable downstream anthropogenic barrier. |
+| rear\_weighted\_connected\_length  | double | Same as spawn weighted connected length but using rear attributes. |
+| spawn\_weighted\_disconnected\_length  | double | spawn\_weighted\_length \* (1 \- the spawn passability status of the first non-passable downstream anthropogenic barrier). |
+| rear\_weighted\_disconnected\_length  | double | Same as spawn weighted disconnected length but using rear attributes. |
 | upstream\_anthro\_spawn\_count  | int | Number of spawning impassable anthropogenic barriers upstream of the stream segment edge |
 | upstream\_anthro\_rear\_count  | int | Number of rearing impassable anthropogenic barriers upstream of the stream segment edge |
 | upstream\_anthro\_spawnrear\_count  | int | The number of impassable rearing or spawning anthrogopenic barriers upstream of the stream segment. Barriers are counted only once (no double counting) |

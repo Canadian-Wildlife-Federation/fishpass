@@ -147,10 +147,10 @@ def fetch_bundle_habitat_updates(cursor, output_schema, graph_ids):
 def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats):
 	"""Returns species_stats, {edge_id: {...}} ready for json.dumps, matching the
 	Outputs section fields for <output_schema>.streams. Upstream length fields (accessible
-	length, and per-lifecycle upstream/functional upstream/weighted upstream/functional weighted
-	upstream length) live on barriers, but the per-edge, non-aggregate
-	"<lc>_weighted_length" (rear/spawn only) IS written here too, since unlike the aggregates it's
-	already a per-edge quantity."""
+	length, and per-lifecycle upstream/functional upstream/weighted upstream length aggregates)
+	live on barriers, but the per-edge, non-aggregate "<lc>_weighted_length"/
+	"<lc>_weighted_connected_length"/"<lc>_weighted_disconnected_length" (rear/spawn only) ARE
+	written here too, since unlike the aggregates they're already a per-edge quantity."""
 
 	species_lifecycles = {}
 	for sp, lc in reporting_species_lifecycles:
@@ -186,6 +186,8 @@ def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, ba
 			for lc in ("rear", "spawn"):
 				if lc in lifecycles:
 					s[f"{lc}_weighted_length"] = species_length_stats[species][f"{lc}_weighted_length"][eid]
+					s[f"{lc}_weighted_connected_length"] = species_length_stats[species][f"{lc}_weighted_connected_length"][eid]
+					s[f"{lc}_weighted_disconnected_length"] = species_length_stats[species][f"{lc}_weighted_disconnected_length"][eid]
 			entry[species] = s
 		species_stats[eid] = entry
 

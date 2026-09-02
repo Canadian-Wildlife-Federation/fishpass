@@ -51,12 +51,18 @@ This column contains the following fields for each species identifies in the mod
 | spawn\_functional\_upstream\_length  | double | The sum of all the effective length of all upstream edges flagged as spawning habitat  stopping at the first impassible anthropogenic barrier. |
 | rear\_functional\_upstream\_length  | double | The sum of all the effective length of all upstream edges flagged as rearing habitat stopping at the first impassible anthropogenic barrier. |
 | spawnrear\_functional\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear functional length or spawn functional length for all upstream edges stopping at the first impassible anthropogenic barrier. |
-| spawn\_weighted\_upstream\_length  | double | The sum of the spawn weighted length for all upstream edges. |
-| rear\_weighted\_upstream\_length  | double | The sum of the rear weighted length for all upstream edges. |
-| spawnrear\_weighted\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted length or spawn weighted length for all upstream edges |
-| spawn\_functional\_weighted\_upstream\_length  | double | The sum of all the  spawn weighted length of all upstream edges stopping at the first impassible anthropogenic barrier. |
-| rear\_functional\_weighted\_upstream\_length  | double | The sum of all the  rear weighted length of all upstream edges stopping at the first impassible anthropogenic barrier. |
-| spawnrear\_functional\_weighted\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted functional length or spawn weighted functional length for all upstream edges stopped at the first impassible anthropogenic barrier. |
+| spawn\_weighted\_connected\_upstream\_length  | double | The sum of the spawn weighted length (base, undegraded) for all upstream edges, times this barrier's own spawn passability. |
+| rear\_weighted\_connected\_upstream\_length  | double | Same as spawn weighted connected upstream length but using rear attributes. |
+| spawnrear\_weighted\_connected\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted length or spawn weighted length (base, undegraded) for all upstream edges, times this barrier's own min(spawn, rear) passability. |
+| spawn\_weighted\_disconnected\_upstream\_length  | double | The sum of the spawn weighted length (base, undegraded) for all upstream edges, times (1 \- this barrier's own spawn passability). |
+| rear\_weighted\_disconnected\_upstream\_length  | double | Same as spawn weighted disconnected upstream length but using rear attributes. |
+| spawnrear\_weighted\_disconnected\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted length or spawn weighted length (base, undegraded) for all upstream edges, times (1 \- this barrier's own min(spawn, rear) passability). |
+| spawn\_functional\_weighted\_connected\_upstream\_length  | double | The sum of the spawn weighted length (base, undegraded) of all upstream edges stopping at the first impassible anthropogenic barrier, times this barrier's own spawn passability. |
+| rear\_functional\_weighted\_connected\_upstream\_length  | double | Same as spawn functional weighted connected upstream length but using rear attributes. |
+| spawnrear\_functional\_weighted\_connected\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted length or spawn weighted length (base, undegraded) for all upstream edges stopped at the first impassible anthropogenic barrier, times this barrier's own min(spawn, rear) passability. |
+| spawn\_functional\_weighted\_disconnected\_upstream\_length  | double | The sum of the spawn weighted length (base, undegraded) of all upstream edges stopping at the first impassible anthropogenic barrier, times (1 \- this barrier's own spawn passability). |
+| rear\_functional\_weighted\_disconnected\_upstream\_length  | double | Same as spawn functional weighted disconnected upstream length but using rear attributes. |
+| spawnrear\_functional\_weighted\_disconnected\_upstream\_length  | double | The sum of the maximum (for each edge) of the rear weighted length or spawn weighted length (base, undegraded) for all upstream edges stopped at the first impassible anthropogenic barrier, times (1 \- this barrier's own min(spawn, rear) passability). |
 
 
 

@@ -122,8 +122,23 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		)
 		self.assertIn("(species_stats->'as'->>'rear_upstream_length')::double precision AS rear_upstream_length", sql_natural_as)
 		self.assertIn(
-			"(species_stats->'as'->>'spawn_functional_weighted_upstream_length')::double precision "
-			"AS spawn_functional_weighted_upstream_length",
+			"(species_stats->'as'->>'spawn_weighted_connected_upstream_length')::double precision "
+			"AS spawn_weighted_connected_upstream_length",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'spawn_weighted_disconnected_upstream_length')::double precision "
+			"AS spawn_weighted_disconnected_upstream_length",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'spawn_functional_weighted_connected_upstream_length')::double precision "
+			"AS spawn_functional_weighted_connected_upstream_length",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'spawn_functional_weighted_disconnected_upstream_length')::double precision "
+			"AS spawn_functional_weighted_disconnected_upstream_length",
 			sql_natural_as,
 		)
 
@@ -145,8 +160,26 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		pv.create_species_barrier_views(cursor, "model_test", [("as", "spawnrear")])
 		sql, _ = cursor.executed[0]
 		self.assertIn("(species_stats->'as'->>'spawnrear_upstream_length')::double precision AS spawnrear_upstream_length", sql)
-		self.assertIn("(species_stats->'as'->>'spawnrear_weighted_upstream_length')::double precision AS spawnrear_weighted_upstream_length", sql)
-		self.assertIn("(species_stats->'as'->>'spawnrear_functional_weighted_upstream_length')::double precision AS spawnrear_functional_weighted_upstream_length", sql)
+		self.assertIn(
+			"(species_stats->'as'->>'spawnrear_weighted_connected_upstream_length')::double precision "
+			"AS spawnrear_weighted_connected_upstream_length",
+			sql,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'spawnrear_weighted_disconnected_upstream_length')::double precision "
+			"AS spawnrear_weighted_disconnected_upstream_length",
+			sql,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'spawnrear_functional_weighted_connected_upstream_length')::double precision "
+			"AS spawnrear_functional_weighted_connected_upstream_length",
+			sql,
+		)
+		self.assertIn(
+			"(species_stats->'as'->>'spawnrear_functional_weighted_disconnected_upstream_length')::double precision "
+			"AS spawnrear_functional_weighted_disconnected_upstream_length",
+			sql,
+		)
 
 
 class CreateUnsnappedBarriersViewTests(unittest.TestCase):
@@ -191,12 +224,18 @@ class CreateSpeciesViewsTests(unittest.TestCase):
 		self.assertNotIn("rear_upstream_accessible_length", sql_as)
 		self.assertIn("(species_stats->'as'->>'rear_weighted_length')::double precision AS rear_weighted_length", sql_as)
 		self.assertIn("(species_stats->'as'->>'spawn_weighted_length')::double precision AS spawn_weighted_length", sql_as)
+		self.assertIn("(species_stats->'as'->>'rear_weighted_connected_length')::double precision AS rear_weighted_connected_length", sql_as)
+		self.assertIn("(species_stats->'as'->>'rear_weighted_disconnected_length')::double precision AS rear_weighted_disconnected_length", sql_as)
+		self.assertIn("(species_stats->'as'->>'spawn_weighted_connected_length')::double precision AS spawn_weighted_connected_length", sql_as)
+		self.assertIn("(species_stats->'as'->>'spawn_weighted_disconnected_length')::double precision AS spawn_weighted_disconnected_length", sql_as)
 		self.assertIn("WHERE species_stats->'as' IS NOT NULL", sql_as)
 
 		self.assertIn("CREATE VIEW \"model_test\".\"streams_ae\"", sql_ae)
 		self.assertNotIn("rear_upstream_length", sql_ae)
 		# ae only reports "rear" (reporting_species_lifecycles has ("ae", "rear")), not "spawn"
 		self.assertIn("(species_stats->'ae'->>'rear_weighted_length')::double precision AS rear_weighted_length", sql_ae)
+		self.assertIn("(species_stats->'ae'->>'rear_weighted_connected_length')::double precision AS rear_weighted_connected_length", sql_ae)
+		self.assertIn("(species_stats->'ae'->>'rear_weighted_disconnected_length')::double precision AS rear_weighted_disconnected_length", sql_ae)
 		self.assertNotIn("spawn_weighted_length", sql_ae)
 
 	def test_rejects_unsafe_species_code(self):
