@@ -208,7 +208,11 @@ class AssembleEdgeJsonTests(unittest.TestCase):
 			"downstream_anthro_spawn_ids": {"E1": []}, "downstream_anthro_rear_ids": {"E1": []},
 		}}
 		habitat = {"es": {"rear": {"E1": True}, "spawn": {"E1": False}, "spawnrear": {"E1": True}}}
-		species_length_stats = {"es": {"rear_weighted_length": {"E1": 3.5}}}
+		species_length_stats = {"es": {
+			"rear_weighted_length": {"E1": 3.5},
+			"rear_weighted_connected_length": {"E1": 1.5},
+			"rear_weighted_disconnected_length": {"E1": 2.0},
+		}}
 
 		species_stats = gc.assemble_edge_json(edge_ids, reporting, accessibility, barrier_stats, habitat, species_length_stats)
 		self.assertEqual(species_stats["E1"]["es"]["spawn_accessibility"], "naturally_accessible")
@@ -217,8 +221,10 @@ class AssembleEdgeJsonTests(unittest.TestCase):
 		self.assertNotIn("rear_upstream_length", species_stats["E1"]["es"])
 		self.assertNotIn("spawn_upstream_accessible_length", species_stats["E1"]["es"])
 		self.assertNotIn("rear_upstream_accessible_length", species_stats["E1"]["es"])
-		# "rear" was requested (reporting includes ("es", "rear")), so its weighted_length is written...
+		# "rear" was requested (reporting includes ("es", "rear")), so its weighted length fields are written...
 		self.assertEqual(species_stats["E1"]["es"]["rear_weighted_length"], 3.5)
+		self.assertEqual(species_stats["E1"]["es"]["rear_weighted_connected_length"], 1.5)
+		self.assertEqual(species_stats["E1"]["es"]["rear_weighted_disconnected_length"], 2.0)
 		# ...but "spawn" was never requested, so no spawn_weighted_length is written (and
 		# species_length_stats has no such key to read for it, unlike the always-present habitat fields).
 		self.assertNotIn("spawn_weighted_length", species_stats["E1"]["es"])
@@ -379,22 +385,46 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 			self.assertEqual(stats["spawn_habitat"], spawn, eid)
 			self.assertEqual(stats["spawnrear_habitat"], spawnrear, eid)
 
-	def test_weighted_length_reflects_order_downweight_and_nearest_barrier(self):
+	def test_weighted_length_reflects_only_order_downweight_not_barrier_degradation(self):
+		# <lc>_weighted_length is now the base quantity -- effective_length * strahler weight,
+		# habitat/accessibility masked -- with no barrier degradation at all.
 		expected = {
 			"E1": (0.0, 0.0),
-			"E2": (0.0, 12.5),
-			"E3": (0.0, 12.5),
-			"E4": (0.0, 12.5),
-			"E5": (0.0, 12.5),
-			"E6": (0.0, 12.5),
-			"E7": (0.0, 50.0),
-			"E8": (25.0, 50.0),
+			"E2": (0.0, 25.0),
+			"E3": (50.0, 25.0),
+			"E4": (50.0, 25.0),
+			"E5": (75.0, 25.0),
+			"E6": (75.0, 25.0),
+			"E7": (100.0, 100.0),
+			"E8": (100.0, 100.0),
 			"E9": (100.0, 100.0),
 		}
 		for eid, (rear_weighted, spawn_weighted) in expected.items():
 			stats = self.species_stats[eid]["es"]
 			self.assertEqual(stats["rear_weighted_length"], rear_weighted, eid)
 			self.assertEqual(stats["spawn_weighted_length"], spawn_weighted, eid)
+
+	def test_weighted_connected_disconnected_length_reflects_order_downweight_and_nearest_barrier(self):
+		# <lc>_weighted_connected_length/<lc>_weighted_disconnected_length split the base value
+		# (from the table above) by the passability of the nearest not-fully-passable downstream
+		# anthropogenic barrier -- this reproduces the pre-change "weighted_length" numbers for the
+		# connected half.
+		expected_rear = {
+			"E1": (0.0, 0.0), "E2": (0.0, 0.0), "E3": (0.0, 50.0), "E4": (0.0, 50.0),
+			"E5": (0.0, 75.0), "E6": (0.0, 75.0), "E7": (0.0, 100.0), "E8": (25.0, 75.0), "E9": (100.0, 0.0),
+		}
+		expected_spawn = {
+			"E1": (0.0, 0.0), "E2": (12.5, 12.5), "E3": (12.5, 12.5), "E4": (12.5, 12.5),
+			"E5": (12.5, 12.5), "E6": (12.5, 12.5), "E7": (50.0, 50.0), "E8": (50.0, 50.0), "E9": (100.0, 0.0),
+		}
+		for eid, (connected, disconnected) in expected_rear.items():
+			stats = self.species_stats[eid]["es"]
+			self.assertAlmostEqual(stats["rear_weighted_connected_length"], connected, msg=eid)
+			self.assertAlmostEqual(stats["rear_weighted_disconnected_length"], disconnected, msg=eid)
+		for eid, (connected, disconnected) in expected_spawn.items():
+			stats = self.species_stats[eid]["es"]
+			self.assertAlmostEqual(stats["spawn_weighted_connected_length"], connected, msg=eid)
+			self.assertAlmostEqual(stats["spawn_weighted_disconnected_length"], disconnected, msg=eid)
 
 	def test_barrier_b1_stats_read_at_its_upstream_edge_e7(self):
 		stats = self.barrier_rows_by_id["b1"]["stats"]["es"]
@@ -420,16 +450,27 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		self.assertEqual(stats["rear_upstream_accessible_length"], 700.0)
 		self.assertEqual(stats["rear_upstream_length"], 500.0)
 		self.assertEqual(stats["rear_functional_upstream_length"], 500.0)
-		self.assertEqual(stats["rear_weighted_upstream_length"], 0.0)
-		self.assertEqual(stats["rear_functional_weighted_upstream_length"], 0.0)
 		self.assertEqual(stats["spawn_upstream_length"], 600.0)
 		self.assertEqual(stats["spawn_functional_upstream_length"], 600.0)
-		self.assertEqual(stats["spawn_weighted_upstream_length"], 112.5)
-		self.assertEqual(stats["spawn_functional_weighted_upstream_length"], 112.5)
 		self.assertEqual(stats["spawnrear_upstream_length"], 600.0)
 		self.assertEqual(stats["spawnrear_functional_upstream_length"], 600.0)
-		self.assertEqual(stats["spawnrear_weighted_upstream_length"], 112.5)
-		self.assertEqual(stats["spawnrear_functional_weighted_upstream_length"], 112.5)
+
+		# b1's own passability: rear=0, spawn=0.5, spawnrear=min(0,0.5)=0. Base weighted length
+		# summed over E1..E7 (upstream_edge_id=E7, no anthro barrier sits within that range so the
+		# functional/reset sum equals the plain sum here): rear base sum = 350, spawn base sum = 225,
+		# spawnrear base sum (per-edge max of rear/spawn base) = 375.
+		self.assertAlmostEqual(stats["rear_weighted_connected_upstream_length"], 350.0 * 0.0)
+		self.assertAlmostEqual(stats["rear_weighted_disconnected_upstream_length"], 350.0 * 1.0)
+		self.assertAlmostEqual(stats["rear_functional_weighted_connected_upstream_length"], 350.0 * 0.0)
+		self.assertAlmostEqual(stats["rear_functional_weighted_disconnected_upstream_length"], 350.0 * 1.0)
+		self.assertAlmostEqual(stats["spawn_weighted_connected_upstream_length"], 225.0 * 0.5)
+		self.assertAlmostEqual(stats["spawn_weighted_disconnected_upstream_length"], 225.0 * 0.5)
+		self.assertAlmostEqual(stats["spawn_functional_weighted_connected_upstream_length"], 225.0 * 0.5)
+		self.assertAlmostEqual(stats["spawn_functional_weighted_disconnected_upstream_length"], 225.0 * 0.5)
+		self.assertAlmostEqual(stats["spawnrear_weighted_connected_upstream_length"], 375.0 * 0.0)
+		self.assertAlmostEqual(stats["spawnrear_weighted_disconnected_upstream_length"], 375.0 * 1.0)
+		self.assertAlmostEqual(stats["spawnrear_functional_weighted_connected_upstream_length"], 375.0 * 0.0)
+		self.assertAlmostEqual(stats["spawnrear_functional_weighted_disconnected_upstream_length"], 375.0 * 1.0)
 
 	def test_barrier_b2_stats_read_at_its_upstream_edge_e8(self):
 		stats = self.barrier_rows_by_id["b2"]["stats"]["es"]
@@ -455,16 +496,28 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		self.assertEqual(stats["rear_upstream_accessible_length"], 800.0)
 		self.assertEqual(stats["rear_upstream_length"], 600.0)
 		self.assertEqual(stats["rear_functional_upstream_length"], 100.0)
-		self.assertEqual(stats["rear_weighted_upstream_length"], 25.0)
-		self.assertEqual(stats["rear_functional_weighted_upstream_length"], 25.0)
 		self.assertEqual(stats["spawn_upstream_length"], 700.0)
 		self.assertEqual(stats["spawn_functional_upstream_length"], 100.0)
-		self.assertEqual(stats["spawn_weighted_upstream_length"], 162.5)
-		self.assertEqual(stats["spawn_functional_weighted_upstream_length"], 50.0)
 		self.assertEqual(stats["spawnrear_upstream_length"], 700.0)
 		self.assertEqual(stats["spawnrear_functional_upstream_length"], 100.0)
-		self.assertEqual(stats["spawnrear_weighted_upstream_length"], 162.5)
-		self.assertEqual(stats["spawnrear_functional_weighted_upstream_length"], 50.0)
+
+		# b2's own passability: rear=0.25, spawn=0.5, spawnrear=min(0.5,0.25)=0.25. Base weighted
+		# length summed over E1..E8 (upstream_edge_id=E8): rear base sum = 450, spawn base sum = 325,
+		# spawnrear base sum = 475. b1 sits at E8 (an anthro barrier "at" E8's own start), so the
+		# functional/reset sum resets there -- it's just E8's own base local value: rear=100,
+		# spawn=100, spawnrear=max(100,100)=100.
+		self.assertAlmostEqual(stats["rear_weighted_connected_upstream_length"], 450.0 * 0.25)
+		self.assertAlmostEqual(stats["rear_weighted_disconnected_upstream_length"], 450.0 * 0.75)
+		self.assertAlmostEqual(stats["rear_functional_weighted_connected_upstream_length"], 100.0 * 0.25)
+		self.assertAlmostEqual(stats["rear_functional_weighted_disconnected_upstream_length"], 100.0 * 0.75)
+		self.assertAlmostEqual(stats["spawn_weighted_connected_upstream_length"], 325.0 * 0.5)
+		self.assertAlmostEqual(stats["spawn_weighted_disconnected_upstream_length"], 325.0 * 0.5)
+		self.assertAlmostEqual(stats["spawn_functional_weighted_connected_upstream_length"], 100.0 * 0.5)
+		self.assertAlmostEqual(stats["spawn_functional_weighted_disconnected_upstream_length"], 100.0 * 0.5)
+		self.assertAlmostEqual(stats["spawnrear_weighted_connected_upstream_length"], 475.0 * 0.25)
+		self.assertAlmostEqual(stats["spawnrear_weighted_disconnected_upstream_length"], 475.0 * 0.75)
+		self.assertAlmostEqual(stats["spawnrear_functional_weighted_connected_upstream_length"], 100.0 * 0.25)
+		self.assertAlmostEqual(stats["spawnrear_functional_weighted_disconnected_upstream_length"], 100.0 * 0.75)
 
 
 if __name__ == "__main__":

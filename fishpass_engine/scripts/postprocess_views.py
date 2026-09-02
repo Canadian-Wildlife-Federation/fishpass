@@ -14,7 +14,10 @@ from model_plan import IDENTIFIER_RE
 STREAM_COLUMNS = "id, geometry, length, strahler_order, effective_length, segment_gradient"
 
 SPECIES_LIFECYCLE_FIELDS = ("upstream_length", "functional_upstream_length")
-SPECIES_LIFECYCLE_WEIGHTED_FIELDS = ("weighted_upstream_length", "functional_weighted_upstream_length")
+SPECIES_LIFECYCLE_WEIGHTED_FIELDS = (
+	"weighted_connected_upstream_length", "weighted_disconnected_upstream_length",
+	"functional_weighted_connected_upstream_length", "functional_weighted_disconnected_upstream_length",
+)
 
 
 def _species_by_lifecycle_map(reporting_species_lifecycles):
@@ -144,8 +147,9 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 		]
 		for lc in ("rear", "spawn"):
 			if lc in lifecycles:
-				column_name = f"{lc}_weighted_length"
-				columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
+				for field in ("weighted_length", "weighted_connected_length", "weighted_disconnected_length"):
+					column_name = f"{lc}_{field}"
+					columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
 
 		view_ident = quote_ident(f"streams_{species}")
 		column_sql = ",\n\t\t\t".join(columns)

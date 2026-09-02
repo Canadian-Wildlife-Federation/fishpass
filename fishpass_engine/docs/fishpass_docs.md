@@ -72,11 +72,35 @@ Each stream edge will have the following length fields added:
 * <species> <lifestage> Weighted Length 
   * If the edge is not habit for <species> <lifestage> then 0
   * If the edge is not naturally accessible for <species> <lifestage> then 0
-  * Otherwise the effective length * (<species> <lifestage> strahler order weighting) * (<species> <lifestage> passability status of the first not-passable anthropogenic downstream barrier) 
+  * Otherwise the effective length * (<species> <lifestage> strahler order weighting)
+  * Note: Only need spawning and rearing as lifestage, NOT combined
+* <species> <lifestage> Weighted Connected Length
+  * If the edge is not habit for <species> <lifestage> then 0
+  * If the edge is not naturally accessible for <species> <lifestage> then 0
+  * Otherwise the effective length * (<species> <lifestage> strahler order weighting) * (<species> <lifestage> passability status of the first not-passable anthropogenic downstream barrier)
+  * Note: Only need spawning and rearing as lifestage, NOT combined
+* <species> <lifestage> Weighted Disconnected Length
+  * If the edge is not habit for <species> <lifestage> then 0
+  * If the edge is not naturally accessible for <species> <lifestage> then 0
+  * Otherwise the effective length * (<species> <lifestage> strahler order weighting) * (1 - <species> <lifestage> passability status of the first not-passable anthropogenic downstream barrier)
   * Note: Only need spawning and rearing as lifestage, NOT combined
 
 ### 'Functional' Upstream Length
  * A barrier ‘resets’ the upstream length calculation when the barrier is a non-passable anthropogenic barrier.
+
+### Barrier Weighted Upstream Length
+
+For each barrier and <species> <lifestage>, the base weighted lengths (see above, not the
+connected/disconnected variants) of edges upstream of the barrier are summed, then split by that
+barrier's own passability status for <species> <lifestage>:
+* <species> <lifestage> Weighted Connected Upstream Length = (sum of base weighted lengths in the total upstream area) * (passability of the barrier)
+* <species> <lifestage> Weighted Disconnected Upstream Length = (sum of base weighted lengths in the total upstream area) * (1 - passability of the barrier)
+* <species> <lifestage> Weighted Functional Connected Upstream Length = (sum of base weighted lengths in the upstream area, stopping at the first non-passable anthropogenic barrier) * (passability of the barrier)
+* <species> <lifestage> Weighted Functional Disconnected Upstream Length = (sum of base weighted lengths in the upstream area, stopping at the first non-passable anthropogenic barrier) * (1 - passability of the barrier)
+
+The definition of 'functional' (stopping at the first non-passable anthropogenic barrier) is
+unchanged from above. For spawnrear, the passability of the barrier is the minimum of its spawn and
+rear passability (matching the combined "impassable if either lifestage fails" rule used elsewhere).
  
 
 

@@ -105,7 +105,7 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			self.downstream_first_barrier_passability,
 		)
 		# rearing weight: E1 (order 1, weight 0.5): 10*0.5=5; E2 (order 1): 20*0.5=10; E3 (order 2, weight 0.8): 5*0.8=4
-		self.assertAlmostEqual(result["es"]["rear_weighted_upstream_length"]["E3"], 5 + 10 + 4)
+		self.assertAlmostEqual(result["es"]["rear_weighted_upstream_length_base"]["E3"], 5 + 10 + 4)
 
 	def test_weighted_length_uses_spawning_weight_for_spawn_lifecycle(self):
 		result = ls.compute_species_length_stats(
@@ -116,7 +116,7 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		)
 		# spawning weight: E1 (order 1, weight 0.6): 10*0.6=6; E3 (order 2, weight 0.9): 5*0.9=4.5
 		# (E2 excluded, not spawn habitat)
-		self.assertAlmostEqual(result["es"]["spawn_weighted_upstream_length"]["E3"], 6 + 0 + 4.5)
+		self.assertAlmostEqual(result["es"]["spawn_weighted_upstream_length_base"]["E3"], 6 + 0 + 4.5)
 
 	def test_no_raw_weighted_length_for_spawnrear_lifecycle(self):
 		# There's no spawnrear stream-order weight, so there's no raw per-edge spawnrear_weighted_length
@@ -131,7 +131,7 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 
 	def test_spawnrear_weighted_upstream_length_is_max_of_rear_and_spawn(self):
 		# spawnrear's weighted upstream aggregates sum, per edge, the maximum of that edge's rear
-		# and spawn weighted_length -- computed even though "rear"/"spawn" aren't themselves
+		# and spawn base weighted length -- computed even though "rear"/"spawn" aren't themselves
 		# reported here. rearing weight 0.5/0.8 (order1/2), spawning weight 0.6/0.9 (order1/2).
 		# E1 (order1): rear 10*0.5=5, spawn 10*0.6=6 -> max 6
 		# E2 (order1, not spawn habitat): rear 20*0.5=10, spawn 0 -> max 10
@@ -142,8 +142,8 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			[("es", "spawnrear")],
 			self.downstream_first_barrier_passability,
 		)
-		self.assertAlmostEqual(result["es"]["spawnrear_weighted_upstream_length"]["E3"], 6 + 10 + 4.5)
-		self.assertAlmostEqual(result["es"]["spawnrear_functional_weighted_upstream_length"]["E3"], 6 + 10 + 4.5)
+		self.assertAlmostEqual(result["es"]["spawnrear_weighted_upstream_length_base"]["E3"], 6 + 10 + 4.5)
+		self.assertAlmostEqual(result["es"]["spawnrear_functional_weighted_upstream_length_base"]["E3"], 6 + 10 + 4.5)
 
 	def test_functional_length_resets_at_anthro_barrier(self):
 		# E3 has predecessors E1/E2, so a barrier there is observable at E4: with a reset,
@@ -231,7 +231,9 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		# spawn by checking E3, which is untouched by either override
 		self.assertAlmostEqual(result["es"]["spawn_weighted_length"]["E3"], 5 * 0.9)
 
-	def test_weighted_length_degraded_by_first_downstream_barrier_passability(self):
+	def test_weighted_length_is_undegraded_by_downstream_barrier_passability(self):
+		# <lc>_weighted_length is now the base quantity -- no barrier degradation at all, regardless
+		# of downstream barrier passability.
 		downstream_first_barrier_passability = {
 			"es": {
 				"rear": {**{eid: 1.0 for eid in self.edge_ids}, "E1": 0.25},
@@ -244,14 +246,11 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			[("es", "rear")],
 			downstream_first_barrier_passability,
 		)
-		# E1 (order 1, rearing weight 0.5): 10*0.5=5, degraded by its first downstream barrier's 0.25 passability
-		self.assertAlmostEqual(result["es"]["rear_weighted_length"]["E1"], 10 * 0.5 * 0.25)
-		# E3 unaffected -- its own first-downstream-barrier passability is untouched
-		self.assertAlmostEqual(result["es"]["rear_weighted_length"]["E3"], 5 * 0.8 * 1.0)
+		# E1 (order 1, rearing weight 0.5): 10*0.5=5, unaffected by its first downstream barrier's 0.25 passability
+		self.assertAlmostEqual(result["es"]["rear_weighted_length"]["E1"], 10 * 0.5)
+		self.assertAlmostEqual(result["es"]["rear_weighted_length"]["E3"], 5 * 0.8)
 
-	def test_weighted_upstream_length_reflects_downstream_degradation(self):
-		# weighted upstream aggregates now sum the already-degraded per-edge weighted_length, not
-		# an undegraded effective_length * strahler_weight value.
+	def test_weighted_connected_and_disconnected_length_split_by_first_downstream_barrier_passability(self):
 		downstream_first_barrier_passability = {
 			"es": {
 				"rear": {**{eid: 1.0 for eid in self.edge_ids}, "E1": 0.25},
@@ -264,12 +263,35 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			[("es", "rear")],
 			downstream_first_barrier_passability,
 		)
-		# E1 degraded: 10*0.5*0.25=1.25; E2 undegraded: 20*0.5=10; E3 undegraded: 5*0.8=4
-		self.assertAlmostEqual(result["es"]["rear_weighted_upstream_length"]["E3"], 1.25 + 10 + 4)
+		# E1 base = 10*0.5=5; connected = 5*0.25=1.25; disconnected = 5*0.75=3.75
+		self.assertAlmostEqual(result["es"]["rear_weighted_connected_length"]["E1"], 5 * 0.25)
+		self.assertAlmostEqual(result["es"]["rear_weighted_disconnected_length"]["E1"], 5 * 0.75)
+		# E3 unaffected -- its own first-downstream-barrier passability is 1.0, so fully connected
+		self.assertAlmostEqual(result["es"]["rear_weighted_connected_length"]["E3"], 5 * 0.8 * 1.0)
+		self.assertAlmostEqual(result["es"]["rear_weighted_disconnected_length"]["E3"], 0.0)
 
-	def test_only_nearest_downstream_barrier_degrades_weighted_length(self):
+	def test_weighted_upstream_length_base_is_undegraded_by_downstream_barrier_passability(self):
+		# the base upstream-length sum consumed by compute_barrier_upstream_downstream_stats sums
+		# the undegraded per-edge base weighted length, not one already split by any downstream
+		# barrier passability.
+		downstream_first_barrier_passability = {
+			"es": {
+				"rear": {**{eid: 1.0 for eid in self.edge_ids}, "E1": 0.25},
+				"spawn": {eid: 1.0 for eid in self.edge_ids},
+			},
+		}
+		result = ls.compute_species_length_stats(
+			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
+			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			[("es", "rear")],
+			downstream_first_barrier_passability,
+		)
+		# E1: 10*0.5=5; E2: 20*0.5=10; E3: 5*0.8=4 -- none degraded
+		self.assertAlmostEqual(result["es"]["rear_weighted_upstream_length_base"]["E3"], 5 + 10 + 4)
+
+	def test_only_nearest_downstream_barrier_splits_weighted_connected_length(self):
 		# E1's nearest downstream barrier is at E3 (0.5); a further barrier at E4 (0.5) must not
-		# also be multiplied in -- unlike the old product-of-all-downstream-barriers formula.
+		# also be multiplied in -- unlike a product-of-all-downstream-barriers formula.
 		downstream_first_barrier_passability = {
 			"es": {
 				"rear": {**{eid: 1.0 for eid in self.edge_ids}, "E1": 0.5, "E2": 0.5},
@@ -282,7 +304,7 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			[("es", "rear")],
 			downstream_first_barrier_passability,
 		)
-		self.assertAlmostEqual(result["es"]["rear_weighted_length"]["E1"], 10 * 0.5 * 0.5)
+		self.assertAlmostEqual(result["es"]["rear_weighted_connected_length"]["E1"], 10 * 0.5 * 0.5)
 
 
 class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
@@ -360,7 +382,10 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		self.assertEqual(result["b1"]["es"]["downstream_natural_spawn_count"], 0)
 
 	def test_length_fields_taken_as_is_at_upstream_edge(self):
-		barriers = [{"id": "b1", "edge_id": "E3", "upstream_edge_id": "E2", "structure_type": "natural"}]
+		barriers = [{
+			"id": "b1", "edge_id": "E3", "upstream_edge_id": "E2", "structure_type": "natural",
+			"species_passability_value": {"es_spawn": 0.4, "es_rear": 0.4},
+		}]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},
@@ -382,8 +407,8 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 				"rear_upstream_accessible_length": {"E2": 35.0},
 				"rear_upstream_length": {"E2": 35.0},
 				"rear_functional_upstream_length": {"E2": 5.0},
-				"rear_weighted_upstream_length": {"E2": 19.0},
-				"rear_functional_weighted_upstream_length": {"E2": 4.0},
+				"rear_weighted_upstream_length_base": {"E2": 19.0},
+				"rear_functional_weighted_upstream_length_base": {"E2": 4.0},
 			},
 		}
 		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
@@ -391,11 +416,79 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		self.assertEqual(result["b1"]["es"]["rear_upstream_accessible_length"], 35.0)
 		self.assertEqual(result["b1"]["es"]["rear_upstream_length"], 35.0)
 		self.assertEqual(result["b1"]["es"]["rear_functional_upstream_length"], 5.0)
-		self.assertEqual(result["b1"]["es"]["rear_weighted_upstream_length"], 19.0)
-		self.assertEqual(result["b1"]["es"]["rear_functional_weighted_upstream_length"], 4.0)
+		# the raw base fields are internal-only -- not copied through to the barrier's output
+		self.assertNotIn("rear_weighted_upstream_length_base", result["b1"]["es"])
+		self.assertNotIn("rear_functional_weighted_upstream_length_base", result["b1"]["es"])
+		# derived connected/disconnected fields = base sum * this barrier's own passability (0.4) / (1 - 0.4)
+		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_connected_upstream_length"], 19.0 * 0.4)
+		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_disconnected_upstream_length"], 19.0 * 0.6)
+		self.assertAlmostEqual(result["b1"]["es"]["rear_functional_weighted_connected_upstream_length"], 4.0 * 0.4)
+		self.assertAlmostEqual(result["b1"]["es"]["rear_functional_weighted_disconnected_upstream_length"], 4.0 * 0.6)
+
+	def test_spawnrear_upstream_length_uses_min_of_spawn_and_rear_passability(self):
+		barriers = [{
+			"id": "b1", "edge_id": "E3", "upstream_edge_id": "E2", "structure_type": "anthropogenic",
+			"species_passability_value": {"es_spawn": 0.7, "es_rear": 0.3},
+		}]
+		barrier_stats = {
+			"es": {
+				"upstream_natural_spawnrear_count": {"E3": 0},
+				"upstream_anthro_spawnrear_count": {"E3": 0},
+				"downstream_natural_spawnrear_count": {"E3": 0},
+				"downstream_anthro_spawnrear_count": {"E3": 0},
+				"downstream_natural_spawn_ids": {"E3": []},
+				"downstream_natural_rear_ids": {"E3": []},
+				"downstream_anthro_spawn_ids": {"E3": []},
+				"downstream_anthro_rear_ids": {"E3": []},
+			},
+		}
+		barrier_here_by_species = {
+			"es": {"natural": {"E3": 0}, "anthro": {"E3": 1}},
+		}
+		species_length_stats = {
+			"es": {"spawnrear_weighted_upstream_length_base": {"E2": 20.0}, "spawnrear_functional_weighted_upstream_length_base": {"E2": 10.0}},
+		}
+		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		# min(0.7, 0.3) = 0.3
+		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_weighted_connected_upstream_length"], 20.0 * 0.3)
+		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_weighted_disconnected_upstream_length"], 20.0 * 0.7)
+		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_functional_weighted_connected_upstream_length"], 10.0 * 0.3)
+		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_functional_weighted_disconnected_upstream_length"], 10.0 * 0.7)
+
+	def test_upstream_length_treats_missing_passability_key_as_zero(self):
+		# missing species_lifestage key on this barrier's own species_passability_value is treated
+		# as 0 (full barrier), consistent with is_impassable's "missing = full barrier" convention.
+		barriers = [{
+			"id": "b1", "edge_id": "E3", "upstream_edge_id": "E2", "structure_type": "anthropogenic",
+			"species_passability_value": {},
+		}]
+		barrier_stats = {
+			"es": {
+				"upstream_natural_spawnrear_count": {"E3": 0},
+				"upstream_anthro_spawnrear_count": {"E3": 0},
+				"downstream_natural_spawnrear_count": {"E3": 0},
+				"downstream_anthro_spawnrear_count": {"E3": 0},
+				"downstream_natural_spawn_ids": {"E3": []},
+				"downstream_natural_rear_ids": {"E3": []},
+				"downstream_anthro_spawn_ids": {"E3": []},
+				"downstream_anthro_rear_ids": {"E3": []},
+			},
+		}
+		barrier_here_by_species = {
+			"es": {"natural": {"E3": 0}, "anthro": {"E3": 1}},
+		}
+		species_length_stats = {
+			"es": {"rear_weighted_upstream_length_base": {"E2": 19.0}, "rear_functional_weighted_upstream_length_base": {"E2": 4.0}},
+		}
+		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_connected_upstream_length"], 0.0)
+		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_disconnected_upstream_length"], 19.0)
 
 	def test_length_fields_none_when_upstream_edge_id_missing(self):
-		barriers = [{"id": "b1", "edge_id": "E3", "upstream_edge_id": None, "structure_type": "natural"}]
+		barriers = [{
+			"id": "b1", "edge_id": "E3", "upstream_edge_id": None, "structure_type": "natural",
+			"species_passability_value": {"es_rear": 0.4},
+		}]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},
@@ -412,10 +505,18 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			"es": {"natural": {"E3": 1}, "anthro": {"E3": 0}},
 		}
 		species_length_stats = {
-			"es": {"rear_upstream_length": {"E1": 5.0, "E2": 5.0}},
+			"es": {
+				"rear_upstream_length": {"E1": 5.0, "E2": 5.0},
+				"rear_weighted_upstream_length_base": {"E1": 5.0, "E2": 5.0},
+				"rear_functional_weighted_upstream_length_base": {"E1": 5.0, "E2": 5.0},
+			},
 		}
 		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
 		self.assertIsNone(result["b1"]["es"]["rear_upstream_length"])
+		self.assertIsNone(result["b1"]["es"]["rear_weighted_connected_upstream_length"])
+		self.assertIsNone(result["b1"]["es"]["rear_weighted_disconnected_upstream_length"])
+		self.assertIsNone(result["b1"]["es"]["rear_functional_weighted_connected_upstream_length"])
+		self.assertIsNone(result["b1"]["es"]["rear_functional_weighted_disconnected_upstream_length"])
 
 
 if __name__ == "__main__":
