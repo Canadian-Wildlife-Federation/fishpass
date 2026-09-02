@@ -64,6 +64,22 @@ def upstream_order(predecessors, roots):
 	return order
 
 
+def upstream_closure(predecessors, seed_ids):
+	"""Return the set of edge_ids consisting of every id in seed_ids plus all of their upstream
+	ancestors (transitively, via predecessors) -- every edge that drains into a seed, directly or
+	indirectly, including the seeds themselves."""
+
+	closure = set()
+	stack = list(seed_ids)
+	while stack:
+		eid = stack.pop()
+		if eid in closure:
+			continue
+		closure.add(eid)
+		stack.extend(predecessors.get(eid, []))
+	return closure
+
+
 def downstream_order(order_up):
 	"""Reverse of upstream_order: every edge appears only after its successor. Correct
 	processing order for a downward (outlet -> headwaters) propagating pass."""

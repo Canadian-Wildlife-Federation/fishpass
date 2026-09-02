@@ -162,15 +162,34 @@ class LoadModelPlanTests(unittest.TestCase):
 			with self.assertRaises(SystemExit):
 				mp.load_model_plan("bad", models_dir=models_dir)
 
-	def test_upstream_of_not_supported_exits(self):
+	def test_upstream_of_parses(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			models_dir = Path(tmp)
+			(models_dir / "upplan.yaml").write_text("""
+code: upplan
+output_schema: model_up
+aoi:
+  upstream_of:
+    - 12345678-1234-1234-1234-123456789012
+target_species:
+  - chn
+reporting_values:
+  - all_all
+structure_types:
+  - dams
+""")
+			plan = mp.load_model_plan("upplan", models_dir=models_dir)
+		self.assertEqual(plan["aoi_kind"], "upstream_of")
+		self.assertEqual(plan["aoi_value"], ["12345678-1234-1234-1234-123456789012"])
+
+	def test_upstream_of_empty_list_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			models_dir = Path(tmp)
 			(models_dir / "bad.yaml").write_text("""
 code: bad
 output_schema: model_bad
 aoi:
-  upstream_of:
-    - 12345678-1234-1234-1234-123456789012
+  upstream_of: []
 target_species:
   - chn
 reporting_values:

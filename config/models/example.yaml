@@ -6,10 +6,11 @@ name: Example Plan
 output_schema: model_example
 
 aoi:
-  workunit:
-    - 02YL000
-    - 02YG000
-
+#  workunit:
+#    - 02YL000
+#    - 02YG000
+  province:
+    - nb
 target_species:
   - as
 

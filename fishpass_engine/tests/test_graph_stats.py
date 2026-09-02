@@ -57,6 +57,24 @@ class OrderingTests(unittest.TestCase):
 		self.assertEqual(down[0], "E4")
 
 
+class UpstreamClosureTests(unittest.TestCase):
+	def test_single_seed_includes_its_ancestors(self):
+		_successor, predecessors, _roots = gs.build_graph(make_confluence_edges())
+		self.assertEqual(gs.upstream_closure(predecessors, ["E3"]), {"E1", "E2", "E3"})
+
+	def test_headwater_seed_has_no_ancestors(self):
+		_successor, predecessors, _roots = gs.build_graph(make_confluence_edges())
+		self.assertEqual(gs.upstream_closure(predecessors, ["E1"]), {"E1"})
+
+	def test_nested_seeds_union_to_the_larger_closure(self):
+		_successor, predecessors, _roots = gs.build_graph(make_confluence_edges())
+		self.assertEqual(gs.upstream_closure(predecessors, ["E1", "E3"]), {"E1", "E2", "E3"})
+
+	def test_sibling_seeds_union_both_branches(self):
+		_successor, predecessors, _roots = gs.build_graph(make_confluence_edges())
+		self.assertEqual(gs.upstream_closure(predecessors, ["E1", "E2"]), {"E1", "E2"})
+
+
 class PropagateTests(unittest.TestCase):
 	def setUp(self):
 		self.successor, self.predecessors, self.roots = gs.build_graph(make_confluence_edges())

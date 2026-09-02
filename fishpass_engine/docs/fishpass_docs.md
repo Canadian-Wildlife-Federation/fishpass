@@ -179,7 +179,13 @@ Model Parameter File: aoi_filter
 * aoi = 'province'
   * create a filter using the province_territory_code attribute from the chyf_raw.aoi table
 * aoi = 'upstream_of'
-  * Fail saying not yet supported. We will implement this later.
+  * Resolve the given edge ids' `graph_id`(s) (failing the run if any edge id doesn't exist), then
+    filter on every `chyf_raw.aoi` id that has any edge on those `graph_id`(s) -- the same
+    aoi_id-based copy as above, so the full `graph_id` component(s) get copied in.
+  * Immediately afterward, delete every copied edge that isn't upstream of (or one of) the given
+    edges -- computed per `graph_id` as the union of each given edge's own upstream closure (edge +
+    all ancestors), which also strips out any unrelated `graph_id` pulled in incidentally by
+    sharing an aoi with a target `graph_id`.
 
 ### Load Structures
 

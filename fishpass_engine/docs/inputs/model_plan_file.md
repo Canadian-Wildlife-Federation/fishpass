@@ -48,7 +48,7 @@ aoi:
     - ns
 ```
 
-**upstream_of** — run on the network upstream of one or more CHyF stream edge ids. If a given edge id doesn't exist, the software will abort. *(Not yet supported)*
+**upstream_of** — run on the network upstream of one or more CHyF stream edge ids. If a given edge id doesn't exist, the software will abort. If multiple edge ids are given, the network upstream of each is unioned together (so giving both a downstream edge and one of its own upstream edges is harmless -- the downstream edge's own upstream area already includes the other).
 
 ```yaml
 aoi:
