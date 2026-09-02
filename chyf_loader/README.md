@@ -4,7 +4,17 @@ Copies the CHyF2 stream network into the FishPass database's `chyf_raw` schema, 
 stream segments, and computes segment length. See [requirements.md](requirements.md) for the
 full requirements this implements.
 
-## One-time setup: `init/database/chyf_raw_init.sql`
+## Requirements
+
+**psql**
+
+`load.py` shells out to the `psql` command-line client, so `psql` must be installed and on the
+`PATH` to run it locally (e.g. via [`run.ps1`](run.ps1) / [`run.sh`](run.sh)).
+
+
+## One-time setup
+
+ `init/database/chyf_raw_init.sql`
 
 Before the reload pipeline can be used, the `chyf_raw` schema, its tables, and the FDW
 connection to CHyF2 must exist on the target FishPass database. Run this manually (it is not
