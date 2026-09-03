@@ -8,7 +8,7 @@ on:
         required: true
 
 jobs:
-  run:
+  run_fishpass_analysis:
     runs-on: ubuntu-latest
     env:
       PYTHONUNBUFFERED: "1"

@@ -4,7 +4,7 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  reload:
+  reload_chyf:
     runs-on: ubuntu-latest
     env:
       PYTHONUNBUFFERED: "1"
