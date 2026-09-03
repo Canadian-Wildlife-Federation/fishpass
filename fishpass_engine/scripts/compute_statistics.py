@@ -5,6 +5,8 @@ partitioned design behind steps 5-9, and graph_component.py's module docstring f
 AOI-boundary caveat.
 """
 
+import logging
+
 from barrier_tables import (
 	create_and_populate_gradient_barriers_cache,
 	write_barrier_stat_tables,
@@ -22,6 +24,8 @@ from graph_component import (
 )
 from network_break import break_network
 from species_params import load_species_params
+
+logger = logging.getLogger(__name__)
 
 NO_DATA = -9999  # sentinel used in chyf_raw for a missing smoothed-elevation (M ordinate) value
 BUNDLE_EDGE_BUDGET = 100_000  # max total edge count packed into one bulk-fetch bundle of graph_ids
@@ -94,7 +98,7 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 	graph_id_counts = fetch_graph_id_counts(cursor, output_schema)
 	bundles = build_graph_id_bundles(graph_id_counts, BUNDLE_EDGE_BUDGET)
 	total_components = len(graph_id_counts)
-	print(f"Step 5-9: processing {total_components} connected component(s) in {len(bundles)} bundle(s)...")
+	logger.info("Step 5-9: processing %d connected component(s) in %d bundle(s)...", total_components, len(bundles))
 
 	all_barrier_rows = []
 	pending_write_rows = []
@@ -123,7 +127,10 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 				pending_write_rows.clear()
 
 			if components_done % 100 == 0 or components_done == total_components:
-				print(f"  Processed {components_done}/{total_components} connected component(s) (bundle {bundle_num}/{len(bundles)}).")
+				logger.info(
+					"  Processed %d/%d connected component(s) (bundle %d/%d).",
+					components_done, total_components, bundle_num, len(bundles),
+				)
 
 	flush_stats_writes(cursor, output_schema, pending_write_rows)
 	return all_barrier_rows
@@ -140,27 +147,27 @@ def compute_statistics(conn, cursor, plan, srid):
 	# Step 1 (Load the stream network) -- <output_schema>.streams already holds the working
 	# network from Load Stream Network/Load Structures/Process Habitat; nothing to do here.
 
-	print("Break Network");
+	logger.info("Break Network")
 	new_segments = break_network(conn, cursor, plan, srid)  # step 2
-	print(f"Break Network - done: {new_segments} new segment(s).")
+	logger.info("Break Network - done: %d new segment(s).", new_segments)
 
-	print("Compute Effective Length and Segment Gradient")
+	logger.info("Compute Effective Length and Segment Gradient")
 	compute_effective_length_and_gradient(cursor, output_schema)  # steps 3-4
 	conn.commit()
-	print("Compute Effective Length and Segment Gradient - done.")
+	logger.info("Compute Effective Length and Segment Gradient - done.")
 
-	print("Compute Edge Statistics")
+	logger.info("Compute Edge Statistics")
 	species_params_by_code = load_species_params()
 	barrier_rows = run_component_statistics(cursor, output_schema, plan, species_params_by_code)  # steps 5-9
 	conn.commit()
-	print(f"Compute Edge Statistics - done: ({len(barrier_rows)} barrier(s) processed).")
+	logger.info("Compute Edge Statistics - done: (%d barrier(s) processed).", len(barrier_rows))
 
-	print("Writing barrier stat tables")
+	logger.info("Writing barrier stat tables")
 	write_barrier_stat_tables(cursor, output_schema, barrier_rows)
 	conn.commit()
-	print("Writing barrier stat tables - done.")
+	logger.info("Writing barrier stat tables - done.")
 
 	if plan["include_gradient_barriers"]:
 		create_and_populate_gradient_barriers_cache(cursor, output_schema, srid)
 	conn.commit()
-	print("Gradient barriers cache table: done.")
+	logger.info("Gradient barriers cache table: done.")
