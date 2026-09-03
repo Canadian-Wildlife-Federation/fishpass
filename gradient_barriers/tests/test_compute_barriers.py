@@ -157,7 +157,7 @@ class FlagSpeciesTests(unittest.TestCase):
 
 class ComputeBarriersTests(unittest.TestCase):
 
-	"""The i / A / B worked example from requirements.md's "Design Decisions" section:
+	"""The i / A / B worked example from gradient_barriers_doc.md's "Design Decisions" section:
 	i: 0m, elevation 0; A: 50m, elevation 5 (10% grade); B: 150m, elevation 5.5 (0.5% grade for
 	the 100m beyond A). Interpolating between A and B for i's 100m mark gives 5.25%; A's own
 	100m mark lands exactly on B, giving 0.5%.
@@ -485,23 +485,23 @@ class LoadAoiConfigTests(unittest.TestCase):
 	def test_missing_file_means_full_run(self):
 		self.assertEqual(cb.load_aoi_config(Path("/no/such/gradient_barriers.yaml")), [])
 
-	def test_blank_short_names_means_full_run(self):
+	def test_blank_workunit_means_full_run(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			config_path = Path(tmp) / "gradient_barriers.yaml"
-			config_path.write_text("aoi:\n  short_names: []\n")
+			config_path.write_text("aoi:\n  workunit: []\n")
 			self.assertEqual(cb.load_aoi_config(config_path), [])
 
-	def test_populated_short_names_are_parsed_and_stripped(self):
+	def test_populated_workunit_are_parsed_and_stripped(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			config_path = Path(tmp) / "gradient_barriers.yaml"
-			config_path.write_text("aoi:\n  short_names: [08MF001, 08MF002]\n")
+			config_path.write_text("aoi:\n  workunit: [08MF001, 08MF002]\n")
 			self.assertEqual(cb.load_aoi_config(config_path), ["08MF001", "08MF002"])
 
 	def test_invalid_short_name_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			config_path = Path(tmp) / "gradient_barriers.yaml"
 			config_path.write_text(
-				"aoi:\n  short_names: ['08MF001; DROP TABLE support.gradient_barriers;']\n"
+				"aoi:\n  workunit: ['08MF001; DROP TABLE support.gradient_barriers;']\n"
 			)
 			with self.assertRaises(SystemExit):
 				cb.load_aoi_config(config_path)

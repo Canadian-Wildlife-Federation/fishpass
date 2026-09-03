@@ -1,7 +1,7 @@
 # CHyF Loader
 
 Copies the CHyF2 stream network into the FishPass database's `chyf_raw` schema, flags isolated
-stream segments, and computes segment length. See [requirements.md](requirements.md) for the
+stream segments, and computes segment length. See [chyf_loader_doc](docs/chyf_loader_doc.md) for the
 full requirements this implements.
 
 ## Requirements

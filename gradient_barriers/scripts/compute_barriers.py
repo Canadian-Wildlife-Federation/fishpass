@@ -8,6 +8,7 @@ README.md) -- never from a config file and never logged.
 
 import argparse
 import json
+import logging
 import math
 import re
 import sys
@@ -20,6 +21,8 @@ import os
 import psycopg
 import shapely
 import yaml
+
+logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPECIES_PARAMS_FILE = REPO_ROOT / "config" / "fish_species_parameters.yaml"
@@ -53,19 +56,20 @@ def parse_args():
 
 def load_aoi_config(config_path):
 	"""Return the list of chyf_raw.aoi.short_name values to scope this run to, from the
-	aoi.short_names setting in config_path. Returns [] (meaning: recompute the entire network)
-	if config_path doesn't exist or	short_names is empty."""
+	aoi.workunit setting in config_path (same key as a fishpass_engine model plan's aoi.workunit).
+	Returns [] (meaning: recompute the entire network) if config_path doesn't exist or
+	aoi.workunit is empty."""
 
 	if not config_path.is_file():
 		return []
 
 	with open(config_path) as f:
 		data = yaml.safe_load(f) or {}
-	short_names = (data.get("aoi") or {}).get("short_names") or []
+	short_names = (data.get("aoi") or {}).get("workunit") or []
 
 	invalid = [s for s in short_names if not SHORT_NAME_RE.match(s)]
 	if invalid:
-		sys.exit(f"Invalid short_name(s) in aoi.short_names: {', '.join(invalid)}")
+		sys.exit(f"Invalid short_name(s) in aoi.workunit: {', '.join(invalid)}")
 
 	return short_names
 
@@ -223,15 +227,15 @@ def prepare_tables(cursor, srid):
 		cursor.execute(
 			f"ALTER INDEX support.gradient_barriers_geometry_idx RENAME TO {archive_name}_geometry_idx;"
 		)
-		print(f"Archived existing table to support.{archive_name}")
+		logger.info("Archived existing table to support.%s", archive_name)
 
 	if table_exists(cursor, "gradient_barriers_metadata"):
 		# rename existing table with current date
 		# to ensure we keep a copy of it and don't lose
 		# any manual updates
 		archive_name = f"gradient_barriers_metadata_{archive_postfix}";
-		cursor.execute(f"ALTER TABLE support.gradient_barriers_metadata RENAME TO {archive_name};")		
-		print(f"Archived existing table to support.{archive_name}")
+		cursor.execute(f"ALTER TABLE support.gradient_barriers_metadata RENAME TO {archive_name};")
+		logger.info("Archived existing table to support.%s", archive_name)
 
 	create_tables(cursor, srid);
 
@@ -251,7 +255,7 @@ def backup_and_clear_aoi_rows(cursor, srid, short_names):
 	audit table, then delete them from the live table, ahead of a scoped recompute."""
 
 	if not table_exists(cursor, "gradient_barriers"):
-		print("support.gradient_barriers does not exist yet -- creating it.")
+		logger.info("support.gradient_barriers does not exist yet -- creating it.")
 		create_tables(cursor, srid)
 		return
 
@@ -267,7 +271,7 @@ def backup_and_clear_aoi_rows(cursor, srid, short_names):
 		"DELETE FROM support.gradient_barriers WHERE workunit && %s::varchar[]",
 		(short_names,),
 	)
-	print(f"Archived {cursor.rowcount} existing row(s) for {', '.join(short_names)} to support.{backup_name}")
+	logger.info("Archived %d existing row(s) for %s to support.%s", cursor.rowcount, ", ".join(short_names), backup_name)
 
 
 def fetch_edges(conn, aoi_ids=None):
@@ -322,7 +326,7 @@ def edge_vertices(wkb_bytes):
 	"""Return an (N, 3) array of (lon, lat, m) for a flowpath edge's LineString, in the
 	geometry's native (upstream -> downstream) vertex order.
 
-	Requires shapely>=2.1 / GEOS>=3.12 for M-ordinate support -- see requirements.md's
+	Requires shapely>=2.1 / GEOS>=3.12 for M-ordinate support -- see gradient_barriers_doc.md's
 	"Design Decisions" section.
 	"""
 	geom = shapely.from_wkb(wkb_bytes)
@@ -427,7 +431,7 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 				current_mainstem = mainstem_id
 				mainstem_count += 1
 				if mainstem_count % PROGRESS_LOG_INTERVAL_MAINSTEMS == 0:
-					print(f"Processed {mainstem_count} mainstem(s), {total + len(barriers)} barrier(s) found so far.")
+					logger.info("Processed %d mainstem(s), %d barrier(s) found so far.", mainstem_count, total + len(barriers))
 
 			in_scope = aoi_id_set is None or edge_aoi_id in aoi_id_set
 
@@ -463,7 +467,7 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 		total += len(barriers)
 
 	if invalid_elevation_count:
-		print(f"Skipped {invalid_elevation_count} vertex/vertices with invalid elevation (NaN or {NO_DATA}).")
+		logger.info("Skipped %d vertex/vertices with invalid elevation (NaN or %d).", invalid_elevation_count, NO_DATA)
 
 	return total
 
@@ -509,6 +513,12 @@ def format_elapsed(seconds):
 def main():
 	start_time = time.monotonic()
 
+	logging.basicConfig(
+		level=logging.INFO,
+		format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+		datefmt="%Y-%m-%d %H:%M:%S",
+	)
+
 	args = parse_args()
 	require_env()
 	species_params = load_species_parameters(args.species_params)
@@ -520,13 +530,13 @@ def main():
 			srid = get_source_srid(cursor)
 
 			if short_names:
-				print(f"Reprocessing AOI(s): {', '.join(short_names)}")
+				logger.info("Reprocessing AOI(s): %s", ", ".join(short_names))
 				aois = resolve_aois(cursor, short_names)
 				backup_and_clear_aoi_rows(cursor, srid, short_names)
 				conn.commit()
 				count = compute_barriers(conn, cursor, srid, species_params, aoi_ids=[a["id"] for a in aois])
 				if not table_exists(cursor, "gradient_barriers_metadata"):
-					print("gradient_barriers_metadata table does not exist - metadata will not be updated")
+					logger.info("gradient_barriers_metadata table does not exist - metadata will not be updated")
 				else:
 					insert_metadata_record(cursor, short_names, species_params)
 			else:
@@ -535,7 +545,7 @@ def main():
 				count = compute_barriers(conn, cursor, srid, species_params)
 				insert_metadata_record(cursor, ["all"], species_params)
 
-			print(f"Computed and inserted {count} barrier point(s).")
+			logger.info("Computed and inserted %d barrier point(s).", count)
 			if count:
 				assign_workunits(cursor)
 			conn.commit()
@@ -546,7 +556,7 @@ def main():
 		conn.close()
 
 	elapsed = format_elapsed(time.monotonic() - start_time)
-	print(f"Gradient barrier computation complete in {elapsed}.")
+	logger.info("Gradient barrier computation complete in %s.", elapsed)
 
 
 if __name__ == "__main__":

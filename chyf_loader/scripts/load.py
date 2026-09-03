@@ -7,6 +7,7 @@ README.md) -- never from the config file and never logged.
 """
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -19,6 +20,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RELOAD_SQL_DIR = REPO_ROOT / "sql" / "reload"
 DEFAULT_CONFIG = REPO_ROOT.parent / "config" / "chyf_loader.yaml"
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_ENV_VARS = [
 	"FISHPASS_HOST",
@@ -92,7 +95,7 @@ def schema_var_args(schema_vars):
 	return args
 
 
-def resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars):
+def resolve_workunit_ids(short_names, dry_run, schema_vars):
 	names_literal = "{" + ",".join(short_names) + "}"
 	query = (
 		"SELECT coalesce(array_agg(id), '{}') FROM :source_aoi_table "
@@ -100,7 +103,7 @@ def resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars):
 	)
 
 	if dry_run:
-		print(f"[dry-run] would resolve short_names {short_names} via {schema_vars['source_aoi_table']}")
+		logger.info("[dry-run] would resolve short_names %s via %s", short_names, schema_vars["source_aoi_table"])
 		return None
 
 	# psql on this environment does not interpolate :variables when the SQL is
@@ -120,12 +123,12 @@ def resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars):
 			"-t", "-A",
 			"-f", query_path,
 		]
-		if verbosity == "debug":
+		if logger.isEnabledFor(logging.DEBUG):
 			resolved_query = query.replace(
 				":source_aoi_table", schema_vars["source_aoi_table"]
 			).replace(":'short_names'", f"'{names_literal}'")
-			print("Resolving workunit ids with query:\n", resolved_query)
-			print("Command:", " ".join(cmd))
+			logger.debug("Resolving workunit ids with query:\n%s", resolved_query)
+			logger.debug("Command: %s", " ".join(cmd))
 
 		result = subprocess.run(cmd, env=psql_env(), capture_output=True, text=True)
 	finally:
@@ -144,7 +147,7 @@ def resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars):
 	return ids
 
 
-def run_reload_sql(workunit_ids, dry_run, verbosity, schema_vars):
+def run_reload_sql(workunit_ids, dry_run, schema_vars):
 	sql_files = sorted(RELOAD_SQL_DIR.glob("*.sql"))
 	if not sql_files:
 		sys.exit(f"No SQL files found in {RELOAD_SQL_DIR}")
@@ -161,11 +164,10 @@ def run_reload_sql(workunit_ids, dry_run, verbosity, schema_vars):
 			"-f", str(sql_file),
 		]
 		if dry_run:
-			print(f"[dry-run] would run: {' '.join(cmd)}")
+			logger.info("[dry-run] would run: %s", " ".join(cmd))
 			continue
 
-		if verbosity in ("debug", "info"):
-			print(f"Running {sql_file.name} ...")
+		logger.info("Running %s ...", sql_file.name)
 
 		result = subprocess.run(cmd, env=psql_env())
 		if result.returncode != 0:
@@ -182,18 +184,25 @@ def main():
 
 	args = parse_args()
 	short_names, dry_run, verbosity, schema_vars = load_config(args.config)
+	log_level = getattr(logging, verbosity.upper(), None)
+	if not isinstance(log_level, int):
+		sys.exit(f"Invalid behavior.verbosity {verbosity!r} -- expected one of: debug, info, warning, error")
+	logging.basicConfig(
+		level=log_level,
+		format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+		datefmt="%Y-%m-%d %H:%M:%S",
+	)
 	require_env()
 
-	print(f"Reloading workunit(s): {', '.join(short_names)}")
-	workunit_ids = resolve_workunit_ids(short_names, dry_run, verbosity, schema_vars)
-	run_reload_sql(workunit_ids, dry_run, verbosity, schema_vars)
+	logger.info("Reloading workunit(s): %s", ", ".join(short_names))
+	workunit_ids = resolve_workunit_ids(short_names, dry_run, schema_vars)
+	run_reload_sql(workunit_ids, dry_run, schema_vars)
 
 	elapsed = format_elapsed(time.monotonic() - start_time)
-	print(
-		f"Dry run complete in {elapsed} -- no changes made."
-		if dry_run
-		else f"Reload complete in {elapsed}."
-	)
+	if dry_run:
+		logger.info("Dry run complete in %s -- no changes made.", elapsed)
+	else:
+		logger.info("Reload complete in %s.", elapsed)
 
 
 if __name__ == "__main__":
