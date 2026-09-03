@@ -66,10 +66,10 @@ def resolve_upstream_of_aoi_ids(cursor, edge_ids):
 	component(s), which trim_to_upstream_of narrows down afterwards. Exits if any edge id doesn't
 	exist in chyf_raw.flowpath."""
 
-	cursor.execute("SELECT id, graph_id FROM chyf_raw.flowpath WHERE id = ANY(%s)", (edge_ids,))
+	cursor.execute("SELECT id, graph_id FROM chyf_raw.flowpath WHERE id = ANY(%s::uuid[])", (edge_ids,))
 	rows = cursor.fetchall()
-	found = {eid for eid, _graph_id in rows}
-	missing = [str(e) for e in edge_ids if e not in found]
+	found = {str(eid) for eid, _graph_id in rows}
+	missing = [e for e in edge_ids if str(e) not in found]
 	if missing:
 		sys.exit(f"Could not resolve upstream_of edge id(s) in chyf_raw.flowpath: {', '.join(missing)}")
 
@@ -187,7 +187,7 @@ def compute_upstream_of_keep_ids(cursor, output_schema, edge_ids):
 	upstream area -- the result is the union of all of them)."""
 
 	schema_ident = quote_ident(output_schema)
-	cursor.execute(f"SELECT graph_id FROM {schema_ident}.streams WHERE id = ANY(%s)", (edge_ids,))
+	cursor.execute(f"SELECT graph_id FROM {schema_ident}.streams WHERE id = ANY(%s::uuid[])", (edge_ids,))
 	graph_ids = list({row[0] for row in cursor.fetchall()})
 	if not graph_ids:
 		return set()
@@ -202,11 +202,11 @@ def compute_upstream_of_keep_ids(cursor, output_schema, edge_ids):
 			{"id": eid, "from_nexus_id": from_nexus_id, "to_nexus_id": to_nexus_id}
 		)
 
-	seed_ids = set(edge_ids)
+	seed_ids = {str(e) for e in edge_ids}
 	keep_ids = set()
 	for edges in edges_by_graph.values():
 		_successor, predecessors, _roots = build_graph(edges)
-		seeds_here = [e["id"] for e in edges if e["id"] in seed_ids]
+		seeds_here = [e["id"] for e in edges if str(e["id"]) in seed_ids]
 		keep_ids |= upstream_closure(predecessors, seeds_here)
 	return keep_ids
 

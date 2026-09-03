@@ -77,7 +77,7 @@ class ResolveUpstreamOfAoiIdsTests(unittest.TestCase):
 		self.assertEqual(sorted(result), ["aoi-a", "aoi-b"])
 
 		sql1, params1 = cursor.executed[0]
-		self.assertIn("FROM chyf_raw.flowpath WHERE id = ANY(%s)", sql1)
+		self.assertIn("FROM chyf_raw.flowpath WHERE id = ANY(%s::uuid[])", sql1)
 		self.assertEqual(params1, (["edge-1", "edge-2"],))
 
 		sql2, params2 = cursor.executed[1]
