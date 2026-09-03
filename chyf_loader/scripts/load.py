@@ -44,9 +44,9 @@ def load_config(config_path):
 	with open(config_path) as f:
 		data = yaml.safe_load(f) or {}
 
-	short_names = (data.get("workunits") or {}).get("short_names") or []
+	short_names = data.get("workunits") or []
 	if not short_names:
-		sys.exit("No workunits configured in workunits.short_names -- refusing to run.")
+		sys.exit("No workunits configured in workunits -- refusing to run.")
 
 	behavior = data.get("behavior") or {}
 	dry_run = behavior.get("dry_run", False)

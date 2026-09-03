@@ -36,7 +36,7 @@ Run the **CHyF Loader Reload** GitHub Action (`workflow_dispatch`, manual trigge
 CHyF2 data has changed and needs to be re-cached. It runs `chyf_loader/scripts/load.py`, which:
 
 1. Reads the workunit(s) to reload from [`config/chyf_loader.yaml`](../config/chyf_loader.yaml)
-   (`workunits.short_names`).
+   (`workunits`).
 2. Resolves those `short_name`s to `chyf2.aoi.id` UUIDs.
 3. Deletes all existing cached `chyf_raw` data.
 4. Copies the corresponding `aoi`, `shoreline` and (merged) `eflowpath` + `eflowpath_properties` rows from

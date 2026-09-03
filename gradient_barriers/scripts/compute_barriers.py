@@ -56,20 +56,20 @@ def parse_args():
 
 def load_aoi_config(config_path):
 	"""Return the list of chyf_raw.aoi.short_name values to scope this run to, from the
-	aoi.workunit setting in config_path (same key as a fishpass_engine model plan's aoi.workunit).
+	workunits setting in config_path.
 	Returns [] (meaning: recompute the entire network) if config_path doesn't exist or
-	aoi.workunit is empty."""
+	workunits is empty."""
 
 	if not config_path.is_file():
 		return []
 
 	with open(config_path) as f:
 		data = yaml.safe_load(f) or {}
-	short_names = (data.get("aoi") or {}).get("workunit") or []
+	short_names = data.get("workunits") or []
 
 	invalid = [s for s in short_names if not SHORT_NAME_RE.match(s)]
 	if invalid:
-		sys.exit(f"Invalid short_name(s) in aoi.workunit: {', '.join(invalid)}")
+		sys.exit(f"Invalid short_name(s) in workunits: {', '.join(invalid)}")
 
 	return short_names
 

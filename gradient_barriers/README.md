@@ -44,10 +44,9 @@ To recompute barriers for just one or a few AOI(s) instead of the entire network
 [`config/gradient_barriers.yaml`](../config/gradient_barriers.yaml) and commit the change:
 
 ```yaml
-aoi:
-  workunit:
-    - 08MF001
-    - 08MG001
+workunits:
+  - 08MF001
+  - 08MG001
 ```
 
 Leave `workunit` empty (or delete the file) to recompute the entire network. When one or more `workunit`(s) are set, `compute_barriers.py`

@@ -488,20 +488,20 @@ class LoadAoiConfigTests(unittest.TestCase):
 	def test_blank_workunit_means_full_run(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			config_path = Path(tmp) / "gradient_barriers.yaml"
-			config_path.write_text("aoi:\n  workunit: []\n")
+			config_path.write_text("workunits: []\n")
 			self.assertEqual(cb.load_aoi_config(config_path), [])
 
 	def test_populated_workunit_are_parsed_and_stripped(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			config_path = Path(tmp) / "gradient_barriers.yaml"
-			config_path.write_text("aoi:\n  workunit: [08MF001, 08MF002]\n")
+			config_path.write_text("workunits: [08MF001, 08MF002]\n")
 			self.assertEqual(cb.load_aoi_config(config_path), ["08MF001", "08MF002"])
 
 	def test_invalid_short_name_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			config_path = Path(tmp) / "gradient_barriers.yaml"
 			config_path.write_text(
-				"aoi:\n  workunit: ['08MF001; DROP TABLE support.gradient_barriers;']\n"
+				"workunits: ['08MF001; DROP TABLE support.gradient_barriers;']\n"
 			)
 			with self.assertRaises(SystemExit):
 				cb.load_aoi_config(config_path)
