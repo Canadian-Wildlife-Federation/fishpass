@@ -12,6 +12,21 @@ full requirements this implements.
 `PATH` to run it locally (e.g. via [`run.ps1`](run.ps1) / [`run.sh`](run.sh)).
 
 
+## Regular use: reload
+
+Run the **CHyF Loader Reload** GitHub Action (`workflow_dispatch`, manual trigger only) whenever
+CHyF2 data has changed and needs to be re-cached. 
+
+### Configure AOI
+To change which workunit(s) get loaded, edit `config/chyf_loader.yaml` and commit the change before running. All existing data is removed before reloading only the data for the specific AOIs.
+
+### Warnings
+**Destructive refresh:** All existing CHyF data is dropped and only the data for the AOI listed in the configure file is reloaded (not an additive action).
+
+**Workunits are connected:** 
+Users must be aware of interactions between workunit data and must ensure all appropriate workunits are loaded together; otherwise results of the analysis will not be accurate.  For example, mainstems will cross work unit boundaries; if mainstems are recomputed then all workunits must be reloaded - you cannot reload an individual work unit or the mainstems will not be contiguous across the boundaries. Additionally if you exclude connected workunits, `is_isolated` may not be computed correctly.
+
+
 ## One-time setup
 
  `init/database/chyf_raw_init.sql`
@@ -29,28 +44,3 @@ psql "host=<fishpass-host> port=<port> dbname=<dbname> user=<user>" \
 
 All statements in that script are idempotent (`IF NOT EXISTS`), so it's safe to re-run, e.g.
 after a schema change.
-
-## Regular use: reload
-
-Run the **CHyF Loader Reload** GitHub Action (`workflow_dispatch`, manual trigger only) whenever
-CHyF2 data has changed and needs to be re-cached. It runs `chyf_loader/scripts/load.py`, which:
-
-1. Reads the workunit(s) to reload from [`config/chyf_loader.yaml`](../config/chyf_loader.yaml)
-   (`workunits`).
-2. Resolves those `short_name`s to `chyf2.aoi.id` UUIDs.
-3. Deletes all existing cached `chyf_raw` data.
-4. Copies the corresponding `aoi`, `shoreline` and (merged) `eflowpath` + `eflowpath_properties` rows from
-   CHyF2 via FDW, filtered to `rank = 1` and `ef_type != 2`.
-5. Computes `length_km` for the newly loaded rows.
-6. Computes `is_isolated` for the newly loaded rows.
-
-Database connection details for both CHyF2 (source) and FishPass (target) come from GitHub
-Actions secrets and are injected as environment variables. They are never stored in the config file or logged.
-
-To change which workunit(s) get reloaded, edit `config/chyf_loader.yaml` and commit the change
-(see [`chyf_loader.yaml.example`](../config/chyf_loader.yaml.example) for the documented format).
-
-## WARNING: workunits are connected
-
-Users must be aware of interactions between workunit data and must ensure all appropriate workunits are loaded together; otherwise results of the analysis will not be accurate.  For example, mainstems will cross work unit boundaries; if mainstems are recomputed then all workunits must be reloaded - you cannot reload an individual work unit or the mainstems will not be contiguous across the boundaries. Additionally if you exclude connected workunits, `is_isolated` may not be computed correctly.
-

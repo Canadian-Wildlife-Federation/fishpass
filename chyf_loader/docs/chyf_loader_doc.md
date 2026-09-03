@@ -50,17 +50,30 @@ The following additional attributes will be added to all CHyF stream segments:
 Isolated Stream Segments are defined as any stream segment that does not flow into the coastline or AOI boundary.
 
 ## Process
-This script will use FDW to load required data (include all flowpath attributes) from the CHyF2 database into the chyf_raw schema and execute the required initial processing of this data which includes:
-* Remove isolated watersheds
-  * To identify isolated groups, keep groups that intersect the coastline or AOI boundaries.
-  * Rather than delete them, they will be flagged as isolated and not used in fish pass modelling
-* Computing segment length in km
+This script will use FDW to load required data (include all flowpath attributes) from the CHyF2 database into the chyf_raw schema.
 
-This will be developed as a collection of SQL commands. They will be executed via a GitHub action.
+It runs `chyf_loader/scripts/load.py`, which:
 
-Each run will drop all existing CHyF data cached in the FishPass database and reload it from CHyF.
+1. Reads the workunit(s) to reload from [`config/chyf_loader.yaml`](../config/chyf_loader.yaml)
+   (`workunits`).
+2. Resolves those `short_name`s to `chyf2.aoi.id` UUIDs.
+3. Deletes all existing cached `chyf_raw` data (for all AOI).
+4. Copies the corresponding `aoi`, `shoreline` and (merged) `eflowpath` + `eflowpath_properties` rows from
+   CHyF2 via FDW, filtered to `rank = 1` and `ef_type != 2`.
+5. Computes `length_km` for the newly loaded rows.
+6. Computes `is_isolated` for the newly loaded rows.
+    * This is used to identify isolated groups which are flagged and excluded from used in fish pass modelling
 
-WARNING: Users must be aware of interactions between workunit data and must ensure all appropriate workunits are loaded together; otherwise results of the analysis will not be accurate.  For example, mainstems will cross work unit boundaries; if mainstems are recomputed then all workunits must be reloaded - you cannot reload an individual work unit or the mainstems will not be contiguous across the boundaries.
+Database connection details for both CHyF2 (source) and FishPass (target) come from GitHub
+Actions secrets and are injected as environment variables. They are never stored in the config file or logged.
+
+
+**WARNINGS:** 
+
+**Data is Replaced** Each run will drop all existing CHyF data cached in the FishPass database and reload it from CHyF.
+
+**WorkUnit Interactions**
+Users must be aware of interactions between workunit data and must ensure all appropriate workunits are loaded together; otherwise results of the analysis will not be accurate.  For example, mainstems will cross work unit boundaries; if mainstems are recomputed then all workunits must be reloaded - you cannot reload an individual work unit or the mainstems will not be contiguous across the boundaries.
 
 # CHYF 2 Database Schema
 
@@ -119,5 +132,3 @@ CREATE TABLE chyf2.aoi (
 	CONSTRAINT aoi_short_name_key UNIQUE (short_name)
 );
 ```
-
-x
