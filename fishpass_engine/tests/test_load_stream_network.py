@@ -67,15 +67,88 @@ class ResolveProvinceAoiIdsTests(unittest.TestCase):
 			lsn.resolve_province_aoi_ids(cursor, ["zz"])
 
 
+class ResolveUpstreamOfAoiIdsTests(unittest.TestCase):
+	def test_resolves_aoi_ids_covering_graph_ids(self):
+		cursor = FakeCursor(fetch_results=[
+			[("edge-1", 5), ("edge-2", 7)],
+			[("aoi-a",), ("aoi-b",)],
+		])
+		result = lsn.resolve_upstream_of_aoi_ids(cursor, ["edge-1", "edge-2"])
+		self.assertEqual(sorted(result), ["aoi-a", "aoi-b"])
+
+		sql1, params1 = cursor.executed[0]
+		self.assertIn("FROM chyf_raw.flowpath WHERE id = ANY(%s::uuid[])", sql1)
+		self.assertEqual(params1, (["edge-1", "edge-2"],))
+
+		sql2, params2 = cursor.executed[1]
+		self.assertIn("SELECT DISTINCT aoi_id FROM chyf_raw.flowpath WHERE graph_id = ANY(%s)", sql2)
+		self.assertEqual(sorted(params2[0]), [5, 7])
+
+	def test_missing_edge_id_exits(self):
+		cursor = FakeCursor(fetch_results=[[("edge-1", 5)]])
+		with self.assertRaises(SystemExit):
+			lsn.resolve_upstream_of_aoi_ids(cursor, ["edge-1", "edge-missing"])
+
+
 class ResolveAoiIdsTests(unittest.TestCase):
 	def test_workunit_all_returns_none(self):
 		cursor = FakeCursor()
 		self.assertIsNone(lsn.resolve_aoi_ids(cursor, "workunit", "all"))
 
+	def test_upstream_of_dispatches(self):
+		cursor = FakeCursor(fetch_results=[[("edge-1", 5)], [("aoi-a",)]])
+		result = lsn.resolve_aoi_ids(cursor, "upstream_of", ["edge-1"])
+		self.assertEqual(result, ["aoi-a"])
+
 	def test_unsupported_kind_raises(self):
 		cursor = FakeCursor()
 		with self.assertRaises(ValueError):
-			lsn.resolve_aoi_ids(cursor, "upstream_of", ["x"])
+			lsn.resolve_aoi_ids(cursor, "nonsense", ["x"])
+
+
+class ComputeUpstreamOfKeepIdsTests(unittest.TestCase):
+	def _streams_rows(self):
+		# Confluence graph (graph_id 1): E1, E2 headwaters -> E3 -> E4 (outlet).
+		# Unrelated graph_id 2: E5 -> E6, pulled in incidentally by the aoi filter.
+		return [
+			("E1", "N1", "N3", 1), ("E2", "N2", "N3", 1),
+			("E3", "N3", "N4", 1), ("E4", "N4", "N5", 1),
+			("E5", "N6", "N7", 2), ("E6", "N7", "N8", 2),
+		]
+
+	def test_single_seed_keeps_only_its_own_upstream(self):
+		cursor = FakeCursor(fetch_results=[[(1,)], self._streams_rows()])
+		keep_ids = lsn.compute_upstream_of_keep_ids(cursor, "model_test", ["E3"])
+		self.assertEqual(keep_ids, {"E1", "E2", "E3"})
+
+	def test_nested_seeds_union_to_the_most_downstream(self):
+		cursor = FakeCursor(fetch_results=[[(1,)], self._streams_rows()])
+		keep_ids = lsn.compute_upstream_of_keep_ids(cursor, "model_test", ["E1", "E3"])
+		self.assertEqual(keep_ids, {"E1", "E2", "E3"})
+
+	def test_sibling_seeds_union_both_tributaries(self):
+		cursor = FakeCursor(fetch_results=[[(1,)], self._streams_rows()])
+		keep_ids = lsn.compute_upstream_of_keep_ids(cursor, "model_test", ["E1", "E2"])
+		self.assertEqual(keep_ids, {"E1", "E2"})
+
+	def test_no_matching_graph_id_returns_empty_set(self):
+		cursor = FakeCursor(fetch_results=[[]])
+		keep_ids = lsn.compute_upstream_of_keep_ids(cursor, "model_test", ["missing"])
+		self.assertEqual(keep_ids, set())
+
+
+class TrimToUpstreamOfTests(unittest.TestCase):
+	def test_deletes_edges_outside_the_upstream_closure(self):
+		streams_rows = [
+			("E1", "N1", "N3", 1), ("E2", "N2", "N3", 1),
+			("E3", "N3", "N4", 1), ("E4", "N4", "N5", 1),
+			("E5", "N6", "N7", 2), ("E6", "N7", "N8", 2),
+		]
+		cursor = FakeCursor(fetch_results=[[(1,)], streams_rows])
+		lsn.trim_to_upstream_of(cursor, "model_test", ["E3"])
+		sql, params = cursor.executed[-1]
+		self.assertIn('DELETE FROM "model_test".streams WHERE NOT (id = ANY(%s))', sql)
+		self.assertEqual(sorted(params[0]), ["E1", "E2", "E3"])
 
 
 class CopyStreamsTests(unittest.TestCase):

@@ -6,10 +6,15 @@ name: Example Plan
 output_schema: model_example
 
 aoi:
-  workunit:
-    - 02YL000
-    - 02YG000
-
+#  workunit:
+#    - 02YL000
+#    - 02YG000
+  province:
+    - ns
+#  upstream_of:
+#    - 48328d77-181d-43b9-bd83-a70501d55894
+#    - 2ffd9ef1-969e-4ce7-abff-8ce5d837f584
+    
 target_species:
   - as
 

@@ -47,8 +47,7 @@ def _fail(plan_path, message):
 
 def _validate_aoi(aoi, plan_path):
 	"""Return (aoi_kind, aoi_value) -- aoi_kind is one of 'workunit', 'province',
-	'upstream_of'. Exits if not exactly one is given, or if upstream_of is used (not yet
-	supported)."""
+	'upstream_of'. Exits if not exactly one is given."""
 
 	if not isinstance(aoi, dict):
 		_fail(plan_path, "'aoi' must be a mapping with exactly one of workunit/province/upstream_of")
@@ -61,8 +60,6 @@ def _validate_aoi(aoi, plan_path):
 		)
 
 	kind = present[0]
-	if kind == "upstream_of":
-		_fail(plan_path, "aoi.upstream_of is not yet supported")
 
 	value = aoi[kind]
 	if kind == "workunit" and value == "all":

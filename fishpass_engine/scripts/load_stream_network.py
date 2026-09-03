@@ -9,6 +9,7 @@ Network" section for why there is no separate flowpath copy.
 import sys
 
 from db import quote_ident
+from graph_stats import build_graph, upstream_closure
 
 STREAMS_FIELDS = (
 	"id", "aoi_id", "ef_type", "ef_subtype", "rank", "length",
@@ -59,6 +60,24 @@ def resolve_province_aoi_ids(cursor, province_codes):
 	return aoi_ids
 
 
+def resolve_upstream_of_aoi_ids(cursor, edge_ids):
+	"""Resolve chyf_raw.flowpath edge ids to the aoi ids covering every graph_id those edges
+	belong to -- enough aoi-scoped data for copy_streams/copy_aois to pull in the full graph_id
+	component(s), which trim_to_upstream_of narrows down afterwards. Exits if any edge id doesn't
+	exist in chyf_raw.flowpath."""
+
+	cursor.execute("SELECT id, graph_id FROM chyf_raw.flowpath WHERE id = ANY(%s::uuid[])", (edge_ids,))
+	rows = cursor.fetchall()
+	found = {str(eid) for eid, _graph_id in rows}
+	missing = [e for e in edge_ids if str(e) not in found]
+	if missing:
+		sys.exit(f"Could not resolve upstream_of edge id(s) in chyf_raw.flowpath: {', '.join(missing)}")
+
+	graph_ids = list({graph_id for _eid, graph_id in rows})
+	cursor.execute("SELECT DISTINCT aoi_id FROM chyf_raw.flowpath WHERE graph_id = ANY(%s)", (graph_ids,))
+	return [row[0] for row in cursor.fetchall()]
+
+
 def resolve_aoi_ids(cursor, aoi_kind, aoi_value):
 	"""Return the list of chyf_raw.aoi ids to copy for this plan's aoi selection, or None for
 	aoi.workunit == 'all' (meaning: copy everything, no filter needed)."""
@@ -69,7 +88,9 @@ def resolve_aoi_ids(cursor, aoi_kind, aoi_value):
 		return resolve_workunit_aoi_ids(cursor, aoi_value)
 	if aoi_kind == "province":
 		return resolve_province_aoi_ids(cursor, aoi_value)
-	raise ValueError(f"Unsupported aoi_kind: {aoi_kind!r}")  # upstream_of rejected earlier in model_plan
+	if aoi_kind == "upstream_of":
+		return resolve_upstream_of_aoi_ids(cursor, aoi_value)
+	raise ValueError(f"Unsupported aoi_kind: {aoi_kind!r}")
 
 
 def init_output_schema(cursor, output_schema):
@@ -159,6 +180,49 @@ def copy_streams(cursor, output_schema, aoi_ids):
 	return cursor.rowcount
 
 
+def compute_upstream_of_keep_ids(cursor, output_schema, edge_ids):
+	"""Return the set of <output_schema>.streams ids to keep for an aoi.upstream_of plan: each
+	given edge plus everything upstream of it, computed per graph_id component (edges on separate
+	graph_id components, or on separate tributaries of the same component, each keep their own
+	upstream area -- the result is the union of all of them)."""
+
+	schema_ident = quote_ident(output_schema)
+	cursor.execute(f"SELECT graph_id FROM {schema_ident}.streams WHERE id = ANY(%s::uuid[])", (edge_ids,))
+	graph_ids = list({row[0] for row in cursor.fetchall()})
+	if not graph_ids:
+		return set()
+
+	cursor.execute(
+		f"SELECT id, from_nexus_id, to_nexus_id, graph_id FROM {schema_ident}.streams WHERE graph_id = ANY(%s)",
+		(graph_ids,),
+	)
+	edges_by_graph = {}
+	for eid, from_nexus_id, to_nexus_id, graph_id in cursor.fetchall():
+		edges_by_graph.setdefault(graph_id, []).append(
+			{"id": eid, "from_nexus_id": from_nexus_id, "to_nexus_id": to_nexus_id}
+		)
+
+	seed_ids = {str(e) for e in edge_ids}
+	keep_ids = set()
+	for edges in edges_by_graph.values():
+		_successor, predecessors, _roots = build_graph(edges)
+		seeds_here = [e["id"] for e in edges if str(e["id"]) in seed_ids]
+		keep_ids |= upstream_closure(predecessors, seeds_here)
+	return keep_ids
+
+
+def trim_to_upstream_of(cursor, output_schema, edge_ids):
+	"""Delete every streams row that isn't upstream of (or one of) the plan's aoi.upstream_of
+	edges -- copy_streams is aoi-id-scoped so it may have pulled in whole graph_id components (or
+	unrelated ones sharing an aoi) beyond what upstream_of actually wants. Returns the number of
+	rows deleted."""
+
+	schema_ident = quote_ident(output_schema)
+	keep_ids = compute_upstream_of_keep_ids(cursor, output_schema, edge_ids)
+	cursor.execute(f"DELETE FROM {schema_ident}.streams WHERE NOT (id = ANY(%s))", (list(keep_ids),))
+	return cursor.rowcount
+
+
 def load_stream_network(conn, cursor, plan):
 	"""Run the full Load Stream Network phase for `plan` (see model_plan.load_model_plan).
 	Must be called after init_output_schema. Returns the number of streams rows copied."""
@@ -175,6 +239,11 @@ def load_stream_network(conn, cursor, plan):
 	stream_count = copy_streams(cursor, output_schema, aoi_ids)
 
 	conn.commit()
+
+	if plan["aoi_kind"] == "upstream_of":
+		deleted = trim_to_upstream_of(cursor, output_schema, plan["aoi_value"])
+		stream_count -= deleted
+		conn.commit()
 
 	create_indexes(cursor, output_schema);
 
