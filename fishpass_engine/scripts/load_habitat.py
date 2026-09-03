@@ -14,6 +14,7 @@ that multiple habitat points landing on the same edge in one run see each other'
 vertices, and each edge's geometry is only written back to the database once.
 """
 
+import logging
 import sys
 
 import psycopg
@@ -29,6 +30,8 @@ from network_snap import (
 )
 
 LOCATION_TYPES = {"upstream", "downstream", "between"}
+
+logger = logging.getLogger(__name__)
 
 
 def create_habitat_updates_table(cursor, output_schema, srid):
@@ -307,9 +310,10 @@ def snap_habitat_points(conn, cursor, plan, srid):
 	cursor.execute(f"CREATE INDEX habitat_updates_downstream_snapped_edge_id_idx ON {quote_ident(output_schema)}.habitat_updates (downstream_snapped_edge_id);")
 
 	conn.commit()
-	print(
-		f"Snapped {len(rows) - ignored_count}/{len(rows)} habitat update row(s) "
-		f"({ignored_count} had an unresolvable point and were left partially unsnapped)."
+	logger.info(
+		"Snapped %d/%d habitat update row(s) "
+		"(%d had an unresolvable point and were left partially unsnapped).",
+		len(rows) - ignored_count, len(rows), ignored_count,
 	)
 	return len(rows), ignored_count
 
@@ -323,6 +327,6 @@ def load_habitat(conn, cursor, plan, srid):
 
 	count = load_habitat_updates_rows(cursor, output_schema, plan)
 	conn.commit()
-	print(f"Loaded {count} habitat update(s) into {output_schema}.")
+	logger.info("Loaded %d habitat update(s) into %s.", count, output_schema)
 
 	snap_habitat_points(conn, cursor, plan, srid)

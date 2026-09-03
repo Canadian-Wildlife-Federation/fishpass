@@ -11,6 +11,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
+      PYTHONUNBUFFERED: "1"
       FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
       FISHPASS_PORT: ${{ secrets.FISHPASS_PORT }}
       FISHPASS_DBNAME: ${{ secrets.FISHPASS_DBNAME }}

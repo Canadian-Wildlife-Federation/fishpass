@@ -6,10 +6,13 @@ the single working/output table for the rest of the run -- see the "Load Stream
 Network" section for why there is no separate flowpath copy.
 """
 
+import logging
 import sys
 
 from db import quote_ident
 from graph_stats import build_graph, upstream_closure
+
+logger = logging.getLogger(__name__)
 
 STREAMS_FIELDS = (
 	"id", "aoi_id", "ef_type", "ef_subtype", "rank", "length",
@@ -247,5 +250,5 @@ def load_stream_network(conn, cursor, plan):
 
 	create_indexes(cursor, output_schema);
 
-	print(f"Loaded {aoi_count} AOI(s) and {stream_count} stream edge(s) into {output_schema}.")
+	logger.info("Loaded %d AOI(s) and %d stream edge(s) into %s.", aoi_count, stream_count, output_schema)
 	return stream_count

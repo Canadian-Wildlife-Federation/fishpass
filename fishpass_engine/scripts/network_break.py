@@ -28,10 +28,13 @@ needs no split (see above) but has no unambiguous upstream_edge_id either, since
 have more than one incoming edge -- upstream_edge_id is left NULL in that rare case.
 """
 
+import logging
 import uuid
 
 from db import quote_ident
 from network_snap import edge_vertices, linestring_zm_wkb
+
+logger = logging.getLogger(__name__)
 
 VERTEX_MATCH_TOLERANCE = 1e-9  # degrees -- exact float match expected, no reprojection occurs
 BATCH_SIZE = 5000
@@ -229,7 +232,7 @@ def apply_edge_id_reassignments(cursor, output_schema, reassignments):
 			chunk = rows[i:i + BATCH_SIZE]
 			cursor.executemany(f"UPDATE {table} SET {column} = %s WHERE id = %s", chunk)
 			done += len(chunk)
-			print(f"  reassigned {done}/{total} edge id(s)")
+			logger.info("  reassigned %d/%d edge id(s)", done, total)
 
 
 def find_downstream_edge_ids(cursor, output_schema, to_nexus_ids):
@@ -265,13 +268,13 @@ def break_network(conn, cursor, plan, srid):
 	increase in <output_schema>.streams row count)."""
 
 	output_schema = plan["output_schema"]
-	print("  getting break points");
+	logger.info("  getting break points")
 	by_edge = get_break_points(cursor, output_schema)
 	if not by_edge:
-		print("No barrier/habitat points to break the network at.")
+		logger.info("No barrier/habitat points to break the network at.")
 		return 0
 
-	print("  fetch edges with markers");
+	logger.info("  fetch edges with markers")
 	edges = fetch_edges_with_markers(cursor, output_schema, list(by_edge.keys()))
 	nexus_to_downstream_edge = find_downstream_edge_ids(
 		cursor, output_schema, [edge_row["to_nexus_id"] for edge_row in edges]
@@ -282,7 +285,7 @@ def break_network(conn, cursor, plan, srid):
 	pending_updates = []
 	pending_inserts = []
 	edges_done = 0
-	print("  walk edges");
+	logger.info("  walk edges")
 	for edge_row in edges:
 		segments, end_markers = break_edge(edge_row, by_edge[edge_row["id"]])
 		update_row, insert_rows, reassignments, last_segment_id = build_segment_writes(edge_row, srid, segments)
@@ -304,16 +307,16 @@ def break_network(conn, cursor, plan, srid):
 		if len(pending_updates) + len(pending_inserts) >= BATCH_SIZE:
 			flush_segment_updates(cursor, output_schema, pending_updates)
 			flush_segment_inserts(cursor, output_schema, pending_inserts)
-			print(f"    wrote segments for {edges_done}/{len(edges)} edges")
+			logger.info("    wrote segments for %d/%d edges", edges_done, len(edges))
 			pending_updates.clear()
 			pending_inserts.clear()
 
 	flush_segment_updates(cursor, output_schema, pending_updates)
 	flush_segment_inserts(cursor, output_schema, pending_inserts)
-	print(f"    wrote segments for {edges_done}/{len(edges)} edges")
+	logger.info("    wrote segments for %d/%d edges", edges_done, len(edges))
 
 	apply_edge_id_reassignments(cursor, output_schema, all_reassignments)
 	conn.commit()
 
-	print(f"Broke {len(edges)} edge(s) into {len(edges) + new_segment_count} segment(s).")
+	logger.info("Broke %d edge(s) into %d segment(s).", len(edges), len(edges) + new_segment_count)
 	return new_segment_count

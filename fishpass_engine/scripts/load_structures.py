@@ -12,6 +12,7 @@ matter for a reason not captured here.
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -21,6 +22,8 @@ import yaml
 from cabd_client import fetch_feature_type, map_passability
 from db import quote_ident, quote_qualified_ident
 from model_plan import IDENTIFIER_RE
+
+logger = logging.getLogger(__name__)
 
 STRUCTURE_LIFESTAGES = ("rear", "spawn")
 
@@ -223,7 +226,7 @@ def populate_from_cabd(cursor, conn, output_schema, plan, srid):
 		create_cabd_table(cursor, output_schema, feature_type, srid)
 		count = populate_cabd_table(cursor, output_schema, feature_type, short_names, plan["target_species"], srid)
 		conn.commit()
-		print(f"  CABD {feature_type}: {count} feature(s)")
+		logger.info("  CABD %s: %d feature(s)", feature_type, count)
 
 	return populate_all_barriers_from_cabd(cursor, output_schema, cabd_feature_types)
 
@@ -326,7 +329,7 @@ def add_gradient_barriers(cursor, output_schema, plan, srid):
 
 	cursor.execute("SELECT to_regclass(%s)", (source_table,))
 	if cursor.fetchone()[0] is None:
-		print(f"  {source_table} does not exist -- skipping.")
+		logger.info("  %s does not exist -- skipping.", source_table)
 		return 0
 
 	short_names = get_aoi_short_names(cursor, output_schema)
@@ -384,17 +387,17 @@ def load_structures(conn, cursor, plan, srid):
 	create_structures_table(cursor, output_schema, srid)
 
 	cabd_count = populate_from_cabd(cursor, conn, output_schema, plan, srid)
-	print(f"Loaded {cabd_count} structure(s) from CABD.")
+	logger.info("Loaded %d structure(s) from CABD.", cabd_count)
 
 	new_count = load_new_structures(cursor, output_schema, plan, srid)
-	print(f"Loaded {new_count} new structure(s).")
+	logger.info("Loaded %d new structure(s).", new_count)
 
 	updated_count = apply_structure_updates(cursor, output_schema, plan)
-	print(f"Applied structure updates to {updated_count} structure(s).")
+	logger.info("Applied structure updates to %d structure(s).", updated_count)
 
 	if plan["include_gradient_barriers"]:
 		gb_count = add_gradient_barriers(cursor, output_schema, plan, srid)
-		print(f"Added {gb_count} gradient barrier(s).")
+		logger.info("Added %d gradient barrier(s).", gb_count)
 
 	natural_feature_types = plan["natural_feature_types_override"]
 	if natural_feature_types is None:

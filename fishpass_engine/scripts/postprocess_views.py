@@ -6,10 +6,13 @@ pair with that species' species_stats fields -- including upstream length -- exp
 and streams_<species> (view over streams, with species_stats exploded to columns).
 """
 
+import logging
 import sys
 
 from db import quote_ident
 from model_plan import IDENTIFIER_RE
+
+logger = logging.getLogger(__name__)
 
 STREAM_COLUMNS = "id, geometry, length, strahler_order, effective_length, segment_gradient"
 
@@ -172,8 +175,8 @@ def create_barrier_views(conn, cursor, plan):
 	create_species_barrier_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	create_unsnapped_barriers_view(cursor, output_schema)
 	conn.commit()
-	print("natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_barriers: done.")
+	logger.info("natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_barriers: done.")
 
 	create_species_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	conn.commit()
-	print("streams_<species>: done.")
+	logger.info("streams_<species>: done.")

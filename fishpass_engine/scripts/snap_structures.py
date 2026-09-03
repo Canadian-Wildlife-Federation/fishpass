@@ -8,6 +8,8 @@ The rest (locating the exact snap point, inserting a vertex if needed) is shared
 point snapping -- see network_snap.py.
 """
 
+import logging
+
 import psycopg
 
 from db import quote_ident
@@ -15,6 +17,8 @@ from network_snap import linestring_zm_wkb, point_xyzm, snap_points_to_edge
 
 SNAPPED_GEOMETRY_SRID = 4617
 BATCH_SIZE = 5000  # rows per bulk write; bounds memory, not a correctness requirement
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_candidate_matches(cursor, output_schema, edge_distance_m):
@@ -114,7 +118,7 @@ def snap_structures(conn, cursor, plan, srid):
 	cursor.execute(f"SELECT count(*) FROM {quote_ident(output_schema)}.all_barriers WHERE snapped_geometry IS NULL")
 	total_unsnapped = cursor.fetchone()[0]
 
-	print(f"Finding candidate edges for {total_unsnapped} unsnapped structure(s)...")
+	logger.info("Finding candidate edges for %d unsnapped structure(s)...", total_unsnapped)
 	matches = fetch_candidate_matches(cursor, output_schema, edge_distance_m)
 	by_edge = group_by_edge(matches)
 
@@ -137,7 +141,7 @@ def snap_structures(conn, cursor, plan, srid):
 			edges_buffer = []
 
 		if snapped_count // BATCH_SIZE > (snapped_count - len(results)) // BATCH_SIZE:
-			print(f"Snapped {snapped_count}/{total_unsnapped} structure(s)...")
+			logger.info("Snapped %d/%d structure(s)...", snapped_count, total_unsnapped)
 
 	if results_buffer:
 		write_snapped_geometries(cursor, output_schema, srid, results_buffer)
@@ -152,5 +156,5 @@ def snap_structures(conn, cursor, plan, srid):
 
 	conn.commit()
 
-	print(f"Snapped {snapped_count} structure(s); {unmatched_count} had no edge within {edge_distance_m}m.")
+	logger.info("Snapped %d structure(s); %d had no edge within %sm.", snapped_count, unmatched_count, edge_distance_m)
 	return snapped_count, unmatched_count

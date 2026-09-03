@@ -11,6 +11,7 @@ been validated against a real database run yet.
 """
 
 import argparse
+import logging
 import time
 
 from compute_statistics import compute_statistics
@@ -21,6 +22,13 @@ from load_structures import load_structures
 from model_plan import load_model_plan
 from postprocess_views import create_barrier_views
 from snap_structures import snap_structures
+
+logging.basicConfig(
+	level=logging.INFO,
+	format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+	datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -35,7 +43,7 @@ def main():
 	require_env()
 	plan = load_model_plan(args.plan_code)
 
-	print(f"Running model plan {plan['code']!r} -> output schema {plan['output_schema']!r}")
+	logger.info("Running model plan %r -> output schema %r", plan["code"], plan["output_schema"])
 
 	conn = db_connect()
 	try:
@@ -44,22 +52,22 @@ def main():
 			conn.commit()
 
 			srid = get_source_srid(cursor)
-			print("Loading Stream Network")
+			logger.info("Loading Stream Network")
 			load_stream_network(conn, cursor, plan)
 
-			print("Loading Structures")
+			logger.info("Loading Structures")
 			load_structures(conn, cursor, plan, srid)
 
-			print("Snapping Structures")
+			logger.info("Snapping Structures")
 			snap_structures(conn, cursor, plan, srid)
 
-			print("Loading Habitat")
+			logger.info("Loading Habitat")
 			load_habitat(conn, cursor, plan, srid)
 
-			print("Computing Statistics")
+			logger.info("Computing Statistics")
 			compute_statistics(conn, cursor, plan, srid)
 
-			print("Creating Barrier Views")
+			logger.info("Creating Barrier Views")
 			create_barrier_views(conn, cursor, plan)
 	except Exception:
 		conn.rollback()
@@ -68,7 +76,7 @@ def main():
 		conn.close()
 
 	minutes, seconds = divmod(int(time.monotonic() - start), 60)
-	print(f"Model run complete ({minutes}min, {seconds}sec)")
+	logger.info("Model run complete (%dmin, %dsec)", minutes, seconds)
 
 
 if __name__ == "__main__":
