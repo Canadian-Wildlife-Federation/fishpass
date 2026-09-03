@@ -1,0 +1,37 @@
+name: Test FishPass DB Connection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-connection:
+    runs-on: ubuntu-latest
+    env:
+      FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
+      FISHPASS_PORT: ${{ secrets.FISHPASS_PORT }}
+      FISHPASS_DBNAME: ${{ secrets.FISHPASS_DBNAME }}
+      FISHPASS_USER: ${{ secrets.FISHPASS_USER }}
+      FISHPASS_PASSWORD: ${{ secrets.FISHPASS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install psycopg[binary]
+
+      - name: Test connection
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, 'fishpass_engine/scripts')
+          from db import require_env, db_connect
+
+          require_env()
+          with db_connect() as conn:
+              with conn.cursor() as cur:
+                  cur.execute('SELECT version()')
+                  print('Connected successfully:', cur.fetchone()[0])
+          "
