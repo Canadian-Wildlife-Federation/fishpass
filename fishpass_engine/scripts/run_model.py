@@ -23,6 +23,7 @@ from model_plan import load_model_plan
 from postprocess_views import create_barrier_views
 from snap_structures import snap_structures
 from rank_barriers import run_ranking
+from create_combined_view import create_combined_view
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -73,6 +74,9 @@ def main():
 
 			logger.info("Ranking Barriers")
 			run_ranking(conn, cursor, plan)
+
+			logger.info("Creating Combined Output View")
+			create_combined_view(conn, cursor, plan)
 			
 	except Exception:
 		conn.rollback()
