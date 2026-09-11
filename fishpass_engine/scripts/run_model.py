@@ -22,6 +22,7 @@ from load_structures import load_structures
 from model_plan import load_model_plan
 from postprocess_views import create_barrier_views
 from snap_structures import snap_structures
+from rank_barriers import run_ranking
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -69,6 +70,10 @@ def main():
 
 			logger.info("Creating Barrier Views")
 			create_barrier_views(conn, cursor, plan)
+
+			logger.info("Ranking Barriers")
+			run_ranking(conn, cursor, plan)
+			
 	except Exception:
 		conn.rollback()
 		raise

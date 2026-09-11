@@ -1,4 +1,5 @@
 psycopg[binary]
+psycopg
 pyyaml
 shapely>=2.1
 requests

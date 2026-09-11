@@ -83,3 +83,97 @@ CREATE TABLE IF NOT EXISTS support.habitat_updates (
 );
 
 CREATE INDEX IF NOT EXISTS habitat_updates_points_idx ON support.habitat_updates USING gist (points);
+
+-- =================================================================================
+--  Tracking table ENUMs
+-- =================================================================================
+-- Set up ENUM types for tracking table dropdowns
+-- In QGIS, fields with an ENUM type can be edited via
+-- a user-friendly dropdown.
+-- This allows for columns where the value must be one of
+-- a predefined set of values and the options will
+-- conveniently show up when a user edits the field in QGIS
+
+--Allowable values from the BC Tracking Table Guidance on Notion: 
+--https://app.notion.com/p/cwf-spatial/Tracking-Table-Guidance-32941376668e809799a3f5e4d0a893d2?source=copy_link
+
+drop type if exists
+	support.tt_structure_type,
+	support.tt_structure_list_status_type,
+	support.tt_passability_asmt_type,
+	support.tt_assessment_step_type,
+	support.tt_excl_reason_type,
+	support.tt_excl_method_type,
+	support.tt_partial_passability_type,
+	support.tt_partial_passability_notes_type,
+	support.tt_upstr_hab_quality_type,
+	support.tt_constructability_type,
+	support.tt_priority_type,
+	support.tt_rehab_type,
+	support.tt_next_steps_type;
+	
+CREATE TYPE support.tt_structure_type AS ENUM
+    ('Dam', 'Stream crossing - OBS', 'Stream crossing - CBS', 'Stream crossing - Ford', 'Other', 'None', '');
+	
+CREATE TYPE support.tt_structure_list_status_type AS ENUM
+    ('Excluded structure', 'Data-deficient barrier', 'Non-actionable barrier', 'Priority barrier', 'Rehabilitated barrier', '');
+	
+create type support.tt_passability_asmt_type as enum
+	('Informal assessment', 'Rapid assessment', 'Full assessment', '');
+	
+CREATE TYPE support.tt_assessment_step_type AS ENUM
+    ('Informal assessment', 
+	 'Passability assessment', 
+	 'Habitat confirmation', 
+	 'Detailed habitat investigation', 
+	 'Engineering design', 
+	 'Rehabilitated', 
+	 'Post-rehabilitation monitoring', 
+	 'Other',
+	 '');
+	 
+CREATE TYPE support.tt_excl_reason_type AS ENUM
+    ('Passable', 'No structure', 'No key upstream habitat', 'No structure and key upstream habitat', '');
+	
+CREATE TYPE support.tt_excl_method_type AS ENUM
+    ('Imagery review', 'Informal assessment', 'Field assessment', 'Local knowledge', '');
+	
+CREATE TYPE support.tt_partial_passability_type AS ENUM
+    ('Yes', 'No', 'Unknown', '');
+	
+CREATE TYPE support.tt_partial_passability_notes_type AS ENUM
+    ('Proportion of individuals', 'Proportion of time', '');
+	
+CREATE TYPE support.tt_upstr_hab_quality_type AS ENUM
+    ('High', 'Medium', 'Low', 'N/A or unassessed', '');
+	
+create type support.tt_constructability_type as ENUM 
+	('Difficult', 'Moderate', 'Easy', '');
+
+CREATE TYPE support.tt_priority_type AS ENUM
+    ('High', 'Medium', 'Low', '');
+	
+CREATE TYPE support.tt_rehab_type AS ENUM
+    ('Removal/decommissioned', 'Replacement - OBS', 'Replacement - CBS', 'Retrofit', '');
+	
+CREATE TYPE support.tt_next_steps_type AS ENUM
+	('Barrier assessment',
+	 'Barrier reassessment',
+	 'In-depth passage assessment',
+	 'Habitat confirmation',
+	 'In-depth habitat investigation',
+	 'Identify barrier owner',
+	 'Engage with barrier owner',
+	 'Engage with partners',
+	 'Engage in public consultation',
+	 'Bring barrier to regulator',
+	 'Commission engineering designs',
+	 'Fundraise',
+	 'Rehabilitation',
+	 'Post-rehabilitation monitoring',
+	 'Correct deficiencies',
+	 'Leave until end of lifecycle',
+	 'Non-actionable',
+	 'N/A - project complete',
+	 ''
+	);
