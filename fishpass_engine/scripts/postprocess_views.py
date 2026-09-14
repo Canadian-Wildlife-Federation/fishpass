@@ -164,6 +164,81 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 			WHERE {stats} IS NOT NULL
 		""")
 
+def create_watershed_summary_statistics(cursor, output_schema, reporting_species_lifecycles):
+    """Creates <output_schema>.watershed_summary_stats view in a single pass over streams
+    by unnesting species_stats keys laterally.
+    """
+    schema_ident = quote_ident(output_schema)
+    species_lifecycles = _species_by_lifecycle_map(reporting_species_lifecycles)
+    valid_species = list(species_lifecycles.keys())
+
+    for species in valid_species:
+        if not IDENTIFIER_RE.match(species):
+            sys.exit(f"Invalid species code: {species!r}")
+
+    species_list_sql = ", ".join(f"'{s}'" for s in valid_species)
+
+    query = f"""
+    CREATE MATERIALIZED VIEW {schema_ident}.watershed_summary_stats AS
+    WITH expanded AS (
+        SELECT
+            s.id,
+            s.effective_length,
+            sp.key AS species,
+            sp.value AS stats
+        FROM {schema_ident}.streams s,
+        LATERAL jsonb_each(s.species_stats) sp
+        WHERE sp.key IN ({species_list_sql})
+    ),
+    aggregated AS (
+        SELECT
+            species,
+            COALESCE(SUM(effective_length), 0) / 1000.0 AS total_km,
+            COALESCE(SUM(effective_length) FILTER (WHERE (stats->>'spawn_habitat')::boolean), 0) / 1000.0 AS total_spawn_km,
+            COALESCE(SUM(effective_length) FILTER (WHERE (stats->>'rear_habitat')::boolean), 0) / 1000.0 AS total_rear_km,
+            COALESCE(SUM(effective_length) FILTER (WHERE (stats->>'spawnrear_habitat')::boolean), 0) / 1000.0 AS total_spawnrear_km,
+
+            COALESCE(SUM((stats->>'spawn_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_spawn_km,
+            COALESCE(SUM((stats->>'spawn_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_spawn_km,
+
+            COALESCE(SUM((stats->>'rear_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_rear_km,
+            COALESCE(SUM((stats->>'rear_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_rear_km,
+
+            COALESCE(SUM(
+                LEAST(
+                    COALESCE((stats->>'spawn_weighted_connected_length')::double precision, 0),
+                    COALESCE((stats->>'rear_weighted_connected_length')::double precision, 0)
+                )
+            ), 0) / 1000.0 AS connected_spawnrear_km,
+
+            COALESCE(SUM(
+                LEAST(
+                    COALESCE((stats->>'spawn_weighted_disconnected_length')::double precision, 0),
+                    COALESCE((stats->>'rear_weighted_disconnected_length')::double precision, 0)
+                )
+            ), 0) / 1000.0 AS disconnected_spawnrear_km
+        FROM expanded
+        GROUP BY species
+    )
+    SELECT
+        species,
+        total_km,
+        total_spawn_km,
+        total_rear_km,
+        total_spawnrear_km,
+        connected_spawn_km,
+        disconnected_spawn_km,
+        connected_rear_km,
+        disconnected_rear_km,
+        connected_spawnrear_km,
+        disconnected_spawnrear_km,
+        ROUND((disconnected_spawn_km / NULLIF(total_spawn_km, 0))::numeric, 2) AS pct_disconnected_spawn,
+        ROUND((disconnected_rear_km / NULLIF(total_rear_km, 0))::numeric, 2) AS pct_disconnected_rear,
+        ROUND((disconnected_spawnrear_km / NULLIF(total_spawnrear_km, 0))::numeric, 2) AS pct_disconnected_spawnrear
+    FROM aggregated;
+    """
+
+    cursor.execute(query)
 
 def create_barrier_views(conn, cursor, plan):
 	"""Postprocess phase entry point: create the reporting views over all_barriers/streams
@@ -180,3 +255,7 @@ def create_barrier_views(conn, cursor, plan):
 	create_species_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	conn.commit()
 	logger.info("streams_<species>: done.")
+
+	create_watershed_summary_statistics(cursor, output_schema, plan["reporting_species_lifecycles"])
+	conn.commit()
+	logger.info("watershed_summary_stats: done.")
