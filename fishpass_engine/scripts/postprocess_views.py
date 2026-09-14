@@ -204,6 +204,8 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
             COALESCE(SUM((stats->>'rear_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_rear_km,
             COALESCE(SUM((stats->>'rear_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_rear_km,
 
+			-- Spawnrear is habitat suitable for both spawn and rear life stages. 
+			-- It is taken as the least length between the spawn and rear lengths
             COALESCE(SUM(
                 LEAST(
                     COALESCE((stats->>'spawn_weighted_connected_length')::double precision, 0),
