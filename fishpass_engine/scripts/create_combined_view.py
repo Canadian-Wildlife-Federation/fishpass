@@ -146,7 +146,7 @@ CABD_JOIN_KEY = "cabd_id"
 # --- OTHER SETTINGS --------------------------------------------------------------
 # A barrier is flagged label_in_wcrp = 'yes' when its combined rank is at or above
 # (numerically <=) this threshold, per (species, lifecycle).
-LABEL_IN_WCRP_RANK_THRESHOLD = 20
+LABEL_IN_WCRP_RANK_THRESHOLD = 30
 
 OWNER_ROLE = "fishpass"
 GRANT_ALL_ROLES = ("cwf_analyst", "cwf_tech")
