@@ -191,53 +191,58 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
         WHERE sp.key IN ({species_list_sql})
     ),
     aggregated AS (
-        SELECT
-            species,
-            COALESCE(SUM(effective_length), 0) / 1000.0 AS total_km,
-            COALESCE(SUM(effective_length) FILTER (WHERE (stats->>'spawn_habitat')::boolean), 0) / 1000.0 AS total_spawn_km,
-            COALESCE(SUM(effective_length) FILTER (WHERE (stats->>'rear_habitat')::boolean), 0) / 1000.0 AS total_rear_km,
-            COALESCE(SUM(effective_length) FILTER (WHERE (stats->>'spawnrear_habitat')::boolean), 0) / 1000.0 AS total_spawnrear_km,
+		SELECT
+			species,
+			COALESCE(SUM(effective_length), 0) / 1000.0 AS total_km,
+			COALESCE(SUM((stats->>'spawn_weighted_length')::double precision), 0) / 1000.0 AS total_spawn_km,
+			COALESCE(SUM((stats->>'rear_weighted_length')::double precision), 0) / 1000.0 AS total_rear_km,
+			COALESCE(SUM(
+				LEAST(
+					COALESCE((stats->>'spawn_weighted_length')::double precision, 0),
+					COALESCE((stats->>'rear_weighted_length')::double precision, 0)
+				)
+			), 0) / 1000.0 AS total_spawnrear_km,
 
-            COALESCE(SUM((stats->>'spawn_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_spawn_km,
-            COALESCE(SUM((stats->>'spawn_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_spawn_km,
+			COALESCE(SUM((stats->>'spawn_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_spawn_km,
+			COALESCE(SUM((stats->>'spawn_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_spawn_km,
 
-            COALESCE(SUM((stats->>'rear_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_rear_km,
-            COALESCE(SUM((stats->>'rear_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_rear_km,
+			COALESCE(SUM((stats->>'rear_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_rear_km,
+			COALESCE(SUM((stats->>'rear_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_rear_km,
 
 			-- Spawnrear is habitat suitable for both spawn and rear life stages. 
 			-- It is taken as the least length between the spawn and rear lengths
-            COALESCE(SUM(
-                LEAST(
-                    COALESCE((stats->>'spawn_weighted_connected_length')::double precision, 0),
-                    COALESCE((stats->>'rear_weighted_connected_length')::double precision, 0)
-                )
-            ), 0) / 1000.0 AS connected_spawnrear_km,
+			COALESCE(SUM(
+				LEAST(
+					COALESCE((stats->>'spawn_weighted_connected_length')::double precision, 0),
+					COALESCE((stats->>'rear_weighted_connected_length')::double precision, 0)
+				)
+			), 0) / 1000.0 AS connected_spawnrear_km,
 
-            COALESCE(SUM(
-                LEAST(
-                    COALESCE((stats->>'spawn_weighted_disconnected_length')::double precision, 0),
-                    COALESCE((stats->>'rear_weighted_disconnected_length')::double precision, 0)
-                )
-            ), 0) / 1000.0 AS disconnected_spawnrear_km
-        FROM expanded
-        GROUP BY species
-    )
-    SELECT
-        species,
-        total_km,
-        total_spawn_km,
-        total_rear_km,
-        total_spawnrear_km,
-        connected_spawn_km,
-        disconnected_spawn_km,
-        connected_rear_km,
-        disconnected_rear_km,
-        connected_spawnrear_km,
-        disconnected_spawnrear_km,
-        ROUND((disconnected_spawn_km / NULLIF(total_spawn_km, 0))::numeric, 2) AS pct_disconnected_spawn,
-        ROUND((disconnected_rear_km / NULLIF(total_rear_km, 0))::numeric, 2) AS pct_disconnected_rear,
-        ROUND((disconnected_spawnrear_km / NULLIF(total_spawnrear_km, 0))::numeric, 2) AS pct_disconnected_spawnrear
-    FROM aggregated;
+			COALESCE(SUM(
+				LEAST(
+					COALESCE((stats->>'spawn_weighted_disconnected_length')::double precision, 0),
+					COALESCE((stats->>'rear_weighted_disconnected_length')::double precision, 0)
+				)
+			), 0) / 1000.0 AS disconnected_spawnrear_km
+		FROM expanded
+		GROUP BY species
+	)
+	SELECT
+		species,
+		total_km,
+		total_spawn_km,
+		total_rear_km,
+		total_spawnrear_km,
+		connected_spawn_km,
+		disconnected_spawn_km,
+		connected_rear_km,
+		disconnected_rear_km,
+		connected_spawnrear_km,
+		disconnected_spawnrear_km,
+		ROUND((disconnected_spawn_km / NULLIF(total_spawn_km, 0))::numeric, 2) AS pct_disconnected_spawn,
+		ROUND((disconnected_rear_km / NULLIF(total_rear_km, 0))::numeric, 2) AS pct_disconnected_rear,
+		ROUND((disconnected_spawnrear_km / NULLIF(total_spawnrear_km, 0))::numeric, 2) AS pct_disconnected_spawnrear
+	FROM aggregated;	
     """
 
     cursor.execute(query)
