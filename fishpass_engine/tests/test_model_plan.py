@@ -240,6 +240,24 @@ structure_types:
 			with self.assertRaises(SystemExit):
 				mp.load_model_plan("bad", models_dir=models_dir)
 
+	def test_empty_reporting_values_exits(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			models_dir = Path(tmp)
+			(models_dir / "bad.yaml").write_text("""
+code: bad
+output_schema: model_bad
+aoi:
+  workunit:
+    - 03EBA001
+target_species:
+  - chn
+reporting_values: []
+structure_types:
+  - dams
+""")
+			with self.assertRaises(SystemExit):
+				mp.load_model_plan("bad", models_dir=models_dir)
+
 	def test_workunit_all(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			models_dir = Path(tmp)
