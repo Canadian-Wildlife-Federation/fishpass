@@ -3,7 +3,7 @@
 
 workunits:
   # work units to import; at least one is required
-  - 01AA000
+- 01AA000
 - 01AB000
 - 01AD000
 - 01AF000
