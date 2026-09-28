@@ -285,7 +285,7 @@ class CreateWatershedSummaryStatisticsTests(unittest.TestCase):
             )
 
 class CreateBarrierViewsOrchestratorTests(unittest.TestCase):
-	def test_creates_all_views_and_commits_twice(self):
+	def test_creates_all_views_and_commits(self):
 		cursor = FakeCursor()
 		conn = FakeConn()
 		plan = {

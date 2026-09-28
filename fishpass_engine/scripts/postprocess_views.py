@@ -172,6 +172,10 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
     species_lifecycles = _species_by_lifecycle_map(reporting_species_lifecycles)
     valid_species = list(species_lifecycles.keys())
 
+    if not valid_species:
+        logger.warning("No reporting species configured; skipping watershed_summary_stats.")
+        return
+
     for species in valid_species:
         if not IDENTIFIER_RE.match(species):
             sys.exit(f"Invalid species code: {species!r}")
