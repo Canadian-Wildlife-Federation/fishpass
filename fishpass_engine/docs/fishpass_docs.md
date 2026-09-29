@@ -38,6 +38,7 @@ Each model run will generate its own schema for the output. The schema name is d
 | Dataset | Details |
 | :---- | :---- |
 | Streams | [outputs/streams.md](./outputs/streams.md) |
+| Watershed Summary Stats | [outputs/watershed_summary.md](./outputs/watershed_summary.md) |
 | Barriers | [outputs/barriers.md](./outputs/barriers.md) |
 | CABD Features | [outputs/cabd_features.md](./outputs/cabd_features.md) |
 | Gradient Barriers | [outputs/gradient_barriers.md](./outputs/gradient_barriers.md) |
@@ -304,6 +305,13 @@ Once statistics are populated, create the reporting views over `all_barriers`/`s
 `natural_barriers`, `anthropogenic_barriers`, and `unsnapped_barriers`, plus a per-species
 `natural_barriers_<species>`/`anthropogenic_barriers_<species>`/`streams_<species>` view for each
 `target_species` in the plan, with that species' `species_stats` fields exploded to columns.
+
+### Summary Statistics
+
+A single `watershed_summary_stats` materialized view is created: one row per reporting
+species with total/connected/disconnected habitat length (km) and percent-disconnected figures,
+computed directly from `streams.species_stats` in one pass over the network (see
+[outputs/watershed_summary.md](./outputs/watershed_summary.md)).
 
 
 ## Outstanding Decisions
