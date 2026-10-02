@@ -18,7 +18,9 @@ except ImportError:
     sys.modules["yaml"] = types.ModuleType("yaml")
 
 import model_plan as mp  # noqa: E402
+import postprocess_views as pv  # noqa: E402
 import rank_barriers as rb  # noqa: E402
+import db # noqa: E402
 
 
 def write_plan(tmp_dir, code, extra_yaml=""):
@@ -60,26 +62,11 @@ class ResolveRankingPairsTests(unittest.TestCase):
         self.assertIn(("sth", "spawn"), pairs)
         self.assertIn(("sth", "spawnrear"), pairs)
 
-    def test_species_filter_narrows_pairs(self):
-        """resolve_ranking_pairs with species_filter returns only that species."""
-        with tempfile.TemporaryDirectory() as tmp:
-            models_dir = write_plan(tmp, "myplan")
-            plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-        pairs = rb.resolve_ranking_pairs(plan, species_filter="chn")
-
-        # Only 1 species x 3 lifecycles = 3 pairs
-        self.assertEqual(len(pairs), 3)
-        self.assertTrue(all(sp == "chn" for sp, _ in pairs))
-
-    def test_invalid_species_filter_exits(self):
-        """resolve_ranking_pairs exits if species_filter not in plan."""
-        with tempfile.TemporaryDirectory() as tmp:
-            models_dir = write_plan(tmp, "myplan")
-            plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-        with self.assertRaises(SystemExit):
-            rb.resolve_ranking_pairs(plan, species_filter="invalid_sp")
+    def test_empty_pairs_exits_with_clear_error(self):
+        """resolve_ranking_pairs exits (not IndexError) when there is nothing to rank."""
+        with self.assertRaises(SystemExit) as cm:
+            rb.resolve_ranking_pairs({"code": "ns", "reporting_species_lifecycles": []})
+        self.assertIn("reporting_values", str(cm.exception.code))
 
     def test_invalid_species_code_in_plan_exits(self):
         """resolve_ranking_pairs exits if plan has unsafe species code."""
@@ -105,48 +92,73 @@ class RankingConfigTests(unittest.TestCase):
         config = rb.RankingConfig(self.plan, "chn", "rear")
 
         self.assertEqual(config.schema, "model_ns")
-        self.assertEqual(config.wcrp_schema, "ns_wcrp")
+        self.assertEqual(config.wcrp_schema_name, "ns_wcrp")
+        self.assertEqual(config.wcrp_schema, '"ns_wcrp"')
         self.assertEqual(config.watershed, "ns")
         self.assertEqual(config.species, "chn")
         self.assertEqual(config.lifecycle, "rear")
 
     def test_barriers_view_name(self):
-        """RankingConfig builds correct barriers view name."""
+        """RankingConfig builds a quoted barriers view name."""
         config = rb.RankingConfig(self.plan, "chn", "rear")
-        self.assertEqual(config.barriers_view, "model_ns.anthropogenic_barriers_chn")
+        self.assertEqual(config.barriers_view, '"model_ns"."anthropogenic_barriers_chn"')
 
     def test_ranked_table_name(self):
-        """RankingConfig builds correct ranked output table name."""
+        """RankingConfig builds a quoted ranked output table name (raw name kept too)."""
         config = rb.RankingConfig(self.plan, "chn", "spawn")
-        self.assertEqual(config.ranked, "ns_wcrp.ranked_barriers_chn_spawn_ns")
+        self.assertEqual(config.ranked, '"ns_wcrp"."ranked_barriers_chn_spawn_ns"')
+        self.assertEqual(config.ranked_name, "ranked_barriers_chn_spawn_ns")
 
     def test_work_table_name(self):
-        """RankingConfig builds correct working table name."""
+        """RankingConfig builds a quoted working table name (raw name kept too)."""
         config = rb.RankingConfig(self.plan, "sth", "spawnrear")
-        self.assertEqual(config.work, "ns_wcrp.ranked_barriers_sth_spawnrear_ns_work")
+        self.assertEqual(config.work, '"ns_wcrp"."ranked_barriers_sth_spawnrear_ns_work"')
+        self.assertEqual(config.work_name, "ranked_barriers_sth_spawnrear_ns_work")
 
     def test_tracking_table_name(self):
-        """RankingConfig builds correct tracking table name."""
+        """RankingConfig builds a quoted tracking table name; raw name for lookups."""
         config = rb.RankingConfig(self.plan, "chn", "rear")
-        self.assertEqual(config.tracking_table, "ns_wcrp.tracking_table_ns")
+        self.assertEqual(config.tracking_table, '"ns_wcrp"."tracking_table_ns"')
+        self.assertEqual(config.tracking_table_name, "tracking_table_ns")
         self.assertEqual(config.col_tracking_status, "structure_list_status_chn")
+
+    def test_leading_digit_plan_code_is_quoted(self):
+        """A plan code starting with a digit (allowed by PLAN_CODE_RE) yields
+        quoted -- and therefore valid -- identifiers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = mp.load_model_plan("1ns", models_dir=write_plan(tmp, "1ns"))
+        config = rb.RankingConfig(plan, "chn", "rear")
+        self.assertEqual(config.wcrp_schema, '"1ns_wcrp"')
+        self.assertTrue(config.ranked.startswith('"1ns_wcrp".'))
+        sql = rb.sql_assign_mainstem_and_initial_groups(config)
+        self.assertIn('"ranked_barriers_chn_rear_1ns_work_idx_mainstem"', sql)
+        # every reference to the schema is the quoted form
+        self.assertNotIn("1ns_wcrp.", sql.replace('"1ns_wcrp".', ""))
 
     def test_lifecycle_specific_columns(self):
         """RankingConfig includes lifecycle-specific column names."""
         config_rear = rb.RankingConfig(self.plan, "chn", "rear")
         config_spawn = rb.RankingConfig(self.plan, "chn", "spawn")
-
-        # Column names should differ by lifecycle
         self.assertEqual(config_rear.gain_total, "total_rear_hab_gain_group_km")
         self.assertEqual(config_spawn.gain_total, "total_spawn_hab_gain_group_km")
-
         self.assertEqual(config_rear.src_func_upstr, "rear_functional_upstream_length")
         self.assertEqual(config_spawn.src_func_upstr, "spawn_functional_upstream_length")
 
-    def test_include_rehab_defaults_true(self):
-        """RankingConfig.include_rehab defaults to True."""
+    def test_min_avg_gain_default_from_config(self):
+        """min_avg_gain_km defaults to config/fishpass.yaml's wcrp value."""
         config = rb.RankingConfig(self.plan, "chn", "rear")
-        self.assertTrue(config.include_rehab)
+        self.assertEqual(config.min_avg_gain_km, db.wcrp_setting({}, "min_avg_gain_km"))
+
+    def test_min_avg_gain_plan_override(self):
+        """A plan's min_avg_gain_km overrides the config default."""
+        override = db.wcrp_setting({}, "min_avg_gain_km") + 1
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = mp.load_model_plan(
+                "ns", models_dir=write_plan(tmp, "ns", f"min_avg_gain_km: {override}")
+            )
+        config = rb.RankingConfig(plan, "chn", "rear")
+        self.assertEqual(config.min_avg_gain_km, override)
+        self.assertIn(f">= {override}", rb.sql_assign_ranks(config))
 
 
 class PassabilityPredicateTests(unittest.TestCase):
@@ -196,34 +208,54 @@ class SQLBuildersTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_create_working_table_with_rehab(self):
-        """sql_create_working_table includes tracking join when rehab enabled."""
+    def test_create_working_table_joins_tracking(self):
+        """sql_create_working_table always folds in the tracking table."""
         sql = rb.sql_create_working_table(self.config)
-
         self.assertIn("DROP TABLE IF EXISTS", sql)
         self.assertIn("SELECT b.*", sql)
-        self.assertIn("FROM", sql)
-        self.assertIn("ns_wcrp.tracking_table_ns", sql)
-        self.assertIn("WHERE", sql)
+        self.assertIn('LEFT JOIN "ns_wcrp"."tracking_table_ns" tt', sql)
+        self.assertIn("'Rehabilitated barrier'", sql)
 
-    def test_create_working_table_without_rehab(self):
-        """sql_create_working_table skips tracking join when rehab disabled."""
-        self.config.include_rehab = False
-        sql = rb.sql_create_working_table(self.config)
-
-        self.assertIn("DROP TABLE IF EXISTS", sql)
-        self.assertIn("SELECT b.*", sql)
-        # Should have a comment instead of a join
-        self.assertIn("-- tracking table not present yet", sql)
-
-    def test_convert_lengths_to_km(self):
-        """sql_convert_lengths_to_km converts all length fields."""
+    def test_convert_lengths_covers_every_view_length_column(self):
+        """sql_convert_lengths_to_km converts exactly the view's length columns --
+        including both accessible lengths -- derived from postprocess_views."""
         sql = rb.sql_convert_lengths_to_km(self.config)
-
-        # Should have one ALTER per LENGTH_FIELDS entry
-        for field in rb.LENGTH_FIELDS:
-            # Should rename to _km
+        expected = pv.barrier_length_fields(["rear", "spawn", "spawnrear"])
+        self.assertEqual(self.config.length_fields, expected)
+        for field in expected:
             self.assertIn(f"RENAME COLUMN {field} TO {field}_km", sql)
+        self.assertIn("spawn_upstream_accessible_length_km", sql)
+        self.assertIn("rear_upstream_accessible_length_km", sql)
+
+    def test_convert_lengths_only_touches_reported_lifecycles(self):
+        """A plan reporting only chn_spawn must not ALTER rear/spawnrear columns
+        (they don't exist on the view -- this used to crash)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            write_plan(tmp, "sp")
+            path = Path(tmp) / "sp.yaml"
+            path.write_text(path.read_text().replace("- all_all", "- chn_spawn"))
+            plan = mp.load_model_plan("sp", models_dir=Path(tmp))
+        config = rb.RankingConfig(plan, "chn", "spawn")
+        sql = rb.sql_convert_lengths_to_km(config)
+        self.assertIn("spawn_functional_upstream_length_km", sql)
+        self.assertIn("rear_upstream_accessible_length_km", sql)  # per-species field
+        self.assertNotIn("RENAME COLUMN rear_upstream_length ", sql)
+        self.assertNotIn("spawnrear_", sql)
+
+    def test_finalize_uses_config_roles_quoted(self):
+        """sql_finalize_output_table takes owner/grant roles from fishpass.yaml."""
+        roles = db.get_db_roles()
+        sql = rb.sql_finalize_output_table(self.config)
+        table = self.config.ranked
+        self.assertIn(f"ALTER TABLE {table} OWNER TO {db.quote_ident(roles['owner'])}", sql)
+        for role in roles["grant_all"\]:
+            self.assertIn(f"GRANT ALL ON TABLE {table} TO {db.quote_ident(role)}", sql)
+        for role in roles["grant_select"\]:
+            self.assertIn(f"GRANT SELECT ON TABLE {table} TO {db.quote_ident(role)}", sql)
+
+    def test_not_runnable_standalone(self):
+        """rank_barriers is only run via run_model.py."""
+        self.assertFalse(hasattr(rb, "main"))
 
     def test_stages_list_non_empty(self):
         """STAGES list includes all ranking phases."""

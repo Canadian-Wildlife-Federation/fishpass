@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""One-time setup: create a WCRP's tracking table and its blank2null trigger.
+"""One-time setup: create a WCRP's tracking table and attach its blank2null trigger.
 
-This is deliberately NOT part of the per-model-run pipeline (run_model.py). A
-tracking table holds hand-entered barrier data that must persist for the life of
-the WCRP, so its creation is a one-off, guarded step -- run once when a WCRP is
-first stood up.
+Run once per WCRP, BEFORE its first model run, via the "FishPass WCRP Tracking
+Table Setup" GitHub Action (fishpass_wcrp_tracking_table.yml). This is
+deliberately NOT part of the per-model-run pipeline: a tracking table holds
+hand-entered barrier data that must persist for the life of the WCRP, so its
+creation is a one-off, guarded step. Every model run requires it --
+run_model.py calls check_wcrp_prerequisites() before doing anything else and
+stops with a pointer back to this script if the table is missing.
 
 IMPORTANT -- schema choice: the tracking table lives in its own persistent
 <code>_wcrp schema, NOT in the model's output_schema. run_model.py rebuilds the
@@ -16,35 +19,41 @@ type) but carries NO foreign key -- a cross-schema FK into the ephemeral
 output_schema couldn't survive the rebuild. rank_barriers.py validates every
 tracking barrier_id against the freshly-built all_barriers on each run instead.
 
-The generic blank2null() trigger function lives in the shared 'support' schema,
-alongside the tt_* enum types it services -- keeping all cross-WCRP scaffolding
-in one place, and avoiding the need for CREATE on the public schema.
+Database-wide prerequisites (NOT created here): the support.tt_* enum types and
+the generic support.blank2null() trigger function both come from
+init/database/wcrp_support.sql, run by hand once per database. This script
+checks they exist and stops with a clear message if not.
 
-Two distinct guarantees:
+Guarantees:
   * The tracking table is created NON-idempotently and protected. If a table of
     the target name already exists, this aborts loudly BEFORE any DDL runs, so
     existing data can never be dropped, replaced, or altered. (The containing
     <code>_wcrp schema is created idempotently -- create schema if not exists.)
-  * The generic support.blank2null() function and its trigger ARE idempotent
-    (create-or-replace / drop-if-exists then create), so re-attaching them is
-    always safe.
+  * The per-table blank2null trigger IS idempotent (drop-if-exists then create).
 
 Column layout follows the enum-canonical cheticamp definition: support.tt_*
 enum types, numeric money fields, text date fields, barrier_id (uuid) as the
 primary key. Per-species enum columns are generated from plan['target_species'].
 
-Enum types are expected to already exist in the shared 'support' schema (created
-by the separate support-schema setup script). Database connection details come
-from environment variables only, via the db module.
+Owner/grant roles come from config/fishpass.yaml (database_roles). Database
+connection details come from environment variables only, via the db module.
 
 Usage:
-    python create_tracking_table.py <plan_code>
+    python create_wcrp_tracking_table.py <plan_code>
 """
 import argparse
 import logging
 import sys
 
-from db import db_connect, quote_ident, require_env
+from db import (
+    as_role,
+    db_connect,
+    function_exists,
+    get_db_roles,
+    quote_ident,
+    require_env,
+    table_exists,
+)
 from model_plan import IDENTIFIER_RE, load_model_plan
 
 logger = logging.getLogger(__name__)
@@ -55,14 +64,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# Enum types AND the blank2null trigger function live in the shared support schema.
+# Enum types AND the blank2null trigger function live in the shared support schema
+# (both created by init/database/wcrp_support.sql).
 SUPPORT = "support"
-
-# Ownership and role grants applied to the new tracking table. Finer-grained,
-# per-WCRP biologist access is handled separately in a later manual script.
-OWNER_ROLE = "fishpass"
-GRANT_ALL_ROLES = ("cwf_analyst", "cwf_tech")
-GRANT_SELECT_ROLES = ("cwf_user",)
+BLANK2NULL_FUNCTION = "blank2null"
+SUPPORT_SQL_SCRIPT = "init/database/wcrp_support.sql"
 
 # Non-species columns, in the canonical cheticamp order. Each entry is
 # (column_name, type_sql). Enum types are qualified to the support schema. The
@@ -108,47 +114,15 @@ _TRAILING_COLUMNS = [
     ("supporting_links", "character varying"),
 ]
 
-# Generic, enum-only, self-maintaining trigger function, homed in the support
-# schema (not public) so it sits with the tt_* enums and needs no CREATE on public.
-BLANK2NULL_FUNCTION_SQL = f"""
-create or replace function {SUPPORT}.blank2null()
-    returns trigger
-    language plpgsql as
-$func$
-declare
-    patch jsonb := '{{}}'::jsonb;
-    col   text;
-begin
-    -- Only the ENUM columns of whichever table this trigger fired on.
-    for col in
-        select a.attname
-        from pg_attribute a
-        join pg_type t on t.oid = a.atttypid
-        where a.attrelid = TG_RELID
-          and a.attnum > 0
-          and not a.attisdropped
-          and t.typtype = 'e'            -- 'e' = enum only
-    loop
-        if (to_jsonb(NEW) ->> col) = '' then
-            patch := jsonb_set(patch, array[col], 'null'::jsonb);
-        end if;
-    end loop;
-
-    -- Override ONLY the blank enum columns; all other fields are untouched.
-    if patch <> '{{}}'::jsonb then
-        NEW := jsonb_populate_record(NEW, patch);
-    end if;
-
-    return NEW;
-end
-$func$;
-"""
+def _tracking_table_name(plan):
+    return f"tracking_table_{plan['code']}"
 
 
 def _wcrp_schema(plan):
     """The persistent per-WCRP schema, e.g. 'ns' -> 'ns_wcrp'. plan['code'] is
     already validated by model_plan.PLAN_CODE_RE, and the _wcrp suffix keeps it
-    within the safe identifier charset."""
+    within the safe identifier charset. RAW name -- quote_ident() it before
+    interpolating into SQL (a code may start with a digit)."""
     return f"{plan['code']}_wcrp"
 
 
@@ -205,81 +179,129 @@ def _build_create_table_sql(schema, table, species_list):
     return f"CREATE TABLE {qualified} (\n" + ",\n".join(col_defs) + "\n);"
 
 
-def _table_exists(cursor, schema, table):
+def _required_enum_types(species_list):
+    """The support.tt_* enum type names (RAW, unqualified) the table needs."""
+    prefix = f"{SUPPORT}."
+    return sorted(
+        {t[len(prefix):] for _, t in _build_columns(species_list) if t.startswith(prefix)}
+    )
+
+
+def _check_support_objects(cursor, species_list):
+    """Stop with a clear message if wcrp_support.sql hasn't been run on this
+    database (enum types or blank2null() missing)."""
+    missing = [
+        f"{SUPPORT}.{t}"
+        for t in _required_enum_types(species_list)
+        if not _type_exists(cursor, SUPPORT, t)
+    ]
+    if not function_exists(cursor, SUPPORT, BLANK2NULL_FUNCTION):
+        missing.append(f"{SUPPORT}.{BLANK2NULL_FUNCTION}()")
+    if missing:
+        sys.exit(
+            f"Missing database-wide WCRP support object(s): {', '.join(missing)}. "
+            f"Run {SUPPORT_SQL_SCRIPT} against this database first."
+        )
+
+
+def _type_exists(cursor, schema, type_name):
     cursor.execute(
         """
         select 1
-        from information_schema.tables
-        where table_schema = %s
-          and table_name = %s;
+        from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname = %s and t.typname = %s;
         """,
-        (schema, table),
+        (schema, type_name),
     )
     return cursor.fetchone() is not None
 
 
-def _apply_ownership_and_grants(cursor, qualified):
-    """Set the table owner and role grants. Per-WCRP biologist access is applied
-    separately later."""
-    cursor.execute(f"alter table {qualified} owner to {quote_ident(OWNER_ROLE)};")
-    for role in GRANT_ALL_ROLES:
+def _apply_ownership_and_grants(cursor, qualified, roles):
+    """Set the table owner and role grants (config/fishpass.yaml database_roles).
+    Per-WCRP biologist access is applied separately later."""
+    cursor.execute(f"alter table {qualified} owner to {quote_ident(roles['owner'])};")
+    for role in roles["grant_all"]:
         cursor.execute(f"grant all on table {qualified} to {quote_ident(role)};")
-    for role in GRANT_SELECT_ROLES:
+    for role in roles["grant_select"]:
         cursor.execute(f"grant select on table {qualified} to {quote_ident(role)};")
+
+
+def check_wcrp_prerequisites(cursor, plan):
+    """Pre-flight check for a model run (called by run_model.py BEFORE the output
+    schema is rebuilt, so a missing prerequisite fails in seconds, not after a
+    full run). Every model run ranks barriers against the WCRP tracking table,
+    so it must already exist."""
+    schema = _wcrp_schema(plan)
+    table = _tracking_table_name(plan)
+    if not table_exists(cursor, schema, table):
+        sys.exit(
+            f"WCRP tracking table {schema}.{table} does not exist. Run the "
+            f"'FishPass WCRP Tracking Table Setup' GitHub Action (or "
+            f"create_wcrp_tracking_table.py {plan['code']}) once for this plan "
+            f"before running the model."
+        )
+    if not function_exists(cursor, SUPPORT, BLANK2NULL_FUNCTION):
+        sys.exit(
+            f"{SUPPORT}.{BLANK2NULL_FUNCTION}() is missing. Run "
+            f"{SUPPORT_SQL_SCRIPT} against this database."
+        )
 
 
 def create_tracking_table(conn, cursor, plan):
     """Create the WCRP's tracking table (in <code>_wcrp) and attach the
     blank2null trigger.
 
-    Aborts (sys.exit) without touching the table if it already exists.
+    Aborts (sys.exit) without touching the table if it already exists, or if
+    the database-wide support objects from wcrp_support.sql are missing.
     """
     schema = _wcrp_schema(plan)
-    table = f"tracking_table_{plan['code']}"
+    table = _tracking_table_name(plan)
     species_list = plan["target_species"]
     _validate_species(species_list)
+    roles = get_db_roles()
 
-    # Act as the OWNER_ROLE for the whole setup. The connecting user is expected
+    _check_support_objects(cursor, species_list)
+
+    # Act as the owner role for the whole setup. The connecting user is expected
     # to be a granted member of this role (no password needed for SET ROLE), but
     # may not BE the role. Doing this first means the schema, table, and every
-    # object are created and owned by OWNER_ROLE directly -- otherwise the schema
-    # would be owned by the connecting user and ALTER TABLE ... OWNER TO would
-    # fail because OWNER_ROLE lacks CREATE on a schema it doesn't own. When run as
-    # the fishpass user directly (e.g. the GitHub Action), this is a harmless no-op.
-    cursor.execute(f"set role {quote_ident(OWNER_ROLE)};")
+    # object are created and owned by the owner role directly -- otherwise the
+    # schema would be owned by the connecting user and ALTER TABLE ... OWNER TO
+    # would fail because the owner lacks CREATE on a schema it doesn't own. When
+    # run as the owner directly (e.g. the GitHub Action), SET ROLE is a no-op.
+    # as_role() rolls back + RESETs on the way out, so on any failure (including
+    # the "already exists" exit below) nothing is left half-created.
+    with as_role(conn, cursor, roles["owner"]):
+        # The persistent WCRP schema is created idempotently -- it is never
+        # dropped by a model run, so this is a no-op after the first setup.
+        cursor.execute(f"create schema if not exists {quote_ident(schema)};")
 
-    # The persistent WCRP schema is created idempotently -- it is never dropped
-    # by a model run, so this is a no-op after the first WCRP is set up in it.
-    cursor.execute(f"create schema if not exists {quote_ident(schema)};")
+        if table_exists(cursor, schema, table):
+            sys.exit(
+                f"Tracking table {schema}.{table} already exists -- refusing to "
+                f"recreate it. This table is created once and maintained forever; "
+                f"delete it manually first if you truly intend to rebuild it."
+            )
 
-    if _table_exists(cursor, schema, table):
-        sys.exit(
-            f"Tracking table {schema}.{table} already exists -- refusing to "
-            f"recreate it. This table is created once and maintained forever; "
-            f"delete it manually first if you truly intend to rebuild it."
+        qualified = f"{quote_ident(schema)}.{quote_ident(table)}"
+
+        logger.info("Creating tracking table %s", qualified)
+        cursor.execute(_build_create_table_sql(schema, table, species_list))
+
+        logger.info("Setting ownership and grants on %s", qualified)
+        _apply_ownership_and_grants(cursor, qualified, roles)
+
+        logger.info("Attaching %s.%s trigger to %s", SUPPORT, BLANK2NULL_FUNCTION, qualified)
+        cursor.execute(f"drop trigger if exists blank2null_trg on {qualified};")
+        cursor.execute(
+            f"create trigger blank2null_trg"
+            f" before insert or update on {qualified}"
+            f" for each row execute function {SUPPORT}.{BLANK2NULL_FUNCTION}();"
         )
 
-    qualified = f"{quote_ident(schema)}.{quote_ident(table)}"
-
-    logger.info("Creating tracking table %s", qualified)
-    cursor.execute(_build_create_table_sql(schema, table, species_list))
-
-    logger.info("Setting ownership and grants on %s", qualified)
-    _apply_ownership_and_grants(cursor, qualified)
-
-    logger.info("Creating %s.blank2null() trigger function", SUPPORT)
-    cursor.execute(BLANK2NULL_FUNCTION_SQL)
-
-    logger.info("Attaching blank2null trigger to %s", qualified)
-    cursor.execute(f"drop trigger if exists blank2null_trg on {qualified};")
-    cursor.execute(
-        f"create trigger blank2null_trg"
-        f" before insert or update on {qualified}"
-        f" for each row execute function {SUPPORT}.blank2null();"
-    )
-
-    conn.commit()
-    logger.info("Tracking table setup complete for %s", qualified)
+        conn.commit()
+        logger.info("Tracking table setup complete for %s", qualified)
 
 
 def parse_args():

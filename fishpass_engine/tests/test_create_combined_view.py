@@ -19,6 +19,8 @@ except ImportError:
 
 import model_plan as mp  # noqa: E402
 import create_combined_view as ccv  # noqa: E402
+import postprocess_views as pv  # noqa: E402
+import db # noqa: E402
 
 
 def write_plan(tmp_dir, code, extra_yaml=""):
@@ -120,6 +122,76 @@ class SpeciesLifecyclesTests(unittest.TestCase):
         _, pairs = ccv._species_lifecycles(plan)
 
         self.assertEqual(pairs, sorted(pairs))
+
+
+class EmptyReportingValuesTests(unittest.TestCase):
+    def test_empty_pairs_exits_with_clear_error(self):
+        """_species_lifecycles exits (with a clear message) when nothing is reported."""
+        with self.assertRaises(SystemExit) as cm:
+            ccv._species_lifecycles({"code": "ns", "reporting_species_lifecycles": []})
+        self.assertIn("reporting_values", str(cm.exception.code))
+
+
+class BuildViewSqlTests(unittest.TestCase):
+    def _plan(self, extra_yaml="", reporting="all_all"):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_plan(tmp, "ns", extra_yaml)
+            path = Path(tmp) / "ns.yaml"
+            path.write_text(path.read_text().replace("- all_all", f"- {reporting}"))
+            return mp.load_model_plan("ns", models_dir=Path(tmp))
+
+    def _sql(self, extra_yaml="", reporting="all_all"):
+        return ccv.build_view_sql(
+            self._plan(extra_yaml, reporting), ["waterfalls", "gradients"]
+        )
+
+    def test_every_view_length_column_surfaced_in_km(self):
+        """Every length column from postprocess_views.barrier_length_fields --
+        including the two accessible lengths -- is divided by 1000 and _km-suffixed."""
+        sql = self._sql()
+        for sp in ("chn", "sth"):
+            for col in pv.barrier_length_fields(["rear", "spawn", "spawnrear"]):
+                self.assertIn(
+                    f'bp_{sp}."{col}" / 1000.0 AS "{sp}_{col}_km"', sql
+                )
+        self.assertIn('"chn_spawn_upstream_accessible_length_km"', sql)
+        self.assertIn('"sth_rear_upstream_accessible_length_km"', sql)
+
+    def test_no_metre_length_columns_remain(self):
+        """No habitat length is surfaced without the _km conversion."""
+        sql = self._sql()
+        self.assertNotIn('AS "chn_spawn_upstream_length"', sql)
+
+    def test_only_reported_lifecycles_surfaced(self):
+        """A plan reporting only chn_spawn surfaces spawn lengths (+ accessible) only."""
+        sql = self._sql(reporting="chn_spawn")
+        self.assertIn('"chn_spawn_functional_upstream_length_km"', sql)
+        self.assertIn('"chn_rear_upstream_accessible_length_km"', sql)
+        self.assertNotIn("chn_rear_upstream_length_km", sql)
+        self.assertNotIn("bp_sth", sql)
+
+    def test_label_threshold_default_and_override(self):
+        """label_in_wcrp uses the fishpass.yaml default (30) unless the plan overrides."""
+        self.assertIn("rank_combined <= 30::numeric", self._sql())
+        sql = self._sql("label_in_wcrp_rank_threshold: 50")
+        self.assertIn("rank_combined <= 50::numeric", sql)
+        self.assertNotIn("<= 30::numeric", sql)
+
+    def test_roles_from_config(self):
+        """Owner/grants on the view match database_roles in fishpass.yaml, quoted."""
+        roles = db.get_db_roles()
+        plan = self._plan()
+        sql = ccv.build_view_sql(plan, ["waterfalls", "gradients"])
+        view = f"{db.quote_ident(plan['code'] + '_wcrp')}.{db.quote_ident(ccv.VIEW_NAME)}"
+        self.assertIn(f'ALTER VIEW {view} OWNER TO {db.quote_ident(roles["owner"])};', sql)
+        for role in roles["grant_all"\]:
+            self.assertIn(f"GRANT ALL ON TABLE {view} TO {db.quote_ident(role)};", sql)
+        for role in roles["grant_select"\]:
+            self.assertIn(f"GRANT SELECT ON TABLE {view} TO {db.quote_ident(role)};", sql)
+
+    def test_not_runnable_standalone(self):
+        """create_combined_view is only run via run_model.py."""
+        self.assertFalse(hasattr(ccv, "main"))
 
 
 if __name__ == "__main__":

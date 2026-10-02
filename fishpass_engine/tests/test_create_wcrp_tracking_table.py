@@ -1,7 +1,7 @@
-"""Tests for fishpass_engine/scripts/create_tracking_table.py -- table schema
+"""Tests for fishpass_engine/scripts/create_wcrp_tracking_table.py -- table schema
 building and validation without database access.
 
-Run with: python -m unittest fishpass_engine.tests.test_create_tracking_table
+Run with: python -m unittest fishpass_engine.tests.test_create_wcrp_tracking_table
 """
 
 import sys
@@ -18,7 +18,37 @@ except ImportError:
     sys.modules["yaml"] = types.ModuleType("yaml")
 
 import model_plan as mp  # noqa: E402
-import create_tracking_table as ctt  # noqa: E402
+import create_wcrp_tracking_table as ctt  # noqa: E402
+
+
+class FakeCursor:
+    """Records executed SQL; fetchone() answers catalog lookups from `exists`,
+    a dict of (schema, name) -> bool (default True)."""
+
+    def __init__(self, exists=None):
+        self.exists = exists or {}
+        self.executed = []
+        self._last_params = None
+
+    def execute(self, sql, params=None):
+        self.executed.append(sql)
+        self._last_params = params
+
+    def fetchone(self):
+        if self._last_params is None:
+            return None
+        return (1,) if self.exists.get(tuple(self._last_params), True) else None
+
+
+class FakeConn:
+    def __init__(self):
+        self.calls = []
+
+    def commit(self):
+        self.calls.append("commit")
+
+    def rollback(self):
+        self.calls.append("rollback")
 
 
 def write_plan(tmp_dir, code, extra_yaml=""):
@@ -202,6 +232,62 @@ class WcrpSchemaNameTests(unittest.TestCase):
 
         schema = ctt._wcrp_schema(plan)
         self.assertEqual(schema, "test123_wcrp")
+
+
+class SupportObjectTests(unittest.TestCase):
+    def test_blank2null_sql_no_longer_in_script(self):
+        """blank2null() moved to init/database/wcrp_support.sql."""
+        self.assertFalse(hasattr(ctt, "BLANK2NULL_FUNCTION_SQL"))
+
+    def test_required_enum_types(self):
+        """_required_enum_types lists every support.tt_* type the table uses."""
+        types_needed = ctt._required_enum_types(["chn"])
+        self.assertIn("tt_structure_type", types_needed)
+        self.assertIn("tt_structure_list_status_type", types_needed)
+        self.assertIn("tt_partial_passability_notes_type", types_needed)
+        self.assertEqual(len(types_needed), 13)
+
+    def test_missing_support_objects_exit_before_any_ddl(self):
+        """create_tracking_table stops (pointing at wcrp_support.sql) if the
+        blank2null function is missing, before SET ROLE or any DDL."""
+        cursor = FakeCursor(exists={("support", "blank2null"): False})
+        plan = {"code": "ns", "target_species": ["chn"]}
+        with self.assertRaises(SystemExit) as cm:
+            ctt.create_tracking_table(FakeConn(), cursor, plan)
+        self.assertIn("wcrp_support.sql", str(cm.exception.code))
+        self.assertFalse(any("set role" in q.lower() for q in cursor.executed))
+        self.assertFalse(any("create" in q.lower() for q in cursor.executed))
+
+    def test_existing_table_exits_and_role_is_reset(self):
+        """An existing tracking table aborts; as_role rolls back then resets."""
+        cursor = FakeCursor()  # everything exists, including the table
+        conn = FakeConn()
+        plan = {"code": "ns", "target_species": ["chn"]}
+        with self.assertRaises(SystemExit) as cm:
+            ctt.create_tracking_table(conn, cursor, plan)
+        self.assertIn("already exists", str(cm.exception.code))
+        self.assertFalse(any(q.startswith("CREATE TABLE") for q in cursor.executed))
+        self.assertEqual(cursor.executed[-1], "reset role;")
+        self.assertEqual(conn.calls[-2:], ["rollback", "commit"])
+
+
+class CheckWcrpPrerequisitesTests(unittest.TestCase):
+    PLAN = {"code": "ns"}
+
+    def test_passes_when_everything_exists(self):
+        ctt.check_wcrp_prerequisites(FakeCursor(), self.PLAN)
+
+    def test_missing_tracking_table_exits_with_action_hint(self):
+        cursor = FakeCursor(exists={("ns_wcrp", "tracking_table_ns"): False})
+        with self.assertRaises(SystemExit) as cm:
+            ctt.check_wcrp_prerequisites(cursor, self.PLAN)
+        self.assertIn("FishPass WCRP Tracking Table Setup", str(cm.exception.code))
+
+    def test_missing_blank2null_exits(self):
+        cursor = FakeCursor(exists={("support", "blank2null"): False})
+        with self.assertRaises(SystemExit) as cm:
+            ctt.check_wcrp_prerequisites(cursor, self.PLAN)
+        self.assertIn("wcrp_support.sql", str(cm.exception.code))
 
 
 if __name__ == "__main__":

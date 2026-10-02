@@ -6,31 +6,23 @@ Builds a per-(species, lifecycle) ranked-barriers table from the plan's
 structures recorded in the WCRP tracking table, and writes a slim output table
 containing ONLY the barrier id plus the ranking fields generated here (group
 membership, per-group gains, and the three rank columns). The barriers,
-tracking, and ranked tables are intended to be joined into a single export view
-later, so nothing from the source view is duplicated into the output.
+tracking, and ranked tables are joined into a single export view afterwards
+(create_combined_view.py), so nothing from the source view is duplicated into
+the output.
 
-Runs as part of run_model.py (call run_ranking after create_barrier_views), and
-can also be run standalone for one-off reruns.
-
-Usage:
-    python rank_barriers.py <plan_code>              # run against the database
-    python rank_barriers.py <plan_code> --dry-run    # print SQL, no connection
-    python rank_barriers.py <plan_code> --species as  # one species' pairs only
+Not a standalone script: run_ranking() is called by run_model.py after
+create_barrier_views, on every model run. The WCRP tracking table must already
+exist (create_wcrp_tracking_table.py / its GitHub Action); run_model.py checks
+this before the run starts.
 """
-import argparse
 import logging
 import sys
 
-from db import db_connect, quote_ident, require_env
-from model_plan import IDENTIFIER_RE, load_model_plan
+from db import as_role, get_db_roles, quote_ident, wcrp_setting
+from model_plan import IDENTIFIER_RE
+from postprocess_views import barrier_length_fields
 
 logger = logging.getLogger(__name__)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 
 # =================================================================================
 #  CONFIGURATION
@@ -38,17 +30,10 @@ logging.basicConfig(
 # Ranking is driven by the plan's reporting_species_lifecycles -- the cached
 # result of model_plan.expand_reporting_values(). One ranked table is produced
 # per (species, lifecycle) pair (see resolve_ranking_pairs).
-
-# Minimum weighted average gain per barrier (km). Groups below this are pushed
-# to the bottom of the immediate-gain ranking.
-MIN_AVG_GAIN_KM = 0.5
-
-# Ownership / grants on the final ranked table -- aligned with the tracking-table
-# convention (create_tracking_table.py). OWNER_ROLE also owns the <code>_wcrp
-# schema, so the ranked/_work tables are created there without extra privileges.
-OWNER_ROLE = "fishpass"
-GRANT_ALL_ROLES = ("cwf_analyst", "cwf_tech")
-GRANT_SELECT_ROLES = ("cwf_user",)
+#
+# Shared settings live in config/fishpass.yaml, not here:
+#   * database_roles -- owner + grant roles for the ranked tables (db.get_db_roles)
+#   * wcrp.min_avg_gain_km -- per-plan overridable (db.wcrp_setting)
 
 # Rehabilitated-structure match. The tracking table's status column is a
 # controlled enum (support.tt_structure_list_status_type), so this is a strict
@@ -65,56 +50,34 @@ BARRIER_GEOM_COL = "snapped_geometry"
 STREAM_GEOM_COL = "geometry"
 
 # Every *_length field in the barriers view is in METRES; the km-conversion stage
-# divides each by 1000 and renames it with a _km suffix.
-LENGTH_FIELDS = [
-    "spawn_upstream_accessible_length",
-    "rear_upstream_accessible_length",
-    "rear_upstream_length",
-    "rear_functional_upstream_length",
-    "rear_weighted_connected_upstream_length",
-    "rear_weighted_disconnected_upstream_length",
-    "rear_functional_weighted_connected_upstream_length",
-    "rear_functional_weighted_disconnected_upstream_length",
-    "spawn_upstream_length",
-    "spawn_functional_upstream_length",
-    "spawn_weighted_connected_upstream_length",
-    "spawn_weighted_disconnected_upstream_length",
-    "spawn_functional_weighted_connected_upstream_length",
-    "spawn_functional_weighted_disconnected_upstream_length",
-    "spawnrear_upstream_length",
-    "spawnrear_functional_upstream_length",
-    "spawnrear_weighted_connected_upstream_length",
-    "spawnrear_weighted_disconnected_upstream_length",
-    "spawnrear_functional_weighted_connected_upstream_length",
-    "spawnrear_functional_weighted_disconnected_upstream_length",
-]
+# divides each by 1000 and renames it with a _km suffix. The field list is NOT
+# hand-typed here -- it comes from postprocess_views.barrier_length_fields(), the
+# same source that defines the view's columns (see RankingConfig.length_fields).
 
 
 # =================================================================================
 #  PLAN-DERIVED VALUES + IDENTIFIERS
 # =================================================================================
-def resolve_ranking_pairs(plan, species_filter=None):
+def resolve_ranking_pairs(plan):
     """Return the (species, lifecycle) tuples this run will rank.
 
     This is simply the cached result of model_plan.expand_reporting_values() --
-    plan['reporting_species_lifecycles'] -- optionally narrowed to one species by
-    the --species flag. The expansion of reporting_values ('<species>_<lifestage>'
-    parsing, 'all' handling, lifecycle validation, species-in-target_species
-    checks) is NOT re-done here; it lives entirely in model_plan.py. One ranked
-    table is built per pair.
+    plan['reporting_species_lifecycles']. The expansion of reporting_values
+    ('<species>_<lifestage>' parsing, 'all' handling, lifecycle validation,
+    species-in-target_species checks) is NOT re-done here; it lives entirely in
+    model_plan.py. One ranked table is built per pair.
 
-    The only extra check is a SQL-safety guard on the species code (it is
-    interpolated into table/column identifiers, which can't be bound params);
-    this is an injection defense, not a re-validation of the expansion.
+    Two extra guards: a clear error if there is nothing to rank (model_plan
+    already rejects an empty reporting_values, so this is defense in depth), and
+    a SQL-safety check on the species code (it is interpolated into column
+    names, which can't be bound params).
     """
-    pairs = [tuple(pair) for pair in plan["reporting_species_lifecycles"]]
-    if species_filter is not None:
-        pairs = [(sp, lc) for sp, lc in pairs if sp == species_filter]
-        if not pairs:
-            sys.exit(
-                f"--species {species_filter!r} has no (species, lifecycle) pairs in "
-                f"the plan's reporting_values."
-            )
+    pairs = [tuple(pair) for pair in plan.get("reporting_species_lifecycles") or []]
+    if not pairs:
+        sys.exit(
+            f"Plan {plan.get('code')!r} has no (species, lifecycle) pairs to rank -- "
+            f"reporting_values must list at least one '<species>_<lifecycle>' entry."
+        )
     for sp, _lc in pairs:
         if not IDENTIFIER_RE.match(sp):
             sys.exit(f"Invalid species code (unsafe for a column name): {sp!r}")
@@ -130,35 +93,53 @@ class RankingConfig:
         self.species = species_code                  # e.g. as
         self.lifecycle = lifecycle                   # from reporting_species_lifecycles
 
-        # Whether to fold in the rehabilitated value from the tracking table. Defaults True (dry-run
-        # shows the full SQL); set False at runtime when the persistent tracking
-        # table doesn't exist yet (first run, before the WCRP is set up).
-        self.include_rehab = True
+        # Every lifecycle the plan reports for this species. These decide which
+        # <lc>_* length columns exist on anthropogenic_barriers_<species> (see
+        # postprocess_views.create_species_barrier_views), so the km conversion
+        # touches exactly the columns that are actually there.
+        self.view_lifecycles = sorted(
+            {lc for sp, lc in plan["reporting_species_lifecycles"] if sp == species_code}
+        )
+        self.length_fields = barrier_length_fields(self.view_lifecycles)
 
-        # Persistent per-WCRP schema (owned by OWNER_ROLE) -- holds BOTH the
+        # Per-plan settings (plan override, else config/fishpass.yaml default).
+        self.min_avg_gain_km = wcrp_setting(plan, "min_avg_gain_km")
+        self.roles = get_db_roles()
+
+        # Identifiers. Every schema/table name is quote_ident()-ed: plan['code']
+        # is only held to PLAN_CODE_RE, which allows a leading digit (e.g. '1ns'),
+        # and an unquoted 1ns_wcrp is a SQL syntax error. *_name attributes keep
+        # the RAW names for bound parameters (catalog lookups) and for building
+        # derived names (index names).
+        #
+        # Persistent per-WCRP schema (owned by the owner role) -- holds BOTH the
         # tracking table and the ranked output/_work tables.
-        self.wcrp_schema = f"{self.watershed}_wcrp"
+        self.wcrp_schema_name = f"{self.watershed}_wcrp"
+        self.wcrp_schema = quote_ident(self.wcrp_schema_name)
 
-        # Sources are READ from the ephemeral output_schema. All name parts are
-        # validated (output_schema via IDENTIFIER_RE, code via PLAN_CODE_RE,
-        # species via resolve_ranking_pairs; lifecycle via model_plan expansion),
-        # so they are safe to interpolate directly.
-        self.barriers_view = f"{self.schema}.anthropogenic_barriers_{self.species}"
-        self.streams = f"{self.schema}.streams"
-        self.all_barriers = f"{self.schema}.{ALL_BARRIERS_TABLE}"
+        # Sources are READ from the ephemeral output_schema.
+        self.schema_q = quote_ident(self.schema)
+        self.barriers_view = (
+            f"{self.schema_q}.{quote_ident(f'anthropogenic_barriers_{self.species}')}"
+        )
+        self.streams = f"{self.schema_q}.{quote_ident('streams')}"
+        self.all_barriers = f"{self.schema_q}.{quote_ident(ALL_BARRIERS_TABLE)}"
 
         # Outputs are WRITTEN to the persistent WCRP schema. The lifecycle is part
         # of the name so a plan reporting multiple lifecycles for a species yields
         # one distinct ranked table per (species, lifecycle) pair.
         table_stem = f"ranked_barriers_{self.species}_{self.lifecycle}_{self.watershed}"
-        self.ranked = f"{self.wcrp_schema}.{table_stem}"
-        self.work = f"{self.wcrp_schema}.{table_stem}_work"
+        self.ranked_name = table_stem
+        self.work_name = f"{table_stem}_work"
+        self.ranked = f"{self.wcrp_schema}.{quote_ident(self.ranked_name)}"
+        self.work = f"{self.wcrp_schema}.{quote_ident(self.work_name)}"
 
-        # Tracking table (create_tracking_table.py). Status column is
+        # Tracking table (create_wcrp_tracking_table.py). Status column is
         # species-suffixed (lifecycle-agnostic).
-        self.tracking_schema = self.wcrp_schema
         self.tracking_table_name = f"tracking_table_{self.watershed}"
-        self.tracking_table = f"{self.tracking_schema}.{self.tracking_table_name}"
+        self.tracking_table = (
+            f"{self.wcrp_schema}.{quote_ident(self.tracking_table_name)}"
+        )
         self.col_tracking_status = f"structure_list_status_{self.species}"
 
         lc = self.lifecycle
@@ -209,28 +190,15 @@ def sql_create_working_table(c):
     """DROP + rebuild the working table from the barriers view.
 
     Rehabilitated structures are folded in via the tracking-table LEFT JOIN
-    (strict enum match), unless c.include_rehab is False (the persistent
-    tracking table doesn't exist yet). Length fields are still in METRES here;
-    the next stage converts them to km. anthropogenic_barriers_<species> is a
-    view, but SELECT ... INTO materialises the needed columns into a real table,
-    so all later ALTER/UPDATE stages work normally. The passability gate is
-    lifecycle-specific (see _passability_predicate): a barrier is kept only if it
-    blocks the ranked lifestage(s), with rehabilitated barriers always kept.
+    (strict enum match). The tracking table is guaranteed to exist --
+    run_model.py refuses to start a run without it. Length fields are still in
+    METRES here; the next stage converts them to km. anthropogenic_barriers_<species>
+    is a view, but SELECT ... INTO materialises the needed columns into a real
+    table, so all later ALTER/UPDATE stages work normally. The passability gate
+    is lifecycle-specific (see _passability_predicate): a barrier is kept only if
+    it blocks the ranked lifestage(s), with rehabilitated barriers always kept.
     """
     passability_predicate = _passability_predicate(c)
-    if c.include_rehab:
-        tracking_join = (
-            f"    LEFT JOIN {c.tracking_table} tt\n"
-            f"        ON tt.barrier_id = b.id"
-        )
-        rehab_clause = (
-            f"\n             OR tt.{c.col_tracking_status} = '{REHABILITATED_STATUS}'"
-        )
-    else:
-        tracking_join = (
-            "    -- tracking table not present yet; rehab fold-in skipped this run"
-        )
-        rehab_clause = ""
     return f"""
     DROP TABLE IF EXISTS {c.work} CASCADE;
     SELECT b.*
@@ -239,9 +207,11 @@ def sql_create_working_table(c):
         ,b.{c.col_passability_rear}::decimal  AS {c.out_passability_rear}
         INTO {c.work}
     FROM {c.barriers_view} b
-{tracking_join}
+    LEFT JOIN {c.tracking_table} tt
+        ON tt.barrier_id = b.id
     WHERE (
-                {passability_predicate}{rehab_clause}
+                {passability_predicate}
+             OR tt.{c.col_tracking_status} = '{REHABILITATED_STATUS}'
           )
         AND b.{c.src_hab_exists} != 0
     ORDER BY b.{c.src_func_upstr} DESC;
@@ -252,13 +222,18 @@ def sql_create_working_table(c):
 
 
 def sql_convert_lengths_to_km(c):
-    """Convert every length column from metres to km and rename with a _km suffix."""
+    """Convert every length column from metres to km and rename with a _km suffix.
+
+    Covers exactly the length columns the source view has for this species
+    (c.length_fields -- the per-species accessible lengths plus <lc>_* for each
+    lifecycle the plan reports), so every length on the working table ends up in
+    km and no ALTER targets a column that doesn't exist."""
     lines = [
         "    ------------- CONVERT LENGTH FIELDS FROM METRES TO KILOMETRES -------------",
         "    -- Divide each *_length column by 1000 and rename with a _km suffix so the",
         "    -- unit is explicit for all downstream stages (gains, ranks, min_avg_gain_km).",
     ]
-    for f in LENGTH_FIELDS:
+    for f in c.length_fields:
         lines.append(
             f"    ALTER TABLE {c.work} "
             f"ALTER COLUMN {f} TYPE double precision USING ({f}::double precision / 1000.0);"
@@ -289,15 +264,17 @@ def sql_derive_stream_id_up(c):
 
 def sql_assign_mainstem_and_initial_groups(c):
     """Add mainstem_id from the stream network and seed one group per mainstem."""
-    base = c.work.split(".")[-1]
+    idx_mainstem = quote_ident(f"{c.work_name}_idx_mainstem")
+    idx_group_id = quote_ident(f"{c.work_name}_idx_group_id")
+    idx_id = quote_ident(f"{c.work_name}_idx_id")
     return f"""
     --TO FIX: some group_ids need to get combined - e.g., multiple branches of river
     ALTER TABLE {c.work} ADD COLUMN IF NOT EXISTS mainstem_id uuid;
     UPDATE {c.work} SET mainstem_id = t.mainstem_id
         FROM {c.streams} t WHERE t.id = stream_id_up;
-    CREATE INDEX IF NOT EXISTS {base}_idx_mainstem ON {c.work} (mainstem_id);
-    CREATE INDEX IF NOT EXISTS {base}_idx_group_id ON {c.work} (group_id);
-    CREATE INDEX IF NOT EXISTS {base}_idx_id       ON {c.work} (id);
+    CREATE INDEX IF NOT EXISTS {idx_mainstem} ON {c.work} (mainstem_id);
+    CREATE INDEX IF NOT EXISTS {idx_group_id} ON {c.work} (group_id);
+    CREATE INDEX IF NOT EXISTS {idx_id}       ON {c.work} (id);
     WITH mainstems AS (
         SELECT DISTINCT mainstem_id, row_number() OVER () AS group_id
         FROM {c.work}
@@ -443,7 +420,7 @@ def sql_assign_ranks(c):
                ROW_NUMBER() OVER(ORDER BY COALESCE({c.col_downstr_count}, 0),
                                  {c.gain_w_avg} DESC) AS row_num
         FROM {c.work}
-        WHERE {c.gain_w_avg} >= {MIN_AVG_GAIN_KM}
+        WHERE {c.gain_w_avg} >= {c.min_avg_gain_km}
         UNION ALL
         -- groups blocking < min_avg_gain_km of habitat are moved to the bottom
         SELECT id, group_id, {c.col_upstr_count}, {c.col_downstr_count},
@@ -453,12 +430,12 @@ def sql_assign_ranks(c):
                    SELECT ROW_NUMBER() OVER(ORDER BY COALESCE({c.col_downstr_count}, 0),
                                             {c.gain_w_avg} DESC) AS row_num
                    FROM {c.work}
-                   WHERE {c.gain_w_avg} >= {MIN_AVG_GAIN_KM}
+                   WHERE {c.gain_w_avg} >= {c.min_avg_gain_km}
                ) AS subquery)
                + ROW_NUMBER() OVER(ORDER BY COALESCE({c.col_downstr_count}, 0),
                                    {c.gain_w_avg} DESC) AS row_num
         FROM {c.work}
-        WHERE {c.gain_w_avg} < {MIN_AVG_GAIN_KM}
+        WHERE {c.gain_w_avg} < {c.min_avg_gain_km}
     ),
     ranks AS (
         SELECT id
@@ -521,8 +498,14 @@ def sql_finalize_output_table(c):
     tracking-table convention. The barriers, tracking, and ranked tables are
     joined into a single export view downstream, so no source columns are copied.
     """
-    all_roles = ", ".join(GRANT_ALL_ROLES)
-    select_roles = ", ".join(GRANT_SELECT_ROLES)
+    owner = quote_ident(c.roles["owner"])
+    grants = "".join(
+        f"\n    GRANT ALL ON TABLE {c.ranked} TO {quote_ident(r)};"
+        for r in c.roles["grant_all"]
+    ) + "".join(
+        f"\n    GRANT SELECT ON TABLE {c.ranked} TO {quote_ident(r)};"
+        for r in c.roles["grant_select"]
+    )
     return f"""
     ----------------- BUILD SLIM RANKING OUTPUT TABLE -------------------------
     DROP TABLE IF EXISTS {c.ranked} CASCADE;
@@ -544,9 +527,7 @@ def sql_finalize_output_table(c):
     FROM {c.work};
     ALTER TABLE {c.ranked} ALTER COLUMN barrier_id SET NOT NULL;
     ALTER TABLE {c.ranked} ADD PRIMARY KEY (barrier_id);
-    ALTER TABLE {c.ranked} OWNER TO {OWNER_ROLE};
-    GRANT ALL ON TABLE {c.ranked} TO {all_roles};
-    GRANT SELECT ON TABLE {c.ranked} TO {select_roles};
+    ALTER TABLE {c.ranked} OWNER TO {owner};{grants}
     DROP TABLE IF EXISTS {c.work} CASCADE;
     """
 
@@ -565,32 +546,9 @@ STAGES = [
 ]
 
 
-def build_full_sql(c):
-    """Concatenate every stage into one script (used for --dry-run)."""
-    parts = []
-    for label, fn in STAGES:
-        parts.append(f"-- ===== {label} =====")
-        parts.append(fn(c).strip())
-        parts.append("")
-    return "\n".join(parts)
-
-
 # =================================================================================
-#  TRACKING-TABLE PRESENCE + VALIDATION (FK replacement)
+#  TRACKING-TABLE VALIDATION (FK replacement)
 # =================================================================================
-def _tracking_table_exists(cursor, c):
-    cursor.execute(
-        """
-        select 1
-        from information_schema.tables
-        where table_schema = %s
-          and table_name = %s;
-        """,
-        (c.tracking_schema, c.tracking_table_name),
-    )
-    return cursor.fetchone() is not None
-
-
 def validate_tracking_barrier_ids(cursor, c):
     """Per-run replacement for the dropped foreign key: flag any tracking
     barrier_id that has no matching feature_id in the freshly-built all_barriers.
@@ -622,43 +580,29 @@ def validate_tracking_barrier_ids(cursor, c):
 # =================================================================================
 #  EXECUTION
 # =================================================================================
-def run_ranking(conn, cursor, plan, species_filter=None):
+def run_ranking(conn, cursor, plan):
     """Rank every (species, lifecycle) pair in the plan's reporting_values,
-    committing per stage. Intended to be called from run_model.py after
-    create_barrier_views (reusing the run's conn/cursor), and also used by this
-    module's standalone main(). Optionally restrict to one species via
-    species_filter (the --species flag).
+    committing per stage. Called from run_model.py after create_barrier_views,
+    reusing the run's conn/cursor.
 
-    Detects the persistent tracking table once: if present, validates its
-    barrier_ids against all_barriers and folds rehab structures into the ranking;
-    if absent (first run, before WCRP setup), ranks without the rehab join.
+    Validates the tracking table's barrier_ids against all_barriers once (it is
+    per-watershed, shared across all species/lifecycles), then ranks each pair
+    with rehabilitated structures folded in.
     """
-    pairs = resolve_ranking_pairs(plan, species_filter)
+    pairs = resolve_ranking_pairs(plan)
+    owner = get_db_roles()["owner"]
 
-    # Act as the OWNER_ROLE so the ranked/_work tables (created in the OWNER_ROLE-
+    # Act as the owner role so the ranked/_work tables (created in the owner-
     # owned <code>_wcrp schema) and the finalize-stage OWNER TO succeed even when
-    # the connecting user is only a granted member of the role (no password needed
-    # for SET ROLE). RESET afterwards because run_model.py shares this connection
-    # across phases, so the role change must not leak past ranking.
-    cursor.execute(f"set role {quote_ident(OWNER_ROLE)};")
-    conn.commit()
-    try:
-        # Tracking table is per-watershed (shared across all species/lifecycles),
-        # so probe once using the first pair.
-        probe_species, probe_lifecycle = pairs[0]
-        probe = RankingConfig(plan, probe_species, probe_lifecycle)
-        tracking_exists = _tracking_table_exists(cursor, probe)
-        if tracking_exists:
-            validate_tracking_barrier_ids(cursor, probe)
-        else:
-            logger.info(
-                "Tracking table %s not present yet; ranking without rehab fold-in.",
-                probe.tracking_table,
-            )
+    # the connecting user is only a granted member of the role. as_role() rolls
+    # back + RESETs afterwards (even on error) because run_model.py shares this
+    # connection across phases, so the role change must not leak past ranking.
+    with as_role(conn, cursor, owner):
+        probe = RankingConfig(plan, *pairs[0])
+        validate_tracking_barrier_ids(cursor, probe)
 
         for species, lifecycle in pairs:
             c = RankingConfig(plan, species, lifecycle)
-            c.include_rehab = tracking_exists
             logger.info(
                 "Ranking barriers for %r / %r -> %s", species, lifecycle, c.ranked
             )
@@ -666,70 +610,3 @@ def run_ranking(conn, cursor, plan, species_filter=None):
                 logger.info("  -> %s", label)
                 cursor.execute(fn(c))
                 conn.commit()
-    finally:
-        # Restore the connecting user's role for any later phases / reuse. Runs
-        # even on error, after the caller's rollback, so the session isn't left
-        # stuck as OWNER_ROLE.
-        cursor.execute("reset role;")
-        conn.commit()
-
-
-# =================================================================================
-#  ENTRY POINT (standalone reruns)
-# =================================================================================
-def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "plan_code", help="Plan code -- loads config/models/<plan_code>.yaml"
-    )
-    parser.add_argument(
-        "--species",
-        default=None,
-        help="Only rank the (species, lifecycle) pairs for this species code "
-        "(default: every species in the plan's reporting_values).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the generated SQL and exit without connecting to a database.",
-    )
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-    plan = load_model_plan(args.plan_code)
-    pairs = resolve_ranking_pairs(plan, args.species)
-
-    logger.info(
-        "Plan %r -> schema %r; ranking (species, lifecycle) pairs: %s",
-        plan["code"],
-        plan["output_schema"],
-        pairs,
-    )
-
-    if args.dry_run:
-        for species, lifecycle in pairs:
-            c = RankingConfig(plan, species, lifecycle)  # include_rehab True -> full SQL
-            print(
-                f"\n{'=' * 80}\n-- SQL for {species!r} / {lifecycle!r}  "
-                f"(output table: {c.ranked})\n{'=' * 80}"
-            )
-            print(build_full_sql(c))
-        return
-
-    require_env()
-    conn = db_connect()
-    try:
-        with conn.cursor() as cursor:
-            run_ranking(conn, cursor, plan, args.species)
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-    logger.info("Done!")
-
-
-if __name__ == "__main__":
-    main()

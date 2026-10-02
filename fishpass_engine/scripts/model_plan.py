@@ -29,7 +29,13 @@ DEFAULTS = {
 	"gradient_barriers_table": "support.gradient_barriers",
 	"impassable_threshold": 1.0,
 	"natural_feature_types_override": None,
+	# WCRP per-plan overrides. None = use the default from config/fishpass.yaml's 'wcrp'
+	# section (resolved at use time by db.wcrp_setting).
+	"label_in_wcrp_rank_threshold": None,
+	"min_avg_gain_km": None,
 }
+
+WCRP_PLAN_OVERRIDES = ("label_in_wcrp_rank_threshold", "min_avg_gain_km")
 
 REQUIRED_FIELDS = (
 	"code",
@@ -43,6 +49,23 @@ REQUIRED_FIELDS = (
 
 def _fail(plan_path, message):
 	sys.exit(f"Invalid model plan {plan_path}: {message}")
+
+
+def wcrp_value_error(key, value):
+	"""Return an error message if `value` is not valid for WCRP setting `key`, else None.
+	Shared by plan validation (below) and db.wcrp_setting (fishpass.yaml defaults).
+	  * label_in_wcrp_rank_threshold -- a rank, so a whole number >= 1
+	  * min_avg_gain_km -- a distance in km, >= 0 (0 disables the minimum)
+	"""
+	if key == "label_in_wcrp_rank_threshold":
+		if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+			return f"{key} must be a whole number >= 1, got {value!r}"
+	elif key == "min_avg_gain_km":
+		if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+			return f"{key} must be a number >= 0, got {value!r}"
+	else:
+		return f"unknown WCRP setting {key!r}"
+	return None
 
 
 def _validate_aoi(aoi, plan_path):
@@ -139,6 +162,13 @@ def load_model_plan(plan_code, models_dir=DEFAULT_MODELS_DIR):
 
 	if not isinstance(data["structure_types"], list) or not data["structure_types"]:
 		_fail(plan_path, "structure_types must be a non-empty list")
+	if not isinstance(data["reporting_values"], list) or not data["reporting_values"]:
+		_fail(plan_path, "reporting_values must be a non-empty list")
+	for key in WCRP_PLAN_OVERRIDES:
+		if data.get(key) is not None:
+			error = wcrp_value_error(key, data[key])
+			if error:
+				_fail(plan_path, error)
 
 	override = data.get("natural_feature_types_override")
 	if override is not None and (

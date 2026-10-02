@@ -9,3 +9,27 @@ structure_classification:
   natural_feature_types:
     - waterfalls
     - gradients
+
+# Database roles applied to the objects the WCRP scripts create (the <code>_wcrp schema,
+# tracking table, ranked_barriers_* tables, and combined_output_table_vw).
+#   owner        -- owns every object; scripts SET ROLE to it while creating them, so the
+#                   connecting user must be (or be a granted member of) this role.
+#   grant_all    -- roles granted ALL on each object.
+#   grant_select -- roles granted SELECT only.
+database_roles:
+  owner: fishpass
+  grant_all:
+    - cwf_analyst
+    - cwf_tech
+  grant_select:
+    - cwf_user
+
+# WCRP ranking/reporting defaults. Each can be overridden per plan by setting a field of
+# the same name in config/models/<plan_code>.yaml (see fishpass_engine/docs/inputs/model_plan_file.md).
+wcrp:
+  # combined_output_table_vw flags label_in_wcrp_<sp>_<lc> = 'yes' when the barrier's
+  # rank_combined is at or above (numerically <=) this rank.
+  label_in_wcrp_rank_threshold: 30
+  # Minimum weighted average gain per barrier (km). Groups below this are pushed to the
+  # bottom of the immediate-gain ranking (rank_w_avg_gain_tiered).
+  min_avg_gain_km: 0.5

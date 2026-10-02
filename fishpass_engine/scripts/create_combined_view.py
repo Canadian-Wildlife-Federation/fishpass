@@ -2,7 +2,7 @@
 """Create the combined output view for a model plan (run during a model run).
 
 Builds one <code>_wcrp.combined_output_table_vw with a single row per actionable
-barrier, stitching together three sources:
+barrier, stitching together four sources:
 
   * <output_schema>.all_barriers        -- base row set + feature_type/geometry,
                                            and (via anthropogenic_barriers_<sp>)
@@ -17,6 +17,11 @@ plan['reporting_species_lifecycles'] (so more species/lifecycles just widen the
 column set -- still one row per barrier), and the natural feature types to
 exclude come from fishpass.yaml (or the plan's natural_feature_types_override).
 
+Every habitat length surfaced here is converted from metres to km and suffixed
+_km, matching the ranked tables. The length columns are not hand-listed: they
+come from postprocess_views.barrier_length_fields(), the same source that
+defines the anthropogenic_barriers_<sp> view columns.
+
 Join keys (they differ, by design of the upstream pipeline):
   * ranking tables  -> all_barriers.id       (ranked_barriers.barrier_id = id)
   * tracking table  -> all_barriers.feature_id
@@ -26,33 +31,25 @@ Join keys (they differ, by design of the upstream pipeline):
 Waterfalls/gradients (and anything else listed under natural_feature_types) are
 excluded so the view holds only actionable barriers.
 
-Connection details come from environment variables only (see db.py).
-
-Usage:
-    python create_combined_view.py <plan_code>
-    python create_combined_view.py <plan_code> --dry-run
+Not a standalone script: create_combined_view() is called by run_model.py
+after run_ranking, on every model run. Anything it surfaces (CABD attributes,
+the label_in_wcrp threshold) is picked up on the next full model run.
 """
-import argparse
 import logging
 import sys
-from pathlib import Path
 
-import yaml
-
-from db import db_connect, quote_ident, require_env
-from model_plan import IDENTIFIER_RE, load_model_plan
+from db import (
+    DEFAULT_CONFIG_FILE,
+    as_role,
+    get_db_roles,
+    load_config,
+    quote_ident,
+    wcrp_setting,
+)
+from model_plan import IDENTIFIER_RE
+from postprocess_views import barrier_length_fields
 
 logger = logging.getLogger(__name__)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
-# Repo layout mirrors model_plan.py / species_params.py.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG_FILE = REPO_ROOT / "config" / "fishpass.yaml"
 
 VIEW_NAME = "combined_output_table_vw"
 
@@ -83,17 +80,11 @@ STREAM_CROSSING_ATTRIBUTES = [
     "date_assessed",
 ]
 
-# Per-(species, lifecycle) habitat totals pulled from anthropogenic_barriers_<sp>
-# (postprocess_views.py). Each is a <lc>_<field> column on that view; output is
-# aliased <species>_<lifecycle>_<field>.
-BARRIERS_HABITAT_LIFECYCLE_FIELDS = [
-    "upstream_length",
-    "functional_upstream_length",
-    "weighted_disconnected_upstream_length",
-    "functional_weighted_disconnected_upstream_length",
-]
+# Per-species habitat lengths pulled from anthropogenic_barriers_<sp>
+# (postprocess_views.py) come from postprocess_views.barrier_length_fields() --
+# see build_view_sql. Each is output as <species>_<column>_km, in km.
 
-# Tracking columns to surface (non-species). Mirrors create_tracking_table.py.
+# Tracking columns to surface (non-species). Mirrors create_wcrp_tracking_table.py.
 # barrier_id is intentionally omitted (the view's barrier_id comes from
 # all_barriers). road_name and structure_type collide with CABD crossing/dam
 # attribute names, so they are re-aliased on output (see TRACKING_ALIAS_OVERRIDES).
@@ -144,13 +135,9 @@ STREAM_CROSSINGS_FDW = "cabd_fdw.stream_crossings_sites_structures_view_en"
 CABD_JOIN_KEY = "cabd_id"
 
 # --- OTHER SETTINGS --------------------------------------------------------------
-# A barrier is flagged label_in_wcrp = 'yes' when its combined rank is at or above
-# (numerically <=) this threshold, per (species, lifecycle).
-LABEL_IN_WCRP_RANK_THRESHOLD = 30
-
-OWNER_ROLE = "fishpass"
-GRANT_ALL_ROLES = ("cwf_analyst", "cwf_tech")
-GRANT_SELECT_ROLES = ("cwf_user",)
+# Shared settings live in config/fishpass.yaml, not here:
+#   * database_roles -- owner + grant roles for the view (db.get_db_roles)
+#   * wcrp.label_in_wcrp_rank_threshold -- per-plan overridable (db.wcrp_setting)
 
 
 # =================================================================================
@@ -166,10 +153,7 @@ def _load_natural_feature_types(plan, config_path=DEFAULT_CONFIG_FILE):
     if override is not None:
         types = override
     else:
-        if not Path(config_path).is_file():
-            sys.exit(f"Config file not found: {config_path}")
-        with open(config_path) as f:
-            cfg = yaml.safe_load(f) or {}
+        cfg = load_config(config_path)
         types = (cfg.get("structure_classification") or {}).get(
             "natural_feature_types"
         ) or []
@@ -183,7 +167,13 @@ def _species_lifecycles(plan):
     """{species: [lifecycle, ...]} and the sorted (species, lifecycle) pairs, from
     the cached model_plan.expand_reporting_values() result. Species codes are
     interpolated into identifiers, so they are charset-checked here."""
-    pairs = sorted(tuple(p) for p in plan["reporting_species_lifecycles"])
+    pairs = sorted(tuple(p) for p in plan.get("reporting_species_lifecycles") or [])
+    if not pairs:
+        sys.exit(
+            f"Plan {plan.get('code')!r} has no (species, lifecycle) pairs for the "
+            f"combined view -- reporting_values must list at least one "
+            f"'<species>_<lifecycle>' entry."
+        )
     by_species = {}
     for sp, lc in pairs:
         if not IDENTIFIER_RE.match(sp):
@@ -199,7 +189,7 @@ def _col(src_alias, column, out_name):
     return f"{src_alias}.{quote_ident(column)} AS {quote_ident(out_name)}"
 
 
-def _ranking_columns(alias, sp, lc):
+def _ranking_columns(alias, sp, lc, label_threshold):
     """(source_column, output_name) pairs for one ranked_barriers_<sp>_<lc> table,
     mirroring rank_barriers.py's slim output. The two lifecycle-named source
     columns are handled here so the output name carries species+lifecycle."""
@@ -219,7 +209,7 @@ def _ranking_columns(alias, sp, lc):
     cols = [_col(alias, src, out) for src, out in static]
     # label_in_wcrp: derived from combined rank.
     cols.append(
-        f"CASE WHEN {alias}.rank_combined <= {LABEL_IN_WCRP_RANK_THRESHOLD}::numeric "
+        f"CASE WHEN {alias}.rank_combined <= {label_threshold}::numeric "
         f"THEN 'yes' ELSE 'no' END AS {quote_ident('label_in_wcrp_' + suffix)}"
     )
     return cols
@@ -235,6 +225,8 @@ def build_view_sql(plan, natural_feature_types):
     view_id = f"{wcrp_id}.{quote_ident(VIEW_NAME)}"
 
     by_species, pairs = _species_lifecycles(plan)
+    label_threshold = wcrp_setting(plan, "label_in_wcrp_rank_threshold")
+    roles = get_db_roles()
 
     ab = "ab"
     dm = "dm"
@@ -255,20 +247,20 @@ def build_view_sql(plan, natural_feature_types):
     for attr in STREAM_CROSSING_ATTRIBUTES:
         select_cols.append(_col(sc, attr, attr))
 
-    # 4. Per-species passability + per-(species, lifecycle) habitat totals, from
-    #    the anthropogenic_barriers_<sp> views.
+    # 4. Per-species passability + habitat lengths (metres in the source view,
+    #    converted to km here), from the anthropogenic_barriers_<sp> views.
     for sp in sorted(by_species):
         bp = f"bp_{sp}"
         select_cols.append(_col(bp, "passability_status_spawn", f"{sp}_spawn_passability"))
         select_cols.append(_col(bp, "passability_status_rear", f"{sp}_rear_passability"))
-        for lc in by_species[sp]:
-            for field in BARRIERS_HABITAT_LIFECYCLE_FIELDS:
-                src = f"{lc}_{field}"
-                select_cols.append(_col(bp, src, f"{sp}_{lc}_{field}"))
+        for src in barrier_length_fields(by_species[sp]):
+            select_cols.append(
+                f"{bp}.{quote_ident(src)} / 1000.0 AS {quote_ident(f'{sp}_{src}_km')}"
+            )
 
     # 5. Per-(species, lifecycle) ranking fields.
     for sp, lc in pairs:
-        select_cols.extend(_ranking_columns(f"rk_{sp}_{lc}", sp, lc))
+        select_cols.extend(_ranking_columns(f"rk_{sp}_{lc}", sp, lc, label_threshold))
 
     # 6. Tracking columns (non-species, with collision-safe aliases).
     for col in TRACKING_NON_SPECIES_COLUMNS:
@@ -318,8 +310,12 @@ def build_view_sql(plan, natural_feature_types):
     select_sql = ",\n    ".join(select_cols)
     joins_sql = "\n".join(joins)
 
-    all_roles = ", ".join(quote_ident(r) for r in GRANT_ALL_ROLES)
-    select_roles = ", ".join(quote_ident(r) for r in GRANT_SELECT_ROLES)
+    grants = "".join(
+        f"\nGRANT ALL ON TABLE {view_id} TO {quote_ident(r)};" for r in roles["grant_all"]
+    ) + "".join(
+        f"\nGRANT SELECT ON TABLE {view_id} TO {quote_ident(r)};"
+        for r in roles["grant_select"]
+    )
 
     return f"""
 DROP VIEW IF EXISTS {view_id} CASCADE;
@@ -329,9 +325,7 @@ SELECT
 FROM {schema_id}.{quote_ident('all_barriers')} {ab}
 {joins_sql}
 {where};
-ALTER VIEW {view_id} OWNER TO {quote_ident(OWNER_ROLE)};
-GRANT ALL ON TABLE {view_id} TO {all_roles};
-GRANT SELECT ON TABLE {view_id} TO {select_roles};
+ALTER VIEW {view_id} OWNER TO {quote_ident(roles["owner"])};{grants}
 """
 
 
@@ -339,60 +333,19 @@ GRANT SELECT ON TABLE {view_id} TO {select_roles};
 #  EXECUTION
 # =================================================================================
 def create_combined_view(conn, cursor, plan):
-    """Create <code>_wcrp.combined_output_table_vw. Intended to run from
-    run_model.py after run_ranking (it reads the ranked tables), and safe to
-    rerun standalone. Uses DROP VIEW + CREATE (not CREATE OR REPLACE) so the
-    column set can change between runs (e.g. adding a species)."""
+    """Create <code>_wcrp.combined_output_table_vw. Called from run_model.py
+    after run_ranking (it reads the ranked tables). Uses DROP VIEW + CREATE (not
+    CREATE OR REPLACE) so the column set can change between runs (e.g. adding a
+    species)."""
     natural_feature_types = _load_natural_feature_types(plan)
     sql = build_view_sql(plan, natural_feature_types)
+    owner = get_db_roles()["owner"]
+    view = f"{plan['code']}_wcrp.{VIEW_NAME}"
 
-    cursor.execute(f"set role {quote_ident(OWNER_ROLE)};")
-    conn.commit()
-    try:
-        view = f"{plan['code']}_wcrp.{VIEW_NAME}"
+    # as_role() rolls back + RESETs afterwards (even on error), so a failure
+    # surfaces the real error rather than "current transaction is aborted".
+    with as_role(conn, cursor, owner):
         logger.info("Creating combined output view %s", view)
         cursor.execute(sql)
         conn.commit()
         logger.info("Combined output view %s created.", view)
-    finally:
-        cursor.execute("reset role;")
-        conn.commit()
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "plan_code", help="Plan code -- loads config/models/<plan_code>.yaml"
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the generated SQL and exit without connecting to a database.",
-    )
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-    plan = load_model_plan(args.plan_code)
-
-    if args.dry_run:
-        natural_feature_types = _load_natural_feature_types(plan)
-        print(build_view_sql(plan, natural_feature_types))
-        return
-
-    require_env()
-    conn = db_connect()
-    try:
-        with conn.cursor() as cursor:
-            create_combined_view(conn, cursor, plan)
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-    logger.info("Done!")
-
-
-if __name__ == "__main__":
-    main()
