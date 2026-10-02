@@ -6,6 +6,8 @@ This engine will be implemented in python.
 
 This process will be initiated via a GitHub action. A plan file will control parameters for the run. This plan file will be selected by the user when launching the action. Each run will clear all existing data out of the output schema and generate new output data.
 
+Every model run also produces the WCRP outputs (barrier rankings and the combined output view -- see [WCRP Outputs](#wcrp-outputs)), which rely on a per-plan WCRP tracking table. That table is created once per plan, **before the plan's first model run**, by a separate GitHub action (**FishPass WCRP Tracking Table Setup**, `create_wcrp_tracking_table.py`). A model run checks for the tracking table before it starts and stops immediately if it is missing.
+
 ### GitHub Limitation
 
 Every job has a 6-hour max execution time on GitHub-hosted runners, regardless of tier. Standard `ubuntu-latest` runners provide 4 vCPU / 16 GB RAM, are free/unlimited on public repos, and billed per-minute on private repos. GitHub-hosted runners are available with Ubuntu Linux, Windows, or macOS; machine maintenance and upgrades are handled by GitHub.
@@ -42,6 +44,18 @@ Each model run will generate its own schema for the output. The schema name is d
 | CABD Features | [outputs/cabd_features.md](./outputs/cabd_features.md) |
 | Gradient Barriers | [outputs/gradient_barriers.md](./outputs/gradient_barriers.md) |
 | Habitat Updates | `<output_schema>.habitat_updates`  A copy of the habitat updates table that only includes the rows used for this model. |
+
+### WCRP Outputs
+
+WCRP outputs live in a separate, persistent per-plan schema, `<code>_wcrp` (where `<code>` is the plan's `code`), which a model run **never drops**. The tracking table in it holds hand-entered data and is created once and kept forever; the ranked tables and the combined view are rebuilt on every model run.
+
+| Dataset | Details |
+| :---- | :---- |
+| WCRP Tracking Table | [outputs/tracking_table.md](./outputs/tracking_table.md) |
+| Ranked Barriers | [outputs/ranked_barriers.md](./outputs/ranked_barriers.md) |
+| Combined Output View | [outputs/combined_output_view.md](./outputs/combined_output_view.md) |
+
+Settings used by these outputs live in [config/fishpass.yaml](../../config/fishpass.yaml): `database_roles` (owner and grant roles for every WCRP object) and `wcrp` (`label_in_wcrp_rank_threshold`, `min_avg_gain_km`). Both `wcrp` values can be overridden per plan with a field of the same name in the model plan file.
 
 
 ## Computations
@@ -108,6 +122,14 @@ rear passability (matching the combined "impassable if either lifestage fails" r
 
 The model run is a single sequence of phases against one database connection/transaction scope,
 in this order. If any phase raises an error the whole run is rolled back.
+
+### Check WCRP Prerequisites
+
+Before anything else (so nothing is dropped or recomputed first), confirm that the plan's
+`<code>_wcrp.tracking_table_<code>` and the database-wide `support.blank2null()` trigger function
+exist. If either is missing the run stops with a message saying what to run: the **FishPass WCRP
+Tracking Table Setup** action for the tracking table, or `init/database/wcrp_support.sql` for the
+support objects.
 
 ### Initialize
 
@@ -304,6 +326,34 @@ Once statistics are populated, create the reporting views over `all_barriers`/`s
 `natural_barriers`, `anthropogenic_barriers`, and `unsnapped_barriers`, plus a per-species
 `natural_barriers_<species>`/`anthropogenic_barriers_<species>`/`streams_<species>` view for each
 `target_species` in the plan, with that species' `species_stats` fields exploded to columns.
+
+### Rank Barriers
+
+`rank_barriers.py`. For each (species, lifecycle) pair in the plan's expanded `reporting_values`,
+build `<code>_wcrp.ranked_barriers_<species>_<lifecycle>_<code>` (see
+[outputs/ranked_barriers.md](./outputs/ranked_barriers.md)):
+
+- First, check every tracking-table `barrier_id` against the freshly built `all_barriers.feature_id`
+  (this replaces a foreign key, which couldn't survive the output schema rebuild). Ids with no match
+  are logged as a warning; those rows can't affect ranking until corrected.
+- Select the barriers from `anthropogenic_barriers_<species>` that are not fully passable for the
+  ranked lifestage (spawn, rear, or either for spawnrear), plus any marked `Rehabilitated barrier`
+  in the tracking table, that have upstream habitat for the lifecycle.
+- Convert every length column on the working table from metres to km (`_km` suffix).
+- Group barriers by mainstem, then repeatedly split each group at the barrier that maximizes the
+  running average weighted functional gain.
+- Compute per-group habitat gains, downstream group ids, and three ranks: immediate gain
+  (`rank_w_avg_gain_tiered`, with groups below `min_avg_gain_km` moved to the bottom), potential
+  gain (`rank_w_total_upstr_<lifecycle>_hab`), and their combination (`rank_combined`).
+- Write a slim output table containing only `barrier_id` and the ranking fields.
+
+### Create Combined View
+
+`create_combined_view.py`. Rebuild `<code>_wcrp.combined_output_table_vw` (see
+[outputs/combined_output_view.md](./outputs/combined_output_view.md)): one row per actionable
+barrier (all `all_barriers` rows except natural feature types), joining CABD attributes (via the
+`cabd_fdw` foreign tables), per-species passability and habitat lengths (in km), every ranked table,
+and the tracking table.
 
 
 ## Outstanding Decisions

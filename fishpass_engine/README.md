@@ -2,7 +2,8 @@
 
 Runs a model plan end-to-end: loads a stream network, barriers, and habitat data for the plan's
 AOI, applies structure/habitat updates, snaps everything onto the network, and computes
-per-species/lifecycle accessibility, habitat, and upstream-length statistics. See
+per-species/lifecycle accessibility, habitat, and upstream-length statistics. Every run then
+ranks barriers per species/lifecycle and rebuilds the plan's WCRP combined output view. See
 [fishpass_docs.md](docs/fishpass_docs.md) for the full requirements and design
 decisions behind this tool -- in particular its **Outstanding Decisions** section, which lists
 known gaps/assumptions not yet validated against a real database run.
@@ -17,12 +18,27 @@ known gaps/assumptions not yet validated against a real database run.
   [config/models/example.yaml](../config/models/example.yaml).
 * [config/fishpass.yaml](../config/fishpass.yaml) -- natural/anthropogenic structure
   classification. Any `feature_type` not listed there (or in a plan's
-  `natural_feature_types_override`) falls back to `anthropogenic`.
+  `natural_feature_types_override`) falls back to `anthropogenic`. Also holds the
+  `database_roles` (owner/grant roles for WCRP objects) and `wcrp` defaults
+  (`label_in_wcrp_rank_threshold`, `min_avg_gain_km` -- both overridable per plan).
+* **Once per database:** [init/database/wcrp_support.sql](../init/database/wcrp_support.sql)
+  has been run (creates the `support.tt_*` tracking-table enums and the `support.blank2null()`
+  trigger function), as has
+  [init/database/fishpass_cabd_raw_init.sql](../init/database/fishpass_cabd_raw_init.sql)
+  (the `cabd_fdw` foreign tables the combined view reads CABD attributes from).
+* **Once per plan:** the plan's WCRP tracking table exists -- run the
+  **FishPass WCRP Tracking Table Setup** action first (see below). A model run checks this
+  before it starts and stops immediately if the table is missing.
 
 ## Warnings
 
 **Output schema is fully recomputed each run.** The plan's `output_schema` is dropped and
 recreated from scratch every run -- nothing in it survives between runs.
+
+**The `<code>_wcrp` schema is persistent.** It is never dropped by a model run. Its tracking
+table (`tracking_table_<code>`) holds hand-entered data and is never modified by the scripts after
+creation. The `ranked_barriers_*` tables and `combined_output_table_vw` in it ARE replaced on every
+model run, so don't hand-edit them.
 
 **AOI-scoped runs and graph_id boundaries.** Compute Statistics partitions the network into
 connected components by `graph_id` and computes upstream/downstream statistics using only the
@@ -37,10 +53,16 @@ still need a smaller `chunk_size` than the default -- see `cabd_client.py`.
 
 ## Running - Via GitHub Action
 
-Run the **FishPass Modelling Engine** GitHub Action (`workflow_dispatch`, manual trigger),
-supplying the `plan_code` input. Database connection details come from GitHub Actions secrets
-(`FISHPASS_HOST`, `FISHPASS_PORT`, `FISHPASS_DBNAME`, `FISHPASS_USER`, `FISHPASS_PASSWORD`) --
-never stored in a config file or logged.
+Both actions are manual (`workflow_dispatch`) and take a `plan_code` input. Database connection
+details come from GitHub Actions secrets (`FISHPASS_HOST`, `FISHPASS_PORT`, `FISHPASS_DBNAME`,
+`FISHPASS_USER`, `FISHPASS_PASSWORD`) -- never stored in a config file or logged.
+
+1. **FishPass WCRP Tracking Table Setup** (`fishpass_wcrp_tracking_table.yml`) -- **once per
+   plan, before its first model run.** Creates the persistent `<code>_wcrp` schema and
+   `<code>_wcrp.tracking_table_<code>`, with one set of per-species columns per `target_species`
+   in the plan. Re-running it is safe: it refuses to touch an existing tracking table.
+2. **FishPass Modelling Engine** (`fishpass_engine.yml`) -- every model run. Runs the full
+   pipeline, including barrier ranking and the combined output view.
 
 ## Local Use
 
@@ -55,6 +77,7 @@ Or directly:
 ```sh
 export FISHPASS_HOST=... FISHPASS_PORT=... FISHPASS_DBNAME=... FISHPASS_USER=... FISHPASS_PASSWORD=...
 pip install -r fishpass_engine/scripts/requirements.txt
+python fishpass_engine/scripts/create_wcrp_tracking_table.py myplan   # once per plan
 python fishpass_engine/scripts/run_model.py myplan
 ```
 
@@ -86,4 +109,8 @@ python -m unittest discover -s fishpass_engine/tests -p "test_*.py" -v
 | `length_stats.py` | Compute Statistics step 9 |
 | `graph_component.py` | Per-graph_id DB I/O wiring the engine together |
 | `barrier_tables.py` | `natural_barriers`/`anthropogenic_barriers` views/cached feature-type tables |
-| `db.py` | Shared DB connection/identifier-quoting helpers |
+| `postprocess_views.py` | Create Barrier Views (also the single source of the barrier length-field names, `barrier_length_fields`) |
+| `rank_barriers.py` | Rank Barriers (`<code>_wcrp.ranked_barriers_<species>_<lifecycle>_<code>`) |
+| `create_combined_view.py` | Create Combined View (`<code>_wcrp.combined_output_table_vw`) |
+| `create_wcrp_tracking_table.py` | One-time WCRP tracking table setup (own GitHub Action), plus the pre-run `check_wcrp_prerequisites` check |
+| `db.py` | Shared DB connection/identifier-quoting helpers, `config/fishpass.yaml` loaders (`get_db_roles`, `wcrp_setting`), `as_role` role switching |

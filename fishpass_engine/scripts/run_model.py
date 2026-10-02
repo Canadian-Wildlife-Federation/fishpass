@@ -5,9 +5,13 @@ Database connection details come from environment variables only (see README.md)
 from the plan file and never logged.
 
 Status: all phases (Initialize, Load Stream Network, Load Structures, Process Habitat, Compute
-Statistics) are implemented. See the "Outstanding Decisions" section for known
-gaps/assumptions (supports_species, AOI-boundary graph_id handling, and others) that haven't
-been validated against a real database run yet.
+Statistics, Create Barrier Views, Rank Barriers, Create Combined View) are implemented. See the
+"Outstanding Decisions" section for known gaps/assumptions (supports_species, AOI-boundary
+graph_id handling, and others) that haven't been validated against a real database run yet.
+
+WCRP prerequisite: the plan's <code>_wcrp.tracking_table_<code> must already exist (run the
+"FishPass WCRP Tracking Table Setup" GitHub Action once per plan first). This is checked before
+the output schema is touched, so a missing tracking table fails immediately.
 """
 
 import argparse
@@ -15,12 +19,15 @@ import logging
 import time
 
 from compute_statistics import compute_statistics
+from create_combined_view import create_combined_view
+from create_wcrp_tracking_table import check_wcrp_prerequisites
 from db import db_connect, require_env
 from load_habitat import load_habitat
 from load_stream_network import get_source_srid, init_output_schema, load_stream_network
 from load_structures import load_structures
 from model_plan import load_model_plan
 from postprocess_views import create_barrier_views
+from rank_barriers import run_ranking
 from snap_structures import snap_structures
 
 logging.basicConfig(
@@ -48,6 +55,10 @@ def main():
 	conn = db_connect()
 	try:
 		with conn.cursor() as cursor:
+			logger.info("Checking WCRP prerequisites")
+			check_wcrp_prerequisites(cursor, plan)
+			conn.commit()
+
 			init_output_schema(cursor, plan["output_schema"])
 			conn.commit()
 
@@ -69,6 +80,13 @@ def main():
 
 			logger.info("Creating Barrier Views")
 			create_barrier_views(conn, cursor, plan)
+
+			logger.info("Ranking Barriers")
+			run_ranking(conn, cursor, plan)
+
+			logger.info("Creating Combined Output View")
+			create_combined_view(conn, cursor, plan)
+
 	except Exception:
 		conn.rollback()
 		raise

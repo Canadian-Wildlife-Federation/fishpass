@@ -10,13 +10,8 @@ AOIs (work units) and executed via GitHub Actions against a shared PostgreSQL da
 
 The pipeline has three components, run in order:
 
-1. **[chyf_loader](chyf_loader/README.md)** -- Copies the CHyF2 stream network into the FishPass
-   database's `chyf_raw` schema, flags isolated stream segments, and computes segment length.
-2. **[gradient_barriers](gradient_barriers/README.md)** -- Computes gradient barriers per fish
-   species/lifestage from the cached CHyF stream network and writes them to
-   `support.gradient_barriers`. Requires chyf_loader to have already run.
-3. **[fishpass_engine](fishpass_engine/README.md)** -- Runs a model plan end-to-end: loads the
-   stream network, barriers, and habitat data for the plan's AOI, applies structure/habitat
-   updates, snaps everything onto the network, and computes per-species/lifecycle accessibility,
-   habitat, and upstream-length statistics. Requires chyf_loader (and gradient_barriers, if the
-   plan uses gradient barriers) to have already run.
+1. [chyf_loader](https://github.com/Canadian-Wildlife-Federation/fishpass/blob/main/chyf_loader/README.md) -- Copies the CHyF2 stream network into the FishPass database's `chyf_raw` schema, flags isolated stream segments, and computes segment length.
+2. [gradient_barriers](https://github.com/Canadian-Wildlife-Federation/fishpass/blob/main/gradient_barriers/README.md) -- Computes gradient barriers per fish species/lifestage from the cached CHyF stream network and writes them to `support.gradient_barriers`. Requires chyf_loader to have already run.
+3. [fishpass_engine](https://github.com/Canadian-Wildlife-Federation/fishpass/blob/main/fishpass_engine/README.md) -- Runs a model plan end-to-end: loads the stream network, barriers, and habitat data for the plan's AOI, applies structure/habitat updates, snaps everything onto the network, and computes per-species/lifecycle accessibility, habitat, and upstream-length statistics. It then ranks barriers per species/lifecycle and rebuilds the plan's WCRP combined output view. Requires chyf_loader (and gradient_barriers, if the plan uses gradient barriers) to have already run. Two actions:
+   1. **FishPass WCRP Tracking Table Setup** -- **once per plan, before its first model run.** Creates the plan's persistent WCRP tracking table (`<code>_wcrp.tracking_table_<code>`). A model run stops immediately if this table is missing.
+   2. **FishPass Modelling Engine** -- every model run.

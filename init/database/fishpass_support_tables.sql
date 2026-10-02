@@ -7,7 +7,7 @@
 --   fishpass_engine/docs/inputs/habitat_updates_dataset.md
 --
 -- Run by hand against the target FishPass database, e.g.:
---   psql "host=... dbname=... user=..." -f init/database/support_tables.sql
+--   psql "host=... dbname=... user=..." -f init/database/fishpass_support_tables.sql
 --
 -- Not run by any GitHub Action. Safe to re-run (all statements are idempotent).
 
@@ -83,3 +83,11 @@ CREATE TABLE IF NOT EXISTS support.habitat_updates (
 );
 
 CREATE INDEX IF NOT EXISTS habitat_updates_points_idx ON support.habitat_updates USING gist (points);
+
+-- =================================================================================
+--  Tracking table ENUMs
+-- =================================================================================
+-- The support.tt_* enum types used by WCRP tracking tables (and the support.blank2null()
+-- trigger function that services them) live in init/database/wcrp_support.sql, which
+-- keeps all database-wide WCRP objects together and creates/extends the enums without
+-- dropping them (so it is safe to re-run once tracking tables exist).

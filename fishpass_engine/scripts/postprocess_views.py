@@ -21,6 +21,22 @@ SPECIES_LIFECYCLE_WEIGHTED_FIELDS = (
 	"weighted_connected_upstream_length", "weighted_disconnected_upstream_length",
 	"functional_weighted_connected_upstream_length", "functional_weighted_disconnected_upstream_length",
 )
+# Accessible-length fields, written for both spawn and rear for every target species
+# (independent of the plan's reporting_values).
+SPECIES_LENGTH_FIELDS = ("spawn_upstream_accessible_length", "rear_upstream_accessible_length")
+
+
+def barrier_length_fields(lifecycles):
+	"""Every length column (metres) on an anthropogenic_barriers_<species> /
+	natural_barriers_<species> view for a species reporting the given lifecycles, in view
+	column order: SPECIES_LENGTH_FIELDS, then <lc>_<field> for each lifecycle (sorted).
+	Single source of truth for these names -- rank_barriers.py and create_combined_view.py
+	derive their length columns from here too."""
+	fields = list(SPECIES_LENGTH_FIELDS)
+	for lc in sorted(lifecycles):
+		for field in SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS:
+			fields.append(f"{lc}_{field}")
+	return fields
 
 
 def _species_by_lifecycle_map(reporting_species_lifecycles):
@@ -78,12 +94,8 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'{field}'))::uuid[] AS {field}"
 			for field in BARRIER_STAT_ID_FIELDS
 		]
-		columns.append(f"({stats}->>'spawn_upstream_accessible_length')::double precision AS spawn_upstream_accessible_length")
-		columns.append(f"({stats}->>'rear_upstream_accessible_length')::double precision AS rear_upstream_accessible_length")
-		for lc in sorted(lifecycles):
-			for field in SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS:
-				column_name = f"{lc}_{field}"
-				columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
+		for column_name in barrier_length_fields(lifecycles):
+			columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
 		column_sql = ",\n\t\t\t".join(columns)
 
 		for table_prefix, structure_type in (("natural_barriers", "natural"), ("anthropogenic_barriers", "anthropogenic")):
@@ -164,6 +176,92 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 			WHERE {stats} IS NOT NULL
 		""")
 
+def create_watershed_summary_statistics(cursor, output_schema, reporting_species_lifecycles):
+    """Creates <output_schema>.watershed_summary_stats view in a single pass over streams
+    by unnesting species_stats keys laterally.
+    """
+    schema_ident = quote_ident(output_schema)
+    species_lifecycles = _species_by_lifecycle_map(reporting_species_lifecycles)
+    valid_species = list(species_lifecycles.keys())
+
+    if not valid_species:
+        logger.warning("No reporting species configured; skipping watershed_summary_stats.")
+        return
+
+    for species in valid_species:
+        if not IDENTIFIER_RE.match(species):
+            sys.exit(f"Invalid species code: {species!r}")
+
+    species_list_sql = ", ".join(f"'{s}'" for s in valid_species)
+
+    query = f"""
+    CREATE MATERIALIZED VIEW {schema_ident}.watershed_summary_stats AS
+    WITH expanded AS (
+        SELECT
+            s.id,
+            s.effective_length,
+            sp.key AS species,
+            sp.value AS stats
+        FROM {schema_ident}.streams s,
+        LATERAL jsonb_each(s.species_stats) sp
+        WHERE sp.key IN ({species_list_sql})
+    ),
+    aggregated AS (
+		SELECT
+			species,
+			COALESCE(SUM(effective_length), 0) / 1000.0 AS total_km,
+			COALESCE(SUM((stats->>'spawn_weighted_length')::double precision), 0) / 1000.0 AS total_spawn_km,
+			COALESCE(SUM((stats->>'rear_weighted_length')::double precision), 0) / 1000.0 AS total_rear_km,
+			COALESCE(SUM(
+				LEAST(
+					COALESCE((stats->>'spawn_weighted_length')::double precision, 0),
+					COALESCE((stats->>'rear_weighted_length')::double precision, 0)
+				)
+			), 0) / 1000.0 AS total_spawnrear_km,
+
+			COALESCE(SUM((stats->>'spawn_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_spawn_km,
+			COALESCE(SUM((stats->>'spawn_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_spawn_km,
+
+			COALESCE(SUM((stats->>'rear_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_rear_km,
+			COALESCE(SUM((stats->>'rear_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_rear_km,
+
+			-- Spawnrear is habitat suitable for both spawn and rear life stages. 
+			-- It is taken as the least length between the spawn and rear lengths
+			COALESCE(SUM(
+				LEAST(
+					COALESCE((stats->>'spawn_weighted_connected_length')::double precision, 0),
+					COALESCE((stats->>'rear_weighted_connected_length')::double precision, 0)
+				)
+			), 0) / 1000.0 AS connected_spawnrear_km,
+
+			COALESCE(SUM(
+				LEAST(
+					COALESCE((stats->>'spawn_weighted_disconnected_length')::double precision, 0),
+					COALESCE((stats->>'rear_weighted_disconnected_length')::double precision, 0)
+				)
+			), 0) / 1000.0 AS disconnected_spawnrear_km
+		FROM expanded
+		GROUP BY species
+	)
+	SELECT
+		species,
+		total_km,
+		total_spawn_km,
+		total_rear_km,
+		total_spawnrear_km,
+		connected_spawn_km,
+		disconnected_spawn_km,
+		connected_rear_km,
+		disconnected_rear_km,
+		connected_spawnrear_km,
+		disconnected_spawnrear_km,
+		ROUND((disconnected_spawn_km / NULLIF(total_spawn_km, 0))::numeric, 2) AS pct_disconnected_spawn,
+		ROUND((disconnected_rear_km / NULLIF(total_rear_km, 0))::numeric, 2) AS pct_disconnected_rear,
+		ROUND((disconnected_spawnrear_km / NULLIF(total_spawnrear_km, 0))::numeric, 2) AS pct_disconnected_spawnrear
+	FROM aggregated;	
+    """
+
+    cursor.execute(query)
 
 def create_barrier_views(conn, cursor, plan):
 	"""Postprocess phase entry point: create the reporting views over all_barriers/streams
@@ -180,3 +278,7 @@ def create_barrier_views(conn, cursor, plan):
 	create_species_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	conn.commit()
 	logger.info("streams_<species>: done.")
+
+	create_watershed_summary_statistics(cursor, output_schema, plan["reporting_species_lifecycles"])
+	conn.commit()
+	logger.info("watershed_summary_stats: done.")
