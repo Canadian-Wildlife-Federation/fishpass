@@ -1,0 +1,32 @@
+name: FishPass WCRP Tracking Table Setup
+# One-time setup per WCRP: creates <code>_wcrp.tracking_table_<code> for the plan.
+# Run this ONCE for a plan before its first "FishPass Modelling Engine" run -- every model
+# run requires the tracking table and stops immediately if it's missing.
+# Safe to trigger again: it refuses to touch an existing tracking table.
+# Prerequisite: init/database/wcrp_support.sql has been run on the database.
+on:
+  workflow_dispatch:
+    inputs:
+      plan_code:
+        description: "Plan code (loads config/models/<plan_code>.yaml)"
+        required: true
+
+jobs:
+  create_wcrp_tracking_table:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+      FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
+      FISHPASS_PORT: ${{ secrets.FISHPASS_PORT }}
+      FISHPASS_DBNAME: ${{ secrets.FISHPASS_DBNAME }}
+      FISHPASS_USER: ${{ secrets.FISHPASS_USER }}
+      FISHPASS_PASSWORD: ${{ secrets.FISHPASS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: pip install -r fishpass_engine/scripts/requirements.txt
+      - name: Create WCRP tracking table
+        run: python fishpass_engine/scripts/create_wcrp_tracking_table.py "${{ inputs.plan_code }}"
