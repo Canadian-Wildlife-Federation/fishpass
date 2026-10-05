@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""One-time setup: create a WCRP's tracking table and attach its blank2null trigger.
+"""Create a WCRP's tracking table (and its blank2null trigger) if it doesn't exist yet.
 
-Run once per WCRP, BEFORE its first model run, via the "FishPass WCRP Tracking
-Table Setup" GitHub Action (fishpass_wcrp_tracking_table.yml). This is
-deliberately NOT part of the per-model-run pipeline: a tracking table holds
-hand-entered barrier data that must persist for the life of the WCRP, so its
-creation is a one-off, guarded step. Every model run requires it --
-run_model.py calls check_wcrp_prerequisites() before doing anything else and
-stops with a pointer back to this script if the table is missing.
+Runs automatically at the start of every model run: run_model.py calls
+ensure_tracking_table() before the output schema is rebuilt. On a plan's first
+run the table is created; on every later run creation is skipped (the existing
+table and its hand-entered data are never touched) and the skip is reported in
+the log and the GitHub Actions job summary.
+
+The standalone entry point (python create_wcrp_tracking_table.py <plan_code>) is
+kept for local/manual setup. It is stricter: it refuses, with an error, if the
+table already exists.
 
 IMPORTANT -- schema choice: the tracking table lives in its own persistent
 <code>_wcrp schema, NOT in the model's output_schema. run_model.py rebuilds the
@@ -25,10 +27,11 @@ init/database/wcrp_support.sql, run by hand once per database. This script
 checks they exist and stops with a clear message if not.
 
 Guarantees:
-  * The tracking table is created NON-idempotently and protected. If a table of
-    the target name already exists, this aborts loudly BEFORE any DDL runs, so
-    existing data can never be dropped, replaced, or altered. (The containing
-    <code>_wcrp schema is created idempotently -- create schema if not exists.)
+  * An existing tracking table is never dropped, replaced, or altered.
+    ensure_tracking_table() skips creation when it exists; create_tracking_table()
+    (the standalone path) aborts BEFORE any DDL runs. The CREATE TABLE itself has
+    no IF NOT EXISTS, so it can't silently skip. (The containing <code>_wcrp
+    schema is created idempotently -- create schema if not exists.)
   * The per-table blank2null trigger IS idempotent (drop-if-exists then create).
 
 Column layout follows the enum-canonical cheticamp definition: support.tt_*
@@ -227,25 +230,35 @@ def _apply_ownership_and_grants(cursor, qualified, roles):
         cursor.execute(f"grant select on table {qualified} to {quote_ident(role)};")
 
 
-def check_wcrp_prerequisites(cursor, plan):
-    """Pre-flight check for a model run (called by run_model.py BEFORE the output
-    schema is rebuilt, so a missing prerequisite fails in seconds, not after a
-    full run). Every model run ranks barriers against the WCRP tracking table,
-    so it must already exist."""
+def ensure_tracking_table(conn, cursor, plan):
+    """Create the plan's tracking table if it doesn't exist; otherwise skip.
+
+    Called by run_model.py at the start of every model run, BEFORE the output
+    schema is rebuilt, so a missing support object fails in seconds rather than
+    after a full run. Returns True if the table was created, False if it already
+    existed and creation was skipped.
+
+    Still exits (failing the run) if the database-wide support objects from
+    wcrp_support.sql are missing -- every tracking table depends on them.
+    """
     schema = _wcrp_schema(plan)
     table = _tracking_table_name(plan)
-    if not table_exists(cursor, schema, table):
-        sys.exit(
-            f"WCRP tracking table {schema}.{table} does not exist. Run the "
-            f"'FishPass WCRP Tracking Table Setup' GitHub Action (or "
-            f"create_wcrp_tracking_table.py {plan['code']}) once for this plan "
-            f"before running the model."
+
+    if table_exists(cursor, schema, table):
+        # The table's trigger calls blank2null(), so it must still exist.
+        if not function_exists(cursor, SUPPORT, BLANK2NULL_FUNCTION):
+            sys.exit(
+                f"{SUPPORT}.{BLANK2NULL_FUNCTION}() is missing. Run "
+                f"{SUPPORT_SQL_SCRIPT} against this database."
+            )
+        logger.info(
+            "Tracking table %s.%s already exists -- skipping creation.", schema, table
         )
-    if not function_exists(cursor, SUPPORT, BLANK2NULL_FUNCTION):
-        sys.exit(
-            f"{SUPPORT}.{BLANK2NULL_FUNCTION}() is missing. Run "
-            f"{SUPPORT_SQL_SCRIPT} against this database."
-        )
+        return False
+
+    logger.info("Tracking table %s.%s not found -- creating it.", schema, table)
+    create_tracking_table(conn, cursor, plan)
+    return True
 
 
 def create_tracking_table(conn, cursor, plan):
@@ -253,7 +266,9 @@ def create_tracking_table(conn, cursor, plan):
     blank2null trigger.
 
     Aborts (sys.exit) without touching the table if it already exists, or if
-    the database-wide support objects from wcrp_support.sql are missing.
+    the database-wide support objects from wcrp_support.sql are missing. A model
+    run goes through ensure_tracking_table() instead, which checks for the
+    table first and skips rather than aborting.
     """
     schema = _wcrp_schema(plan)
     table = _tracking_table_name(plan)
@@ -278,6 +293,8 @@ def create_tracking_table(conn, cursor, plan):
         cursor.execute(f"create schema if not exists {quote_ident(schema)};")
 
         if table_exists(cursor, schema, table):
+            # Only reachable via the standalone entry point (or if the table
+            # appears between ensure_tracking_table's check and here).
             sys.exit(
                 f"Tracking table {schema}.{table} already exists -- refusing to "
                 f"recreate it. This table is created once and maintained forever; "

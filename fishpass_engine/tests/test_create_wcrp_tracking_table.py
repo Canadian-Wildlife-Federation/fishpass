@@ -271,22 +271,23 @@ class SupportObjectTests(unittest.TestCase):
         self.assertEqual(conn.calls[-2:], ["rollback", "commit"])
 
 
-class CheckWcrpPrerequisitesTests(unittest.TestCase):
-    PLAN = {"code": "ns"}
+class EnsureTrackingTableTests(unittest.TestCase):
+    PLAN = {"code": "ns", "target_species": ["chn"]}
 
-    def test_passes_when_everything_exists(self):
-        ctt.check_wcrp_prerequisites(FakeCursor(), self.PLAN)
+    def test_existing_table_is_skipped_untouched(self):
+        cursor = FakeCursor()  # everything exists
+        self.assertFalse(ctt.ensure_tracking_table(FakeConn(), cursor, self.PLAN))
+        self.assertFalse(any("create" in q.lower() for q in cursor.executed))
 
-    def test_missing_tracking_table_exits_with_action_hint(self):
+    def test_missing_table_is_created(self):
         cursor = FakeCursor(exists={("ns_wcrp", "tracking_table_ns"): False})
-        with self.assertRaises(SystemExit) as cm:
-            ctt.check_wcrp_prerequisites(cursor, self.PLAN)
-        self.assertIn("FishPass WCRP Tracking Table Setup", str(cm.exception.code))
+        self.assertTrue(ctt.ensure_tracking_table(FakeConn(), cursor, self.PLAN))
+        self.assertTrue(any(q.startswith("CREATE TABLE") for q in cursor.executed))
 
-    def test_missing_blank2null_exits(self):
+    def test_existing_table_missing_blank2null_exits(self):
         cursor = FakeCursor(exists={("support", "blank2null"): False})
         with self.assertRaises(SystemExit) as cm:
-            ctt.check_wcrp_prerequisites(cursor, self.PLAN)
+            ctt.ensure_tracking_table(FakeConn(), cursor, self.PLAN)
         self.assertIn("wcrp_support.sql", str(cm.exception.code))
 
 

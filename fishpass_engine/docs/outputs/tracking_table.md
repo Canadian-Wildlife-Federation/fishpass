@@ -2,13 +2,13 @@
 
 **Table:** `<code>_wcrp.tracking_table_<code>`
 
-Hand-entered, per-barrier tracking data for a WCRP (e.g. structure list status, assessments, rehabilitation, next steps), edited directly, typically in QGIS. Created **once per plan** by `create_wcrp_tracking_table.py`, which the **FishPass WCRP Tracking Table Setup** GitHub Action runs, before the plan's first model run. Every model run needs it, and `run_model.py` stops immediately if it's missing.
+Hand-entered, per-barrier tracking data for a WCRP (e.g. structure list status, assessments, rehabilitation, next steps), edited directly, typically in QGIS. Created automatically at the start of a plan's first model run: before anything else, every run checks for the plan's tracking table and creates it if it doesn't exist. On later runs creation is skipped and the table is left unchanged. Either outcome is reported in the log and the GitHub Actions job summary.
 
-**Persistence:** the table lives in the persistent `<code>_wcrp` schema, NOT the plan's `output_schema`, because the output schema is dropped and rebuilt on every model run. Once created it is never dropped, replaced, or altered by any script; re-running the setup action against an existing table stops without making changes.
+**Persistence:** the table lives in the persistent `<code>_wcrp` schema, NOT the plan's `output_schema`, because the output schema is dropped and rebuilt on every model run. Once created it is never dropped, replaced, or altered by any script. Model runs skip creation when it exists, and running `create_wcrp_tracking_table.py` directly against an existing table stops with an error without making changes.
 
 **No foreign key:** `barrier_id` matches `<output_schema>.all_barriers.feature_id` in type, but a foreign key into the ephemeral output schema couldn't survive the rebuild. Instead, every model run checks each `barrier_id` against the freshly built `all_barriers` and logs any that don't match (see [ranked_barriers.md](./ranked_barriers.md)).
 
-**Prerequisites (once per database):** [init/database/wcrp_support.sql](../../../init/database/wcrp_support.sql) creates the `support.tt_*` enum types used below and the `support.blank2null()` trigger function. The setup script checks that they exist before creating anything.
+**Support objects:** the `support.tt_*` enum types used below and the `support.blank2null()` trigger function come from [init/database/wcrp_support.sql](../../../init/database/wcrp_support.sql), which every model run applies before the tracking table is created or checked. To add an allowable value, add it to that file; the next model run applies it.
 
 **Dropdowns and blank values:** the enum columns show up as dropdowns in QGIS. Every enum also includes a blank (`''`) option, last in the list, because QGIS writes `''` when a user clears a dropdown and PostgreSQL rejects any value that isn't in the enum. The `blank2null_trg` trigger (`BEFORE INSERT OR UPDATE`, calling `support.blank2null()`) then turns any `''` in an enum column into NULL, so blanks are never actually stored.
 
@@ -53,4 +53,4 @@ Table Structure (in column order; `<sp>` = species code):
 
 The per-species columns are grouped: all `structure_list_status_<sp>` columns follow `private_owner_details`, and all `partial_passability_<sp>` / `partial_passability_notes_<sp>` pairs follow `method_of_exclusion`.
 
-Allowable enum values come from the BC Tracking Table Guidance on Notion. To add a value, add it to the type's list in `wcrp_support.sql` and re-run the script; the new value is added at the end of the dropdown (just before the blank) and existing data isn't touched. Renaming or removing a value has to be done by hand (see the comments in `wcrp_support.sql`).
+Allowable enum values come from the BC Tracking Table Guidance on Notion. To add a value, add it to the type's list in `wcrp_support.sql`. The next model run adds it to the end of the dropdown (just before the blank) without touching existing data. Renaming or removing a value has to be done by hand (see the comments in `wcrp_support.sql`).

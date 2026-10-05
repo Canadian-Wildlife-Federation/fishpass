@@ -8,7 +8,7 @@ NHN Work units (AOIs) may span multiple provinces and territories. When filterin
 
 Out of scope for now is the option to include all overlapping AOI's and all connected AOI's.
 
-**Prerequiste**
+**Prerequisite**
 
 We need to add province_territory_code varchar[] field to the chyf aoi table.
 
@@ -33,7 +33,6 @@ So accessibility is defined as:
 * ELSE
     * NATURALLY INACCESSIBLE
 ```
-
 
 ## Upstream and Downstream Barrier IDs
 

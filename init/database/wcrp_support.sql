@@ -1,17 +1,21 @@
--- Manual, one-time (or occasional) setup script for the database-wide WCRP support objects:
+-- Database-wide WCRP support objects:
 --   * support.tt_* ENUM types used by every WCRP tracking table
 --   * support.blank2null() trigger function attached to every WCRP tracking table
 --
--- Run by hand against the target FishPass database BEFORE the first WCRP tracking table is
--- created (create_wcrp_tracking_table.py / the "FishPass WCRP Tracking Table Setup" GitHub
--- Action checks these exist and stops if they don't), e.g.:
+-- Applied automatically at the start of every model run (run_model.py, via
+-- create_wcrp_tracking_table.apply_wcrp_support), before the plan's tracking table is
+-- created or checked. Runs as the database_roles.owner role from config/fishpass.yaml,
+-- which must own the support schema, these types, and this function. Any changes it
+-- makes (new types, new enum values, blank2null() created) are reported in the log and
+-- the GitHub Actions job summary.
+--
+-- Every statement is idempotent, so running it on every model run is safe, including
+-- after tracking tables that use these enums exist. To add an enum value, add it to
+-- enum_defs below; the next model run applies it. It can also be run by hand, e.g.:
 --   psql "host=... dbname=... user=..." -f init/database/wcrp_support.sql
 --
--- Requires the support schema (init/database/fishpass_support_tables.sql creates it; it is
--- also created here if missing).
---
--- Not run by any GitHub Action. Safe to re-run (all statements are idempotent), including
--- after tracking tables that use these enums already exist.
+-- Requires the support schema (init/database/fishpass_support_tables.sql creates it; it
+-- is also created here if missing).
 
 CREATE SCHEMA IF NOT EXISTS support;
 

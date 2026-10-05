@@ -9,18 +9,20 @@ Statistics, Create Barrier Views, Rank Barriers, Create Combined View) are imple
 "Outstanding Decisions" section for known gaps/assumptions (supports_species, AOI-boundary
 graph_id handling, and others) that haven't been validated against a real database run yet.
 
-WCRP prerequisite: the plan's <code>_wcrp.tracking_table_<code> must already exist (run the
-"FishPass WCRP Tracking Table Setup" GitHub Action once per plan first). This is checked before
-the output schema is touched, so a missing tracking table fails immediately.
+WCRP tracking table: the plan's <code>_wcrp.tracking_table_<code> is created at the start of the
+run if it doesn't exist yet, and skipped (left untouched) if it does. Either outcome is written to
+the log and, when run in GitHub Actions, to the job summary. This happens before the output schema
+is touched, so a missing database-wide support object fails immediately.
 """
 
 import argparse
 import logging
+import os
 import time
 
 from compute_statistics import compute_statistics
 from create_combined_view import create_combined_view
-from create_wcrp_tracking_table import check_wcrp_prerequisites
+from create_wcrp_tracking_table import ensure_tracking_table
 from db import db_connect, require_env
 from load_habitat import load_habitat
 from load_stream_network import get_source_srid, init_output_schema, load_stream_network
@@ -36,6 +38,16 @@ logging.basicConfig(
 	datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def write_job_summary(markdown):
+	"""Append markdown to the GitHub Actions job summary (shown on the run's summary page).
+	GITHUB_STEP_SUMMARY is only set inside GitHub Actions, so this is a no-op when run locally."""
+	summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+	if not summary_path:
+		return
+	with open(summary_path, "a", encoding="utf-8") as f:
+		f.write(markdown.rstrip() + "\n\n")
 
 
 def parse_args():
@@ -55,8 +67,18 @@ def main():
 	conn = db_connect()
 	try:
 		with conn.cursor() as cursor:
-			logger.info("Checking WCRP prerequisites")
-			check_wcrp_prerequisites(cursor, plan)
+			logger.info("Setting up WCRP tracking table")
+			tracking_table = f"{plan['code']}_wcrp.tracking_table_{plan['code']}"
+			if ensure_tracking_table(conn, cursor, plan):
+				write_job_summary(
+					f"### WCRP tracking table\n:white_check_mark: Created `{tracking_table}` "
+					f"(first run for plan `{plan['code']}`)."
+				)
+			else:
+				write_job_summary(
+					f"### WCRP tracking table\n:information_source: Creation skipped -- "
+					f"`{tracking_table}` already exists and was left unchanged."
+				)
 			conn.commit()
 
 			init_output_schema(cursor, plan["output_schema"])

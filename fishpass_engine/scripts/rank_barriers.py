@@ -11,9 +11,9 @@ tracking, and ranked tables are joined into a single export view afterwards
 the output.
 
 Not a standalone script: run_ranking() is called by run_model.py after
-create_barrier_views, on every model run. The WCRP tracking table must already
-exist (create_wcrp_tracking_table.py / its GitHub Action); run_model.py checks
-this before the run starts.
+create_barrier_views, on every model run. The WCRP tracking table is
+guaranteed to exist by then -- run_model.py creates it at the start of the
+run if it's missing (create_wcrp_tracking_table.ensure_tracking_table).
 """
 import logging
 import sys

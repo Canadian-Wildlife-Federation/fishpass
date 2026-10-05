@@ -6,7 +6,7 @@ This engine will be implemented in python.
 
 This process will be initiated via a GitHub action. A plan file will control parameters for the run. This plan file will be selected by the user when launching the action. Each run will clear all existing data out of the output schema and generate new output data.
 
-Every model run also produces the WCRP outputs (barrier rankings and the combined output view -- see [WCRP Outputs](#wcrp-outputs)), which rely on a per-plan WCRP tracking table. That table is created once per plan, **before the plan's first model run**, by a separate GitHub action (**FishPass WCRP Tracking Table Setup**, `create_wcrp_tracking_table.py`). A model run checks for the tracking table before it starts and stops immediately if it is missing.
+Every model run also produces the WCRP outputs (barrier rankings and the combined output view -- see [WCRP Outputs](#wcrp-outputs)), which rely on a per-plan WCRP tracking table. Before anything else, each model run applies the database-wide WCRP support objects (`init/database/wcrp_support.sql`), then checks for the plan's tracking table. If the table doesn't exist (e.g. on a plan's first run), it is created. If it already exists, creation is skipped and the table and its data are left unchanged. Both steps are reported in the log and the GitHub Actions job summary.
 
 ### GitHub Limitation
 
@@ -123,13 +123,19 @@ rear passability (matching the combined "impassable if either lifestage fails" r
 The model run is a single sequence of phases against one database connection/transaction scope,
 in this order. If any phase raises an error the whole run is rolled back.
 
-### Check WCRP Prerequisites
+### Set Up WCRP Support Objects and Tracking Table
 
-Before anything else (so nothing is dropped or recomputed first), confirm that the plan's
-`<code>_wcrp.tracking_table_<code>` and the database-wide `support.blank2null()` trigger function
-exist. If either is missing the run stops with a message saying what to run: the **FishPass WCRP
-Tracking Table Setup** action for the tracking table, or `init/database/wcrp_support.sql` for the
-support objects.
+Before anything else, so that nothing is dropped or recomputed first:
+
+1. Apply `init/database/wcrp_support.sql` as the `database_roles.owner` role. This creates any
+   missing `support.tt_*` enum types, adds any new enum values, and creates or replaces
+   `support.blank2null()`. Every statement in the file is safe to re-run, so if nothing has
+   changed, nothing changes in the database. Any types, values, or functions it adds are reported
+   in the job summary. If applying the file fails (most likely because the owner role doesn't own
+   the `support` objects), the run stops.
+2. Check for the plan's `<code>_wcrp.tracking_table_<code>`. If it doesn't exist, create it (along
+   with the `<code>_wcrp` schema, if needed). If it exists, skip creation and leave the table and
+   its data unchanged. Either outcome is reported in the log and the job summary.
 
 ### Initialize
 
