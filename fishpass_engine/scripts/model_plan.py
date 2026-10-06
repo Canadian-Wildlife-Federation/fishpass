@@ -170,6 +170,9 @@ def load_model_plan(plan_code, models_dir=DEFAULT_MODELS_DIR):
 			if error:
 				_fail(plan_path, error)
 
+	if not isinstance(data["reporting_values"], list) or not data["reporting_values"]:
+		_fail(plan_path, "reporting_values must be a non-empty list")
+
 	override = data.get("natural_feature_types_override")
 	if override is not None and (
 		not isinstance(override, list) or not all(isinstance(v, str) for v in override)
