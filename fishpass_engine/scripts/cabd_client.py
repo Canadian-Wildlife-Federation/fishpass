@@ -8,7 +8,7 @@ import requests
 
 CABD_BASE_URL = "https://cabd-web.azurewebsites.net/cabd-api/"
 RESULT_CAP = 50_000  # confirmed API limit
-DEFAULT_CHUNK_SIZE = 25  # work units per request, kept comfortably under the 50,000 cap
+DEFAULT_CHUNK_SIZE = 20  # work units per request, kept comfortably under the 50,000 cap
 REQUEST_TIMEOUT_S = 120
 
 # Load Structures step 2: passability_status_code -> 0/1 passability value.
