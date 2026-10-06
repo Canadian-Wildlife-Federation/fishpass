@@ -137,6 +137,13 @@ Before anything else, so that nothing is dropped or recomputed first:
 2. Check for the plan's `<code>_wcrp.tracking_table_<code>`. If it doesn't exist, create it (along
    with the `<code>_wcrp` schema, if needed). If it exists, skip creation and leave the table and
    its data unchanged. Either outcome is reported in the log and the job summary.
+3. Check the prerequisites of the WCRP phases that run last (Rank Barriers, Create Combined View),
+   so a problem stops the run now and not after the whole model has been computed:
+   - the tracking table has every column the run reads, including the per-species columns for
+     each reporting species. An existing tracking table is never altered, so a species added to
+     the plan later needs its columns added by hand.
+   - the `cabd_fdw` foreign tables the combined view joins exist and have the attributes it
+     surfaces (see `init/database/fishpass_cabd_raw_init.sql`).
 
 ### Initialize
 

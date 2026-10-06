@@ -162,8 +162,6 @@ def load_model_plan(plan_code, models_dir=DEFAULT_MODELS_DIR):
 
 	if not isinstance(data["structure_types"], list) or not data["structure_types"]:
 		_fail(plan_path, "structure_types must be a non-empty list")
-	if not isinstance(data["reporting_values"], list) or not data["reporting_values"]:
-		_fail(plan_path, "reporting_values must be a non-empty list")
 	for key in WCRP_PLAN_OVERRIDES:
 		if data.get(key) is not None:
 			error = wcrp_value_error(key, data[key])

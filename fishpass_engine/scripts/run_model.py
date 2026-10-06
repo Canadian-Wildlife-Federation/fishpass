@@ -21,8 +21,8 @@ import os
 import time
 
 from compute_statistics import compute_statistics
-from create_combined_view import create_combined_view
-from create_wcrp_tracking_table import ensure_tracking_table
+from create_combined_view import check_cabd_fdw_sources, create_combined_view
+from create_wcrp_tracking_table import check_tracking_table_columns, ensure_tracking_table
 from db import db_connect, require_env
 from load_habitat import load_habitat
 from load_stream_network import get_source_srid, init_output_schema, load_stream_network
@@ -79,6 +79,14 @@ def main():
 					f"### WCRP tracking table\n:information_source: Creation skipped -- "
 					f"`{tracking_table}` already exists and was left unchanged."
 				)
+			conn.commit()
+
+			# Pre-flight checks for the WCRP phases at the END of the run (Rank Barriers,
+			# Create Combined View), so a missing tracking-table column or CABD foreign
+			# table fails now rather than after the whole model has been computed.
+			logger.info("Checking WCRP prerequisites")
+			check_tracking_table_columns(cursor, plan)
+			check_cabd_fdw_sources(cursor)
 			conn.commit()
 
 			init_output_schema(cursor, plan["output_schema"])

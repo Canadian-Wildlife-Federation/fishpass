@@ -165,6 +165,23 @@ def table_exists(cursor, schema, table):
 	return cursor.fetchone() is not None
 
 
+def table_columns(cursor, schema, table):
+	"""Column names of <schema>.<table> (a table, view, or foreign table) as a set -- empty
+	if the relation doesn't exist. RAW names. Reads pg_attribute rather than
+	information_schema.columns, which hides relations the current user has no privileges on."""
+	cursor.execute(
+		"""
+		select a.attname
+		from pg_attribute a
+		join pg_class c on c.oid = a.attrelid
+		join pg_namespace n on n.oid = c.relnamespace
+		where n.nspname = %s and c.relname = %s and a.attnum > 0 and not a.attisdropped;
+		""",
+		(schema, table),
+	)
+	return {row[0] for row in cursor.fetchall()}
+
+
 def function_exists(cursor, schema, function):
 	"""True if a function named <schema>.<function> exists (any signature). RAW names."""
 	cursor.execute(

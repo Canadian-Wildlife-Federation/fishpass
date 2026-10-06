@@ -191,8 +191,8 @@ def sql_create_working_table(c):
 
     Rehabilitated structures are folded in via the tracking-table LEFT JOIN
     (strict enum match). The tracking table is guaranteed to exist --
-    run_model.py refuses to start a run without it. Length fields are still in
-    METRES here; the next stage converts them to km. anthropogenic_barriers_<species>
+    run_model.py creates it at the start of the run if it's missing. Length
+    fields are still in METRES here; the next stage converts them to km. anthropogenic_barriers_<species>
     is a view, but SELECT ... INTO materialises the needed columns into a real
     table, so all later ALTER/UPDATE stages work normally. The passability gate
     is lifecycle-specific (see _passability_predicate): a barrier is kept only if

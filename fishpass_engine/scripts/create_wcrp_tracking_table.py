@@ -55,6 +55,7 @@ from db import (
     get_db_roles,
     quote_ident,
     require_env,
+    table_columns,
     table_exists,
 )
 from model_plan import IDENTIFIER_RE, load_model_plan
@@ -259,6 +260,37 @@ def ensure_tracking_table(conn, cursor, plan):
     logger.info("Tracking table %s.%s not found -- creating it.", schema, table)
     create_tracking_table(conn, cursor, plan)
     return True
+
+
+def check_tracking_table_columns(cursor, plan):
+    """Stop with a clear message if the plan's tracking table lacks a column this
+    run will read.
+
+    Called by run_model.py right after ensure_tracking_table(), BEFORE the output
+    schema is rebuilt. An existing tracking table is never altered, so a species
+    added to the plan after the table was created has no structure_list_status_<sp>
+    / partial_passability_<sp> columns. Without this check that only surfaces as
+    "column does not exist" in rank_barriers.py / create_combined_view.py, at the
+    very end of a full model run.
+
+    Checks the columns for the plan's REPORTING species (the ones ranking and the
+    combined view read), plus every non-species column.
+    """
+    schema = _wcrp_schema(plan)
+    table = _tracking_table_name(plan)
+    species_list = sorted({sp for sp, _lc in plan["reporting_species_lifecycles"]})
+    _validate_species(species_list)
+
+    existing = table_columns(cursor, schema, table)
+    missing = [name for name, _type in _build_columns(species_list) if name not in existing]
+    if missing:
+        sys.exit(
+            f"Tracking table {schema}.{table} is missing column(s) this model run "
+            f"needs: {', '.join(missing)}. An existing tracking table is never altered "
+            f"automatically (e.g. when a species is added to the plan) -- add the "
+            f"column(s) by hand, then re-run."
+        )
+    logger.info("Tracking table %s.%s has every column this run needs.", schema, table)
 
 
 def create_tracking_table(conn, cursor, plan):

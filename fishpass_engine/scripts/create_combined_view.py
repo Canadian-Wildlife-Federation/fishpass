@@ -44,6 +44,7 @@ from db import (
     get_db_roles,
     load_config,
     quote_ident,
+    table_columns,
     wcrp_setting,
 )
 from model_plan import IDENTIFIER_RE
@@ -133,6 +134,7 @@ TRACKING_ALIAS_OVERRIDES = {
 DAMS_FDW = "cabd_fdw.dams_view_en"
 STREAM_CROSSINGS_FDW = "cabd_fdw.stream_crossings_sites_structures_view_en"
 CABD_JOIN_KEY = "cabd_id"
+CABD_FDW_SQL_SCRIPT = "init/database/fishpass_cabd_raw_init.sql"
 
 # --- OTHER SETTINGS --------------------------------------------------------------
 # Shared settings live in config/fishpass.yaml, not here:
@@ -180,6 +182,36 @@ def _species_lifecycles(plan):
             sys.exit(f"Invalid species code (unsafe for a column name): {sp!r}")
         by_species.setdefault(sp, []).append(lc)
     return by_species, pairs
+
+
+def check_cabd_fdw_sources(cursor):
+    """Stop with a clear message if a CABD foreign table the view joins is missing,
+    or lacks one of the attributes surfaced from it.
+
+    Called by run_model.py at the start of the run, BEFORE the output schema is
+    rebuilt -- otherwise a missing cabd_fdw table only surfaces when the view is
+    created, at the very end of a full model run.
+    """
+    problems = []
+    for source, attributes in (
+        (DAMS_FDW, DAM_ATTRIBUTES),
+        (STREAM_CROSSINGS_FDW, STREAM_CROSSING_ATTRIBUTES),
+    ):
+        schema, table = source.split(".", 1)
+        existing = table_columns(cursor, schema, table)
+        if not existing:
+            problems.append(f"{source} does not exist")
+            continue
+        missing = [c for c in [CABD_JOIN_KEY] + attributes if c not in existing]
+        if missing:
+            problems.append(f"{source} is missing column(s): {', '.join(missing)}")
+    if problems:
+        sys.exit(
+            f"CABD foreign table(s) needed by {VIEW_NAME} are not usable: "
+            f"{'; '.join(problems)}. Run {CABD_FDW_SQL_SCRIPT} against this database "
+            f"(or re-import the foreign tables if CABD's columns have changed)."
+        )
+    logger.info("CABD foreign tables for %s are present.", VIEW_NAME)
 
 
 # =================================================================================

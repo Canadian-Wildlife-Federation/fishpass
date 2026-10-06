@@ -184,14 +184,58 @@ class BuildViewSqlTests(unittest.TestCase):
         sql = ccv.build_view_sql(plan, ["waterfalls", "gradients"])
         view = f"{db.quote_ident(plan['code'] + '_wcrp')}.{db.quote_ident(ccv.VIEW_NAME)}"
         self.assertIn(f'ALTER VIEW {view} OWNER TO {db.quote_ident(roles["owner"])};', sql)
-        for role in roles["grant_all"\]:
+        for role in roles["grant_all"]:
             self.assertIn(f"GRANT ALL ON TABLE {view} TO {db.quote_ident(role)};", sql)
-        for role in roles["grant_select"\]:
+        for role in roles["grant_select"]:
             self.assertIn(f"GRANT SELECT ON TABLE {view} TO {db.quote_ident(role)};", sql)
 
     def test_not_runnable_standalone(self):
         """create_combined_view is only run via run_model.py."""
         self.assertFalse(hasattr(ccv, "main"))
+
+
+class SourcesCursor:
+    """Cursor for db.table_columns(): fetchall() returns the columns registered for
+    the (schema, table) last queried, or nothing if that relation is absent."""
+
+    def __init__(self, relations):
+        self.relations = relations
+
+    def execute(self, sql, params=None):
+        self.params = params
+
+    def fetchall(self):
+        return [(c,) for c in self.relations.get(self.params, [])]
+
+
+class CheckCabdFdwSourcesTests(unittest.TestCase):
+    def _relations(self):
+        return {
+            tuple(ccv.DAMS_FDW.split(".")): [ccv.CABD_JOIN_KEY] + ccv.DAM_ATTRIBUTES,
+            tuple(ccv.STREAM_CROSSINGS_FDW.split(".")): (
+                [ccv.CABD_JOIN_KEY] + ccv.STREAM_CROSSING_ATTRIBUTES
+            ),
+        }
+
+    def test_all_sources_present_passes(self):
+        ccv.check_cabd_fdw_sources(SourcesCursor(self._relations()))
+
+    def test_missing_foreign_table_exits(self):
+        relations = self._relations()
+        del relations[tuple(ccv.STREAM_CROSSINGS_FDW.split("."))]
+        with self.assertRaises(SystemExit) as cm:
+            ccv.check_cabd_fdw_sources(SourcesCursor(relations))
+        message = str(cm.exception.code)
+        self.assertIn(f"{ccv.STREAM_CROSSINGS_FDW} does not exist", message)
+        self.assertIn(ccv.CABD_FDW_SQL_SCRIPT, message)
+        self.assertNotIn(f"{ccv.DAMS_FDW} ", message)
+
+    def test_missing_attribute_exits(self):
+        relations = self._relations()
+        relations[tuple(ccv.DAMS_FDW.split("."))].remove(ccv.DAM_ATTRIBUTES[0])
+        with self.assertRaises(SystemExit) as cm:
+            ccv.check_cabd_fdw_sources(SourcesCursor(relations))
+        self.assertIn(ccv.DAM_ATTRIBUTES[0], str(cm.exception.code))
 
 
 if __name__ == "__main__":

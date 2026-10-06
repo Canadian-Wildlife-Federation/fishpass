@@ -248,9 +248,9 @@ class SQLBuildersTests(unittest.TestCase):
         sql = rb.sql_finalize_output_table(self.config)
         table = self.config.ranked
         self.assertIn(f"ALTER TABLE {table} OWNER TO {db.quote_ident(roles['owner'])}", sql)
-        for role in roles["grant_all"\]:
+        for role in roles["grant_all"]:
             self.assertIn(f"GRANT ALL ON TABLE {table} TO {db.quote_ident(role)}", sql)
-        for role in roles["grant_select"\]:
+        for role in roles["grant_select"]:
             self.assertIn(f"GRANT SELECT ON TABLE {table} TO {db.quote_ident(role)}", sql)
 
     def test_not_runnable_standalone(self):

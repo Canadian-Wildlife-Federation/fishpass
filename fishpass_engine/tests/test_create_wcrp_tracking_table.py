@@ -291,6 +291,51 @@ class EnsureTrackingTableTests(unittest.TestCase):
         self.assertIn("wcrp_support.sql", str(cm.exception.code))
 
 
+class ColumnsCursor:
+    """Cursor for db.table_columns(): fetchall() returns the given column names."""
+
+    def __init__(self, columns):
+        self.columns = columns
+
+    def execute(self, sql, params=None):
+        self.params = params
+
+    def fetchall(self):
+        return [(c,) for c in self.columns]
+
+
+class CheckTrackingTableColumnsTests(unittest.TestCase):
+    PLAN = {"code": "ns", "reporting_species_lifecycles": [("chn", "spawn"), ("chn", "rear")]}
+
+    def _columns(self, species):
+        return [name for name, _type in ctt._build_columns(species)]
+
+    def test_all_columns_present_passes(self):
+        cursor = ColumnsCursor(self._columns(["chn"]))
+        ctt.check_tracking_table_columns(cursor, self.PLAN)
+        self.assertEqual(cursor.params, ("ns_wcrp", "tracking_table_ns"))
+
+    def test_species_added_after_creation_exits(self):
+        """A table created for chn only fails fast once the plan also reports co."""
+        cursor = ColumnsCursor(self._columns(["chn"]))
+        plan = dict(self.PLAN, reporting_species_lifecycles=[("chn", "spawn"), ("co", "spawn")])
+        with self.assertRaises(SystemExit) as cm:
+            ctt.check_tracking_table_columns(cursor, plan)
+        message = str(cm.exception.code)
+        for column in (
+            "structure_list_status_co",
+            "partial_passability_co",
+            "partial_passability_notes_co",
+        ):
+            self.assertIn(column, message)
+        self.assertNotIn("structure_list_status_chn", message)
+
+    def test_extra_columns_are_ignored(self):
+        """Columns for species the plan doesn't report (or hand-added ones) are fine."""
+        cursor = ColumnsCursor(self._columns(["chn", "co"]) + ["hand_added"])
+        ctt.check_tracking_table_columns(cursor, self.PLAN)
+
+
 if __name__ == "__main__":
     unittest.main()
     
