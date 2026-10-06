@@ -1,9 +1,9 @@
 # Example model plan file, per fishpass/requirements/inputs/model_plan_file.md.
 # Copy this file to <plan_code>.yaml (code must match the file name) to define a new plan.
 
-code: asf1
+code: asf_phase1
 name: ASF Phase 1
-output_schema: asf1
+output_schema: asf_phase1
 
 aoi:
   workunit:
