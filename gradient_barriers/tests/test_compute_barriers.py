@@ -144,8 +144,8 @@ LOW_THRESHOLDS = [{"code": "chn", "spawning_max": 1.0, "rearing_max": 0.003}]
 # Thresholds set above both worked-example gradients, so neither should register as a barrier.
 HIGH_THRESHOLDS = [{"code": "chn", "spawning_max": 1.0, "rearing_max": 1.0}]
 
-class FlagSpeciesTests(unittest.TestCase):
 
+class FlagSpeciesTests(unittest.TestCase):
 	def test_blank_threshold_is_never_a_barrier(self):
 		species_params = [{"code": "chn", "spawning_max": None, "rearing_max": None}]
 		self.assertEqual(cb.flag_species(1000.0, species_params), [])
@@ -156,17 +156,17 @@ class FlagSpeciesTests(unittest.TestCase):
 
 
 class ComputeBarriersTests(unittest.TestCase):
-
 	"""The i / A / B worked example from gradient_barriers_doc.md's "Design Decisions" section:
 	i: 0m, elevation 0; A: 50m, elevation 5 (10% grade); B: 150m, elevation 5.5 (0.5% grade for
 	the 100m beyond A). Interpolating between A and B for i's 100m mark gives 5.25%; A's own
 	100m mark lands exactly on B, giving 0.5%.
 	"""
+
 	def test_worked_example_single_edge(self):
 		i = point_at(0.0, 0.0)
 		a = point_at(50.0, 5.0)
 		b = point_at(200.0, 5.75)
-		rows =  [edge_row("worked-e1", "1", 1, [b, a, i])]
+		rows = [edge_row("worked-e1", "1", 1, [b, a, i])]
 
 		barriers = flat_barriers(rows, LOW_THRESHOLDS)
 
@@ -267,7 +267,7 @@ class ComputeBarriersTests(unittest.TestCase):
 		i = point_at(0.0, 0.0)
 		a = point_at(50.0, 5.0)
 		b = point_at(200.0, 5.75)
-		worked_rows =  [edge_row("worked-e1", "2", 1, [b, a, i])]
+		worked_rows = [edge_row("worked-e1", "2", 1, [b, a, i])]
 
 		barriers = flat_barriers(short_rows + worked_rows, LOW_THRESHOLDS)
 
@@ -279,7 +279,6 @@ class ComputeBarriersTests(unittest.TestCase):
 
 
 class AoiScopedComputeBarriersTests(unittest.TestCase):
-
 	"""A single mainstem of 4 contiguous edges -- e1 (in-scope), e2 (OUT of scope), e3
 	(in-scope), e4 (in-scope) -- covering vertices p0@0m, p1@40m, p2@90m, p3@150m, p4@260m at
 	elevations 0/4/9/15/26. p2 is the only out-of-scope vertex.
@@ -335,14 +334,11 @@ class AoiScopedComputeBarriersTests(unittest.TestCase):
 
 
 class BarrierCacheFlushTests(unittest.TestCase):
-
 	def test_cache_flushes_in_batches_around_the_configured_size(self):
 		# A single long mainstem with vertices every 10m, steeply climbing, so every
 		# resolvable vertex clears LOW_THRESHOLDS and becomes a barrier.
 		n_vertices = 20
-		vertices_downstream_to_upstream = [
-			point_at(i * 10.0, i * 10.0 * 0.5) for i in range(n_vertices)
-		]
+		vertices_downstream_to_upstream = [point_at(i * 10.0, i * 10.0 * 0.5) for i in range(n_vertices)]
 		storage_order = list(reversed(vertices_downstream_to_upstream))
 		rows = [edge_row("big-edge", "big-mainstem", 1, storage_order)]
 
@@ -372,6 +368,7 @@ REALWORLD_THRESHOLDS = [
 	{"code": "chn", "spawning_max": 0.16, "rearing_max": 0.11},
 	{"code": "as", "spawning_max": 0.2, "rearing_max": 0.145},
 ]
+
 
 def wkb_from_wkt(wkt):
 	"""Parse real WKT text directly (rather than building it via make_wkb from raw
@@ -422,7 +419,6 @@ class RealWorldMultiSpeciesTests(unittest.TestCase):
 
 
 class LoadSpeciesParametersTests(unittest.TestCase):
-
 	def _write_params(self, tmp, yaml_text):
 		params_path = Path(tmp) / "fish_species_parameters.yaml"
 		params_path.write_text(yaml_text)
@@ -430,58 +426,72 @@ class LoadSpeciesParametersTests(unittest.TestCase):
 
 	def test_valid_thresholds_are_parsed(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			params_path = self._write_params(tmp, """
+			params_path = self._write_params(
+				tmp,
+				"""
 species:
   - code: chn
     accessibility_gradient_spawning_max: 0.16
     accessibility_gradient_rearing_max: 0.11
-""")
+""",
+			)
 			species = cb.load_species_parameters(params_path)
 			self.assertEqual(species, [{"code": "chn", "spawning_max": 0.16, "rearing_max": 0.11}])
 
 	def test_blank_threshold_is_allowed(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			params_path = self._write_params(tmp, """
+			params_path = self._write_params(
+				tmp,
+				"""
 species:
   - code: chn
     accessibility_gradient_spawning_max: 0.16
-""")
+""",
+			)
 			species = cb.load_species_parameters(params_path)
 			self.assertIsNone(species[0]["rearing_max"])
 
 	def test_non_numeric_threshold_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			params_path = self._write_params(tmp, """
+			params_path = self._write_params(
+				tmp,
+				"""
 species:
   - code: chn
     accessibility_gradient_spawning_max: "not-a-number"
-""")
+""",
+			)
 			with self.assertRaises(SystemExit):
 				cb.load_species_parameters(params_path)
 
 	def test_out_of_range_threshold_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			params_path = self._write_params(tmp, """
+			params_path = self._write_params(
+				tmp,
+				"""
 species:
   - code: chn
     accessibility_gradient_rearing_max: 1.5
-""")
+""",
+			)
 			with self.assertRaises(SystemExit):
 				cb.load_species_parameters(params_path)
 
 	def test_negative_threshold_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			params_path = self._write_params(tmp, """
+			params_path = self._write_params(
+				tmp,
+				"""
 species:
   - code: chn
     accessibility_gradient_rearing_max: -0.1
-""")
+""",
+			)
 			with self.assertRaises(SystemExit):
 				cb.load_species_parameters(params_path)
 
 
 class LoadAoiConfigTests(unittest.TestCase):
-
 	def test_missing_file_means_full_run(self):
 		self.assertEqual(cb.load_aoi_config(Path("/no/such/gradient_barriers.yaml")), [])
 
@@ -500,15 +510,12 @@ class LoadAoiConfigTests(unittest.TestCase):
 	def test_invalid_short_name_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			config_path = Path(tmp) / "gradient_barriers.yaml"
-			config_path.write_text(
-				"workunits: ['08MF001; DROP TABLE support.gradient_barriers;']\n"
-			)
+			config_path.write_text("workunits: ['08MF001; DROP TABLE support.gradient_barriers;']\n")
 			with self.assertRaises(SystemExit):
 				cb.load_aoi_config(config_path)
 
 
 class FetchEdgesAoiFilterTests(unittest.TestCase):
-
 	def test_no_aoi_ids_omits_mainstem_filter(self):
 		conn = FakeConnection([])
 		cursor = cb.fetch_edges(conn)

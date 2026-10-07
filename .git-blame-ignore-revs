@@ -1,0 +1,6 @@
+# Commits that only reformat code, skipped by `git blame` so it shows the last real change.
+# GitHub's blame view reads this file automatically. For local blame, enable it once per clone:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply ruff format and lint fixes across the repo
+7e5825494dcad6b9f1f3a6b63ff1a72e4a90bab9

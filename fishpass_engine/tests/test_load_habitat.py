@@ -107,7 +107,9 @@ class ResolvePointSpecificEdgeTests(unittest.TestCase):
 		cursor = FakeCursor(fetchone_results=[None])
 		edge_cache = {}
 		with self.assertRaises(SystemExit):
-			lh.resolve_point(cursor, "model_test", edge_cache, 4617, (0.0, 0.0), 100, 50, "missing-edge", "upstream", "h1")
+			lh.resolve_point(
+				cursor, "model_test", edge_cache, 4617, (0.0, 0.0), 100, 50, "missing-edge", "upstream", "h1"
+			)
 
 	def test_point_too_far_from_specific_edge_exits(self):
 		vertices = [[0.0, 0.0, 0.0, 0.0], [0.01, 0.0, 0.0, 100.0]]
@@ -161,7 +163,9 @@ class ResolvePointNearestEdgeTests(unittest.TestCase):
 		closest = point_zm_wkb(0.005, 0.0, 0.0, 50.0)
 		cursor = FakeCursor(fetchone_results=[("edge-1", wkb, closest)])
 		edge_cache = {}
-		edge_id, xyzm = lh.resolve_point(cursor, "model_test", edge_cache, 4617, (0.005, 0.0), 100, 50, None, "upstream", "h1")
+		edge_id, xyzm = lh.resolve_point(
+			cursor, "model_test", edge_cache, 4617, (0.005, 0.0), 100, 50, None, "upstream", "h1"
+		)
 		self.assertEqual(edge_id, "edge-1")
 		self.assertAlmostEqual(xyzm[0], 0.005, places=5)
 		self.assertTrue(edge_cache["edge-1"]["changed"])
@@ -210,11 +214,15 @@ class ProcessHabitatRowTests(unittest.TestCase):
 class LoadHabitatUpdatesRowsTests(unittest.TestCase):
 	def test_query_filters_by_update_scope_and_distance(self):
 		cursor = FakeCursor()
-		count = lh.load_habitat_updates_rows(cursor, "model_test", {
-			"habitat_update_table": "support.habitat_updates",
-			"update_scope": "plan1",
-			"habitat_point_snap_edge_distance_m": 100,
-		})
+		count = lh.load_habitat_updates_rows(
+			cursor,
+			"model_test",
+			{
+				"habitat_update_table": "support.habitat_updates",
+				"update_scope": "plan1",
+				"habitat_point_snap_edge_distance_m": 100,
+			},
+		)
 		self.assertEqual(count, 3)
 		sql, params = cursor.executed[0]
 		self.assertIn("src.update_scope = 'all' OR src.update_scope = %s", sql)
@@ -225,9 +233,14 @@ class LoadHabitatUpdatesRowsTests(unittest.TestCase):
 class WriteHabitatSnapResultsTests(unittest.TestCase):
 	def test_null_handling_for_unresolved_point(self):
 		cursor = FakeCursor()
-		lh.write_habitat_snap_results(cursor, "model_test", 4617, [
-			("h1", ("edge-1", (1.0, 2.0, 0.0, 5.0)), None),
-		])
+		lh.write_habitat_snap_results(
+			cursor,
+			"model_test",
+			4617,
+			[
+				("h1", ("edge-1", (1.0, 2.0, 0.0, 5.0)), None),
+			],
+		)
 		_, rows = cursor.executemany_calls[0]
 		self.assertEqual(rows, [("edge-1", 1.0, 2.0, None, None, None, "h1")])
 

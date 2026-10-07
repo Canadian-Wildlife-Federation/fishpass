@@ -46,6 +46,7 @@ REQUIRED_ENV_VARS = [
 	"FISHPASS_PASSWORD",
 ]
 
+
 # optional params path for the species parameters file
 def parse_args():
 	parser = argparse.ArgumentParser(description=__doc__)
@@ -116,18 +117,20 @@ def load_species_parameters(params_path):
 		rearing_max = entry.get("accessibility_gradient_rearing_max")
 		_validate_threshold(spawning_max, "accessibility_gradient_spawning_max", code, params_path)
 		_validate_threshold(rearing_max, "accessibility_gradient_rearing_max", code, params_path)
-		species.append({
-			"code": code,
-			"spawning_max": spawning_max,
-			"rearing_max": rearing_max,
-		})
+		species.append(
+			{
+				"code": code,
+				"spawning_max": spawning_max,
+				"rearing_max": rearing_max,
+			}
+		)
 	if not species:
 		sys.exit(f"No species entries found in {params_path}")
 	return species
 
 
 def resolve_aois(cursor, short_names):
-	"""Resolve chyf_raw.aoi.short_name values to {id, short_name} rows, Exits if any short_name 
+	"""Resolve chyf_raw.aoi.short_name values to {id, short_name} rows, Exits if any short_name
 	doesn't resolve (typo protection)."""
 
 	cursor.execute(
@@ -144,9 +147,7 @@ def resolve_aois(cursor, short_names):
 
 
 def get_source_srid(cursor):
-	cursor.execute(
-		"SELECT ST_SRID(geometry) FROM chyf_raw.flowpath WHERE geometry IS NOT NULL LIMIT 1"
-	)
+	cursor.execute("SELECT ST_SRID(geometry) FROM chyf_raw.flowpath WHERE geometry IS NOT NULL LIMIT 1")
 	row = cursor.fetchone()
 	if row is None or row[0] is None:
 		sys.exit("Could not determine SRID from chyf_raw.flowpath -- is the table empty?")
@@ -155,8 +156,7 @@ def get_source_srid(cursor):
 
 def table_exists(cursor, table_name):
 	cursor.execute(
-		"SELECT 1 FROM information_schema.tables "
-		"WHERE table_schema = 'support' AND table_name = %s",
+		"SELECT 1 FROM information_schema.tables WHERE table_schema = 'support' AND table_name = %s",
 		(table_name,),
 	)
 	return cursor.fetchone() is not None
@@ -168,15 +168,10 @@ def next_archive_name_postfix(cursor, prefix):
 	don't collide)."""
 	date_str = datetime.now(tz=timezone.utc).date().strftime("%Y%m%d")
 	cursor.execute(
-		"SELECT table_name FROM information_schema.tables "
-		"WHERE table_schema = 'support' AND table_name LIKE %s",
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = 'support' AND table_name LIKE %s",
 		(f"{prefix}_{date_str}_%",),
 	)
-	existing_seqs = [
-		int(name.rsplit("_", 1)[-1])
-		for (name,) in cursor.fetchall()
-		if name.rsplit("_", 1)[-1].isdigit()
-	]
+	existing_seqs = [int(name.rsplit("_", 1)[-1]) for (name,) in cursor.fetchall() if name.rsplit("_", 1)[-1].isdigit()]
 	next_seq = max(existing_seqs, default=0) + 1
 	return f"{date_str}_{next_seq}"
 
@@ -197,9 +192,7 @@ def create_tables(cursor, srid):
 			comments varchar
 		);
 	""")
-	cursor.execute(
-		"CREATE INDEX gradient_barriers_geometry_idx ON support.gradient_barriers USING gist (geometry);"
-	)
+	cursor.execute("CREATE INDEX gradient_barriers_geometry_idx ON support.gradient_barriers USING gist (geometry);")
 
 	cursor.execute("""
 		CREATE TABLE support.gradient_barriers_metadata (
@@ -209,6 +202,7 @@ def create_tables(cursor, srid):
 			run_at timestamptz NOT NULL DEFAULT now()
 		);
 	""")
+
 
 def prepare_tables(cursor, srid):
 	"""Ensure the support schema exists, archive any existing gradient_barriers table, and
@@ -222,22 +216,21 @@ def prepare_tables(cursor, srid):
 		# rename existing table with current date
 		# to ensure we keep a copy of it and don't lose
 		# any manual updates
-		archive_name = f"gradient_barriers_archive_{archive_postfix}";
+		archive_name = f"gradient_barriers_archive_{archive_postfix}"
 		cursor.execute(f"ALTER TABLE support.gradient_barriers RENAME TO {archive_name};")
-		cursor.execute(
-			f"ALTER INDEX support.gradient_barriers_geometry_idx RENAME TO {archive_name}_geometry_idx;"
-		)
+		cursor.execute(f"ALTER INDEX support.gradient_barriers_geometry_idx RENAME TO {archive_name}_geometry_idx;")
 		logger.info("Archived existing table to support.%s", archive_name)
 
 	if table_exists(cursor, "gradient_barriers_metadata"):
 		# rename existing table with current date
 		# to ensure we keep a copy of it and don't lose
 		# any manual updates
-		archive_name = f"gradient_barriers_metadata_{archive_postfix}";
+		archive_name = f"gradient_barriers_metadata_{archive_postfix}"
 		cursor.execute(f"ALTER TABLE support.gradient_barriers_metadata RENAME TO {archive_name};")
 		logger.info("Archived existing table to support.%s", archive_name)
 
-	create_tables(cursor, srid);
+	create_tables(cursor, srid)
+
 
 def insert_metadata_record(cursor, aoi, species_params):
 	"""Append a row to support.gradient_barriers_metadata recording this run's AOI scope
@@ -271,7 +264,9 @@ def backup_and_clear_aoi_rows(cursor, srid, short_names):
 		"DELETE FROM support.gradient_barriers WHERE workunit && %s::varchar[]",
 		(short_names,),
 	)
-	logger.info("Archived %d existing row(s) for %s to support.%s", cursor.rowcount, ", ".join(short_names), backup_name)
+	logger.info(
+		"Archived %d existing row(s) for %s to support.%s", cursor.rowcount, ", ".join(short_names), backup_name
+	)
 
 
 def fetch_edges(conn, aoi_ids=None):
@@ -282,7 +277,7 @@ def fetch_edges(conn, aoi_ids=None):
 	If aoi_ids is given, edges are restricted to every mainstem that has at least one edge in
 	those AOI(s) -- but *all* of each such mainstem's edges are included, even the portions
 	that fall in neighboring AOIs, so the 100m upstream gradient walk stays correct across an
-	AOI boundary. 
+	AOI boundary.
 
 	Uses a named (server-side) cursor so the full ~tens-of-millions-of-row result set is
 	fetched from Postgres in batches rather than loaded into client memory all at once.
@@ -399,7 +394,7 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 
 	Edges arrive pre-sorted by (mainstem_id, mainstem_seq ASC) from fetch_edges, so a mainstem's
 	vertices are walked in that same streaming pass. A vertex is only held onto (in `window`)
-	for as long as it's still waiting for a	point >= UPSTREAM_DISTANCE_M upstream of it; 
+	for as long as it's still waiting for a	point >= UPSTREAM_DISTANCE_M upstream of it;
 	see resolve_vertex for how each one is resolved.
 
 	Edges outside the aoid_ids (if given) and walked through (in case it exists and re-enters) but never
@@ -431,7 +426,9 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 				current_mainstem = mainstem_id
 				mainstem_count += 1
 				if mainstem_count % PROGRESS_LOG_INTERVAL_MAINSTEMS == 0:
-					logger.info("Processed %d mainstem(s), %d barrier(s) found so far.", mainstem_count, total + len(barriers))
+					logger.info(
+						"Processed %d mainstem(s), %d barrier(s) found so far.", mainstem_count, total + len(barriers)
+					)
 
 			in_scope = aoi_id_set is None or edge_aoi_id in aoi_id_set
 
@@ -484,13 +481,13 @@ def insert_barriers(cursor, srid, barriers):
 			(geometry, gradient, computed_species, actual_species)
 		VALUES (ST_SetSRID(ST_MakePoint(%s, %s), %s), %s, %s, %s)
 		""",
-		rows
+		rows,
 	)
 
 
 def assign_workunits(cursor):
 	"""Spatially assign `workunit` to every row that doesn't have one yet."""
-	
+
 	cursor.execute("""
 		UPDATE support.gradient_barriers b
 		SET workunit = matched.short_names

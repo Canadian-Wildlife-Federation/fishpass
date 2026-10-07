@@ -98,7 +98,7 @@ def snap_points_to_edge(edge_wkb, points, vertex_distance_m):
 		if nearest_d <= vertex_distance_m:
 			results.append((item_id, nearest_v[0], nearest_v[1], nearest_v[2], nearest_v[3]))
 		else:
-			vertices = vertices[:seg_index + 1] + [[px, py, pz, pm]] + vertices[seg_index + 1:]
+			vertices = vertices[: seg_index + 1] + [[px, py, pz, pm]] + vertices[seg_index + 1 :]
 			changed = True
 			results.append((item_id, px, py, pz, pm))
 

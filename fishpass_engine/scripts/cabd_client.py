@@ -49,7 +49,7 @@ def fetch_feature_type(feature_type, short_names, base_url=CABD_BASE_URL, chunk_
 	"""
 	http = session or requests
 	for i in range(0, len(short_names), chunk_size):
-		chunk = short_names[i:i + chunk_size]
+		chunk = short_names[i : i + chunk_size]
 		url = _build_url(feature_type, chunk, base_url)
 		try:
 			resp = http.get(url, timeout=REQUEST_TIMEOUT_S)

@@ -18,8 +18,10 @@ STREAM_COLUMNS = "id, geometry, length, strahler_order, effective_length, segmen
 
 SPECIES_LIFECYCLE_FIELDS = ("upstream_length", "functional_upstream_length")
 SPECIES_LIFECYCLE_WEIGHTED_FIELDS = (
-	"weighted_connected_upstream_length", "weighted_disconnected_upstream_length",
-	"functional_weighted_connected_upstream_length", "functional_weighted_disconnected_upstream_length",
+	"weighted_connected_upstream_length",
+	"weighted_disconnected_upstream_length",
+	"functional_weighted_connected_upstream_length",
+	"functional_weighted_disconnected_upstream_length",
 )
 # Accessible-length fields, written for both spawn and rear for every target species
 # (independent of the plan's reporting_values).
@@ -63,15 +65,26 @@ def create_natural_anthropogenic_views(cursor, output_schema):
 
 
 BARRIER_STAT_FIELDS = (
-	"upstream_natural_spawnrear_count", "upstream_natural_spawn_count", "upstream_natural_rear_count",
-	"upstream_anthro_spawnrear_count", "upstream_anthro_spawn_count", "upstream_anthro_rear_count",
-	"downstream_natural_spawnrear_count", "downstream_natural_spawn_count", "downstream_natural_rear_count",
-	"downstream_anthro_spawnrear_count", "downstream_anthro_spawn_count", "downstream_anthro_rear_count",
+	"upstream_natural_spawnrear_count",
+	"upstream_natural_spawn_count",
+	"upstream_natural_rear_count",
+	"upstream_anthro_spawnrear_count",
+	"upstream_anthro_spawn_count",
+	"upstream_anthro_rear_count",
+	"downstream_natural_spawnrear_count",
+	"downstream_natural_spawn_count",
+	"downstream_natural_rear_count",
+	"downstream_anthro_spawnrear_count",
+	"downstream_anthro_spawn_count",
+	"downstream_anthro_rear_count",
 )
 BARRIER_STAT_ID_FIELDS = (
-	"downstream_natural_spawn_ids", "downstream_natural_rear_ids",
-	"downstream_anthro_spawn_ids", "downstream_anthro_rear_ids",
-	"upstream_anthro_spawn_ids", "upstream_anthro_rear_ids",
+	"downstream_natural_spawn_ids",
+	"downstream_natural_rear_ids",
+	"downstream_anthro_spawn_ids",
+	"downstream_anthro_rear_ids",
+	"upstream_anthro_spawn_ids",
+	"upstream_anthro_rear_ids",
 )
 
 
@@ -98,7 +111,10 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
 		column_sql = ",\n\t\t\t".join(columns)
 
-		for table_prefix, structure_type in (("natural_barriers", "natural"), ("anthropogenic_barriers", "anthropogenic")):
+		for table_prefix, structure_type in (
+			("natural_barriers", "natural"),
+			("anthropogenic_barriers", "anthropogenic"),
+		):
 			view_ident = quote_ident(f"{table_prefix}_{species}")
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
@@ -176,25 +192,26 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 			WHERE {stats} IS NOT NULL
 		""")
 
+
 def create_watershed_summary_statistics(cursor, output_schema, reporting_species_lifecycles):
-    """Creates <output_schema>.watershed_summary_stats view in a single pass over streams
-    by unnesting species_stats keys laterally.
-    """
-    schema_ident = quote_ident(output_schema)
-    species_lifecycles = _species_by_lifecycle_map(reporting_species_lifecycles)
-    valid_species = list(species_lifecycles.keys())
+	"""Creates <output_schema>.watershed_summary_stats view in a single pass over streams
+	by unnesting species_stats keys laterally.
+	"""
+	schema_ident = quote_ident(output_schema)
+	species_lifecycles = _species_by_lifecycle_map(reporting_species_lifecycles)
+	valid_species = list(species_lifecycles.keys())
 
-    if not valid_species:
-        logger.warning("No reporting species configured; skipping watershed_summary_stats.")
-        return
+	if not valid_species:
+		logger.warning("No reporting species configured; skipping watershed_summary_stats.")
+		return
 
-    for species in valid_species:
-        if not IDENTIFIER_RE.match(species):
-            sys.exit(f"Invalid species code: {species!r}")
+	for species in valid_species:
+		if not IDENTIFIER_RE.match(species):
+			sys.exit(f"Invalid species code: {species!r}")
 
-    species_list_sql = ", ".join(f"'{s}'" for s in valid_species)
+	species_list_sql = ", ".join(f"'{s}'" for s in valid_species)
 
-    query = f"""
+	query = f"""
     CREATE MATERIALIZED VIEW {schema_ident}.watershed_summary_stats AS
     WITH expanded AS (
         SELECT
@@ -261,7 +278,8 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
 	FROM aggregated;	
     """
 
-    cursor.execute(query)
+	cursor.execute(query)
+
 
 def create_barrier_views(conn, cursor, plan):
 	"""Postprocess phase entry point: create the reporting views over all_barriers/streams
@@ -273,7 +291,9 @@ def create_barrier_views(conn, cursor, plan):
 	create_species_barrier_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	create_unsnapped_barriers_view(cursor, output_schema)
 	conn.commit()
-	logger.info("natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_barriers: done.")
+	logger.info(
+		"natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_barriers: done."
+	)
 
 	create_species_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	conn.commit()

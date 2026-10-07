@@ -74,21 +74,44 @@ class BuildGraphIdBundlesTests(unittest.TestCase):
 
 class FetchBundleEdgesTests(unittest.TestCase):
 	def test_groups_by_graph_id(self):
-		cursor = FakeCursor(fetch_results=[[
-			(5, "e1", "n1", "n2", "m1", 9.5, 10.0, 0.1, 2),
-			(6, "e2", "n3", "n4", "m2", 19.5, 20.0, 0.2, 3),
-		]])
+		cursor = FakeCursor(
+			fetch_results=[
+				[
+					(5, "e1", "n1", "n2", "m1", 9.5, 10.0, 0.1, 2),
+					(6, "e2", "n3", "n4", "m2", 19.5, 20.0, 0.2, 3),
+				]
+			]
+		)
 		result = gc.fetch_bundle_edges(cursor, "model_test", [5, 6])
-		self.assertEqual(result, {
-			5: [{
-				"id": "e1", "from_nexus_id": "n1", "to_nexus_id": "n2", "mainstem_id": "m1",
-				"length": 9.5, "effective_length": 10.0, "segment_gradient": 0.1, "strahler_order": 2,
-			}],
-			6: [{
-				"id": "e2", "from_nexus_id": "n3", "to_nexus_id": "n4", "mainstem_id": "m2",
-				"length": 19.5, "effective_length": 20.0, "segment_gradient": 0.2, "strahler_order": 3,
-			}],
-		})
+		self.assertEqual(
+			result,
+			{
+				5: [
+					{
+						"id": "e1",
+						"from_nexus_id": "n1",
+						"to_nexus_id": "n2",
+						"mainstem_id": "m1",
+						"length": 9.5,
+						"effective_length": 10.0,
+						"segment_gradient": 0.1,
+						"strahler_order": 2,
+					}
+				],
+				6: [
+					{
+						"id": "e2",
+						"from_nexus_id": "n3",
+						"to_nexus_id": "n4",
+						"mainstem_id": "m2",
+						"length": 19.5,
+						"effective_length": 20.0,
+						"segment_gradient": 0.2,
+						"strahler_order": 3,
+					}
+				],
+			},
+		)
 		sql, params = cursor.executed[0]
 		self.assertIn("WHERE graph_id = ANY(%s)", sql)
 		self.assertEqual(params, ([5, 6],))
@@ -98,12 +121,20 @@ class FetchBundleBarriersTests(unittest.TestCase):
 	def test_groups_by_graph_id(self):
 		cursor = FakeCursor(fetch_results=[[(5, "b1", "e1", "e0", {"es_rear": 0}, "natural")]])
 		result = gc.fetch_bundle_barriers(cursor, "model_test", [5, 6])
-		self.assertEqual(result, {
-			5: [{
-				"id": "b1", "edge_id": "e1", "upstream_edge_id": "e0",
-				"species_passability_value": {"es_rear": 0}, "structure_type": "natural",
-			}],
-		})
+		self.assertEqual(
+			result,
+			{
+				5: [
+					{
+						"id": "b1",
+						"edge_id": "e1",
+						"upstream_edge_id": "e0",
+						"species_passability_value": {"es_rear": 0},
+						"structure_type": "natural",
+					}
+				],
+			},
+		)
 		sql, params = cursor.executed[0]
 		self.assertIn("s.upstream_edge_id", sql)
 		self.assertIn("WHERE e.graph_id = ANY(%s)", sql)
@@ -119,21 +150,32 @@ class FetchBundleHabitatUpdatesTests(unittest.TestCase):
 		self.assertEqual(params, ([5, 6], [5, 6]))
 
 	def test_row_spanning_two_graph_ids_attached_to_both(self):
-		cursor = FakeCursor(fetch_results=[[
-			(5, 6, "h1", "es_rear", "point", "eu1", "ed1", None),
-		]])
+		cursor = FakeCursor(
+			fetch_results=[
+				[
+					(5, 6, "h1", "es_rear", "point", "eu1", "ed1", None),
+				]
+			]
+		)
 		result = gc.fetch_bundle_habitat_updates(cursor, "model_test", [5, 6])
 		expected_update = {
-			"id": "h1", "species_lifestage": "es_rear", "location_type": "point",
-			"upstream_snapped_edge_id": "eu1", "downstream_snapped_edge_id": "ed1",
+			"id": "h1",
+			"species_lifestage": "es_rear",
+			"location_type": "point",
+			"upstream_snapped_edge_id": "eu1",
+			"downstream_snapped_edge_id": "ed1",
 		}
 		self.assertEqual(result, {5: [expected_update], 6: [expected_update]})
 
 	def test_preserves_relative_order_within_each_graph_id(self):
-		cursor = FakeCursor(fetch_results=[[
-			(5, None, "h-first", "es_rear", "point", "eu1", None, "2020-01-01"),
-			(5, None, "h-second", "es_rear", "point", "eu1", None, "2020-06-01"),
-		]])
+		cursor = FakeCursor(
+			fetch_results=[
+				[
+					(5, None, "h-first", "es_rear", "point", "eu1", None, "2020-01-01"),
+					(5, None, "h-second", "es_rear", "point", "eu1", None, "2020-06-01"),
+				]
+			]
+		)
 		result = gc.fetch_bundle_habitat_updates(cursor, "model_test", [5])
 		self.assertEqual([u["id"] for u in result[5]], ["h-first", "h-second"])
 
@@ -172,18 +214,25 @@ class FlushStatsWritesTests(unittest.TestCase):
 
 	def test_arrays_stay_column_aligned_across_multiple_rows(self):
 		cursor = FakeCursor()
-		gc.flush_stats_writes(cursor, "model_test", [
-			('{"s": 1}', 0.0, 10.0, "e1"),
-			('{"s": 2}', 10.0, 30.0, "e2"),
-		])
+		gc.flush_stats_writes(
+			cursor,
+			"model_test",
+			[
+				('{"s": 1}', 0.0, 10.0, "e1"),
+				('{"s": 2}', 10.0, 30.0, "e2"),
+			],
+		)
 		self.assertEqual(len(cursor.executed), 1)
 		_sql, params = cursor.executed[0]
-		self.assertEqual(params, (
-			['{"s": 1}', '{"s": 2}'],
-			[0.0, 10.0],
-			[10.0, 30.0],
-			["e1", "e2"],
-		))
+		self.assertEqual(
+			params,
+			(
+				['{"s": 1}', '{"s": 2}'],
+				[0.0, 10.0],
+				[10.0, 30.0],
+				["e1", "e2"],
+			),
+		)
 
 	def test_skips_when_no_rows(self):
 		cursor = FakeCursor()
@@ -197,24 +246,38 @@ class AssembleEdgeJsonTests(unittest.TestCase):
 		edge_ids = ["E1"]
 		reporting = [("es", "rear"), ("es", "spawnrear")]
 		accessibility = {"es": {"spawn": {"E1": "naturally_accessible"}, "rear": {"E1": "naturally_inaccessible"}}}
-		barrier_stats = {"es": {
-			"upstream_anthro_spawnrear_count": {"E1": 0}, "downstream_anthro_spawnrear_count": {"E1": 0},
-			"upstream_anthro_spawn_count": {"E1": 0}, "upstream_anthro_rear_count": {"E1": 0},
-			"downstream_anthro_spawn_count": {"E1": 0}, "downstream_anthro_rear_count": {"E1": 0},
-			"upstream_natural_spawnrear_count": {"E1": 0}, "downstream_natural_spawnrear_count": {"E1": 0},
-			"upstream_natural_spawn_count": {"E1": 0}, "upstream_natural_rear_count": {"E1": 0},
-			"downstream_natural_spawn_count": {"E1": 0}, "downstream_natural_rear_count": {"E1": 0},
-			"upstream_anthro_spawn_ids": {"E1": []}, "upstream_anthro_rear_ids": {"E1": []},
-			"downstream_anthro_spawn_ids": {"E1": []}, "downstream_anthro_rear_ids": {"E1": []},
-		}}
+		barrier_stats = {
+			"es": {
+				"upstream_anthro_spawnrear_count": {"E1": 0},
+				"downstream_anthro_spawnrear_count": {"E1": 0},
+				"upstream_anthro_spawn_count": {"E1": 0},
+				"upstream_anthro_rear_count": {"E1": 0},
+				"downstream_anthro_spawn_count": {"E1": 0},
+				"downstream_anthro_rear_count": {"E1": 0},
+				"upstream_natural_spawnrear_count": {"E1": 0},
+				"downstream_natural_spawnrear_count": {"E1": 0},
+				"upstream_natural_spawn_count": {"E1": 0},
+				"upstream_natural_rear_count": {"E1": 0},
+				"downstream_natural_spawn_count": {"E1": 0},
+				"downstream_natural_rear_count": {"E1": 0},
+				"upstream_anthro_spawn_ids": {"E1": []},
+				"upstream_anthro_rear_ids": {"E1": []},
+				"downstream_anthro_spawn_ids": {"E1": []},
+				"downstream_anthro_rear_ids": {"E1": []},
+			}
+		}
 		habitat = {"es": {"rear": {"E1": True}, "spawn": {"E1": False}, "spawnrear": {"E1": True}}}
-		species_length_stats = {"es": {
-			"rear_weighted_length": {"E1": 3.5},
-			"rear_weighted_connected_length": {"E1": 1.5},
-			"rear_weighted_disconnected_length": {"E1": 2.0},
-		}}
+		species_length_stats = {
+			"es": {
+				"rear_weighted_length": {"E1": 3.5},
+				"rear_weighted_connected_length": {"E1": 1.5},
+				"rear_weighted_disconnected_length": {"E1": 2.0},
+			}
+		}
 
-		species_stats = gc.assemble_edge_json(edge_ids, reporting, accessibility, barrier_stats, habitat, species_length_stats)
+		species_stats = gc.assemble_edge_json(
+			edge_ids, reporting, accessibility, barrier_stats, habitat, species_length_stats
+		)
 		self.assertEqual(species_stats["E1"]["es"]["spawn_accessibility"], "naturally_accessible")
 		self.assertEqual(species_stats["E1"]["es"]["rear_accessibility"], "naturally_inaccessible")
 		self.assertTrue(species_stats["E1"]["es"]["rear_habitat"])
@@ -234,7 +297,16 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 	"""Confluence network: E1/E2 -> E3 -> E4 (outlet)."""
 
 	def _edges(self):
-		fields = ("id", "from_nexus_id", "to_nexus_id", "mainstem_id", "length", "effective_length", "segment_gradient", "strahler_order")
+		fields = (
+			"id",
+			"from_nexus_id",
+			"to_nexus_id",
+			"mainstem_id",
+			"length",
+			"effective_length",
+			"segment_gradient",
+			"strahler_order",
+		)
 		rows = [
 			("E1", "N1", "N3", "M1", 10.0, 10.0, 1.0, 1),
 			("E2", "N2", "N3", "M2", 20.0, 20.0, 1.0, 1),
@@ -248,16 +320,25 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 			"reporting_species_lifecycles": [("es", "rear")],
 			"impassable_threshold": 1.0,
 		}
-		species_params = {"es": {
-			"rear_gradient_min": 0.0, "rear_gradient_max": 5.0,
-			"strahler_order_rearing_min": 1, "strahler_order_rearing_max": 6,
-		}}
+		species_params = {
+			"es": {
+				"rear_gradient_min": 0.0,
+				"rear_gradient_max": 5.0,
+				"strahler_order_rearing_min": 1,
+				"strahler_order_rearing_max": 6,
+			}
+		}
 		return plan, species_params
 
 	def test_runs_without_error_and_returns_stats(self):
 		plan, species_params = self._plan_and_species_params()
 		species_stats, barrier_rows, route_measures = gc.process_component(
-			1, self._edges(), [], [], plan, species_params,
+			1,
+			self._edges(),
+			[],
+			[],
+			plan,
+			species_params,
 		)
 
 		self.assertEqual(barrier_rows, [])
@@ -271,13 +352,23 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		plan, species_params = self._plan_and_species_params()
 		# edge_id="E3" sits at the E1/E2 confluence, so upstream_edge_id is ambiguous/None here
 		# (see network_break.py's marker-attachment convention).
-		barriers = [{
-			"id": "b1", "edge_id": "E3", "upstream_edge_id": None,
-			"species_passability_value": {"es_rear": 1, "es_spawn": 0}, "structure_type": "natural",
-		}]
+		barriers = [
+			{
+				"id": "b1",
+				"edge_id": "E3",
+				"upstream_edge_id": None,
+				"species_passability_value": {"es_rear": 1, "es_spawn": 0},
+				"structure_type": "natural",
+			}
+		]
 
 		species_stats, barrier_rows, _route_measures = gc.process_component(
-			1, self._edges(), barriers, [], plan, species_params,
+			1,
+			self._edges(),
+			barriers,
+			[],
+			plan,
+			species_params,
 		)
 
 		self.assertEqual(len(barrier_rows), 1)
@@ -293,10 +384,22 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 
 	def test_natural_rear_barrier_blocks_upstream_rear_accessibility_only(self):
 		plan, species_params = self._plan_and_species_params()
-		barriers = [{"id": "b1", "edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 1}, "structure_type": "natural"}]
+		barriers = [
+			{
+				"id": "b1",
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 1},
+				"structure_type": "natural",
+			}
+		]
 
 		species_stats, _barrier_rows, _route_measures = gc.process_component(
-			1, self._edges(), barriers, [], plan, species_params,
+			1,
+			self._edges(),
+			barriers,
+			[],
+			plan,
+			species_params,
 		)
 
 		# rear-impassable natural barrier flips rear_accessibility upstream of it...
@@ -314,7 +417,16 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 	downweighting, and downstream-first-barrier degradation together in one component."""
 
 	def _edges(self):
-		fields = ("id", "from_nexus_id", "to_nexus_id", "mainstem_id", "length", "effective_length", "segment_gradient", "strahler_order")
+		fields = (
+			"id",
+			"from_nexus_id",
+			"to_nexus_id",
+			"mainstem_id",
+			"length",
+			"effective_length",
+			"segment_gradient",
+			"strahler_order",
+		)
 		rows = [
 			("E1", "N1", "N7", "M1", 100.0, 100.0, 9.0, 1),
 			("E2", "N2", "N7", "M1", 100.0, 100.0, 6.0, 1),
@@ -331,12 +443,18 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 	def _barriers(self):
 		return [
 			{
-				"id": "b1", "edge_id": "E8", "upstream_edge_id": "E7",
-				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0}, "structure_type": "anthropogenic",
+				"id": "b1",
+				"edge_id": "E8",
+				"upstream_edge_id": "E7",
+				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0},
+				"structure_type": "anthropogenic",
 			},
 			{
-				"id": "b2", "edge_id": "E9", "upstream_edge_id": "E8",
-				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0.25}, "structure_type": "anthropogenic",
+				"id": "b2",
+				"edge_id": "E9",
+				"upstream_edge_id": "E8",
+				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0.25},
+				"structure_type": "anthropogenic",
 			},
 		]
 
@@ -345,20 +463,33 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 			"reporting_species_lifecycles": [("es", "rear"), ("es", "spawn"), ("es", "spawnrear")],
 			"impassable_threshold": 1.0,
 		}
-		species_params = {"es": {
-			"rear_gradient_min": 0.0, "rear_gradient_max": 5.0,
-			"spawn_gradient_min": 0.0, "spawn_gradient_max": 8.0,
-			"strahler_order_rearing_min": 1, "strahler_order_rearing_max": 10,
-			"strahler_order_spawning_min": 1, "strahler_order_spawning_max": 10,
-			"stream_order_1_rearing_weight": 0.5, "stream_order_1_spawning_weight": 0.25,
-			"stream_order_2_rearing_weight": 0.75, "stream_order_2_spawning_weight": 0.25,
-		}}
+		species_params = {
+			"es": {
+				"rear_gradient_min": 0.0,
+				"rear_gradient_max": 5.0,
+				"spawn_gradient_min": 0.0,
+				"spawn_gradient_max": 8.0,
+				"strahler_order_rearing_min": 1,
+				"strahler_order_rearing_max": 10,
+				"strahler_order_spawning_min": 1,
+				"strahler_order_spawning_max": 10,
+				"stream_order_1_rearing_weight": 0.5,
+				"stream_order_1_spawning_weight": 0.25,
+				"stream_order_2_rearing_weight": 0.75,
+				"stream_order_2_spawning_weight": 0.25,
+			}
+		}
 		return plan, species_params
 
 	def setUp(self):
 		plan, species_params = self._plan_and_species_params()
 		self.species_stats, barrier_rows, _route_measures = gc.process_component(
-			1, self._edges(), self._barriers(), [], plan, species_params,
+			1,
+			self._edges(),
+			self._barriers(),
+			[],
+			plan,
+			species_params,
 		)
 		self.barrier_rows_by_id = {b["id"]: b for b in barrier_rows}
 
@@ -410,12 +541,26 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		# anthropogenic barrier -- this reproduces the pre-change "weighted_length" numbers for the
 		# connected half.
 		expected_rear = {
-			"E1": (0.0, 0.0), "E2": (0.0, 0.0), "E3": (0.0, 50.0), "E4": (0.0, 50.0),
-			"E5": (0.0, 75.0), "E6": (0.0, 75.0), "E7": (0.0, 100.0), "E8": (25.0, 75.0), "E9": (100.0, 0.0),
+			"E1": (0.0, 0.0),
+			"E2": (0.0, 0.0),
+			"E3": (0.0, 50.0),
+			"E4": (0.0, 50.0),
+			"E5": (0.0, 75.0),
+			"E6": (0.0, 75.0),
+			"E7": (0.0, 100.0),
+			"E8": (25.0, 75.0),
+			"E9": (100.0, 0.0),
 		}
 		expected_spawn = {
-			"E1": (0.0, 0.0), "E2": (12.5, 12.5), "E3": (12.5, 12.5), "E4": (12.5, 12.5),
-			"E5": (12.5, 12.5), "E6": (12.5, 12.5), "E7": (50.0, 50.0), "E8": (50.0, 50.0), "E9": (100.0, 0.0),
+			"E1": (0.0, 0.0),
+			"E2": (12.5, 12.5),
+			"E3": (12.5, 12.5),
+			"E4": (12.5, 12.5),
+			"E5": (12.5, 12.5),
+			"E6": (12.5, 12.5),
+			"E7": (50.0, 50.0),
+			"E8": (50.0, 50.0),
+			"E9": (100.0, 0.0),
 		}
 		for eid, (connected, disconnected) in expected_rear.items():
 			stats = self.species_stats[eid]["es"]

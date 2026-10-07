@@ -69,10 +69,12 @@ class ResolveProvinceAoiIdsTests(unittest.TestCase):
 
 class ResolveUpstreamOfAoiIdsTests(unittest.TestCase):
 	def test_resolves_aoi_ids_covering_graph_ids(self):
-		cursor = FakeCursor(fetch_results=[
-			[("edge-1", 5), ("edge-2", 7)],
-			[("aoi-a",), ("aoi-b",)],
-		])
+		cursor = FakeCursor(
+			fetch_results=[
+				[("edge-1", 5), ("edge-2", 7)],
+				[("aoi-a",), ("aoi-b",)],
+			]
+		)
 		result = lsn.resolve_upstream_of_aoi_ids(cursor, ["edge-1", "edge-2"])
 		self.assertEqual(sorted(result), ["aoi-a", "aoi-b"])
 
@@ -111,9 +113,12 @@ class ComputeUpstreamOfKeepIdsTests(unittest.TestCase):
 		# Confluence graph (graph_id 1): E1, E2 headwaters -> E3 -> E4 (outlet).
 		# Unrelated graph_id 2: E5 -> E6, pulled in incidentally by the aoi filter.
 		return [
-			("E1", "N1", "N3", 1), ("E2", "N2", "N3", 1),
-			("E3", "N3", "N4", 1), ("E4", "N4", "N5", 1),
-			("E5", "N6", "N7", 2), ("E6", "N7", "N8", 2),
+			("E1", "N1", "N3", 1),
+			("E2", "N2", "N3", 1),
+			("E3", "N3", "N4", 1),
+			("E4", "N4", "N5", 1),
+			("E5", "N6", "N7", 2),
+			("E6", "N7", "N8", 2),
 		]
 
 	def test_single_seed_keeps_only_its_own_upstream(self):
@@ -140,9 +145,12 @@ class ComputeUpstreamOfKeepIdsTests(unittest.TestCase):
 class TrimToUpstreamOfTests(unittest.TestCase):
 	def test_deletes_edges_outside_the_upstream_closure(self):
 		streams_rows = [
-			("E1", "N1", "N3", 1), ("E2", "N2", "N3", 1),
-			("E3", "N3", "N4", 1), ("E4", "N4", "N5", 1),
-			("E5", "N6", "N7", 2), ("E6", "N7", "N8", 2),
+			("E1", "N1", "N3", 1),
+			("E2", "N2", "N3", 1),
+			("E3", "N3", "N4", 1),
+			("E4", "N4", "N5", 1),
+			("E5", "N6", "N7", 2),
+			("E6", "N7", "N8", 2),
 		]
 		cursor = FakeCursor(fetch_results=[[(1,)], streams_rows])
 		lsn.trim_to_upstream_of(cursor, "model_test", ["E3"])

@@ -121,8 +121,12 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 				continue
 
 			species_stats, barrier_rows, route_measures = process_component(
-				graph_id, edges, barriers_by_graph.get(graph_id, []),
-				habitat_by_graph.get(graph_id, []), plan, species_params_by_code,
+				graph_id,
+				edges,
+				barriers_by_graph.get(graph_id, []),
+				habitat_by_graph.get(graph_id, []),
+				plan,
+				species_params_by_code,
 			)
 			all_barrier_rows.extend(barrier_rows)
 			pending_write_rows.extend(build_stats_write_rows(species_stats, route_measures))
@@ -131,13 +135,16 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 			# and a single statement carrying all of them exceeds Postgres's 1GB message limit.
 			if len(pending_write_rows) >= WRITE_BATCH_SIZE:
 				for start in range(0, len(pending_write_rows), WRITE_BATCH_SIZE):
-					flush_stats_writes(cursor, output_schema, pending_write_rows[start:start + WRITE_BATCH_SIZE])
+					flush_stats_writes(cursor, output_schema, pending_write_rows[start : start + WRITE_BATCH_SIZE])
 				pending_write_rows.clear()
 
 			if components_done % 100 == 0 or components_done == total_components:
 				logger.info(
 					"  Processed %d/%d connected component(s) (bundle %d/%d).",
-					components_done, total_components, bundle_num, len(bundles),
+					components_done,
+					total_components,
+					bundle_num,
+					len(bundles),
 				)
 
 	flush_stats_writes(cursor, output_schema, pending_write_rows)

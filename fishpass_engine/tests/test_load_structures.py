@@ -93,10 +93,7 @@ class LoadNaturalFeatureTypesTests(unittest.TestCase):
 
 	def test_reads_configured_list(self):
 		path = self._write_config(
-			"structure_classification:\n"
-			"  natural_feature_types:\n"
-			"    - waterfalls\n"
-			"    - gradients\n"
+			"structure_classification:\n  natural_feature_types:\n    - waterfalls\n    - gradients\n"
 		)
 		self.assertEqual(ls.load_natural_feature_types(path), {"waterfalls", "gradients"})
 
@@ -169,11 +166,16 @@ class ApplyStructureUpdatesOrderingTests(unittest.TestCase):
 		]
 		cursor = FakeCursor(fetch_results=[rows])
 		import load_structures as mod
-		updated = mod.apply_structure_updates(cursor, "model_test", {
-			"structure_update_table": "support.structure_updates",
-			"update_scope": "plan1",
-			"target_species": ["es"],
-		})
+
+		updated = mod.apply_structure_updates(
+			cursor,
+			"model_test",
+			{
+				"structure_update_table": "support.structure_updates",
+				"update_scope": "plan1",
+				"target_species": ["es"],
+			},
+		)
 		self.assertEqual(updated, 1)
 		update_sql, update_params = cursor.executed[-1]
 		self.assertIn("species_passability_value || %s::jsonb", update_sql)
@@ -182,11 +184,15 @@ class ApplyStructureUpdatesOrderingTests(unittest.TestCase):
 
 	def test_no_rows_returns_zero(self):
 		cursor = FakeCursor(fetch_results=[[]])
-		updated = ls.apply_structure_updates(cursor, "model_test", {
-			"structure_update_table": "support.structure_updates",
-			"update_scope": "plan1",
-			"target_species": ["es"],
-		})
+		updated = ls.apply_structure_updates(
+			cursor,
+			"model_test",
+			{
+				"structure_update_table": "support.structure_updates",
+				"update_scope": "plan1",
+				"target_species": ["es"],
+			},
+		)
 		self.assertEqual(updated, 0)
 
 
@@ -256,7 +262,7 @@ class PopulateCabdTableTests(unittest.TestCase):
 		self.assertEqual(count, 1)
 		self.assertEqual(len(cursor.executemany_calls), 1)
 		sql, params = cursor.executemany_calls[0]
-		self.assertIn("INSERT INTO \"model_test\".\"cabd_dams\"", sql)
+		self.assertIn('INSERT INTO "model_test"."cabd_dams"', sql)
 		self.assertNotIn("all_barriers", sql)
 		self.assertEqual(len(params), 1)
 		self.assertEqual(params[0][0], "f1")
@@ -353,13 +359,14 @@ class PopulateFromCabdRawCacheTests(unittest.TestCase):
 		self.assertEqual(cursor.executemany_calls, [])
 		self.assertEqual(conn.commit_count, 1)
 
+
 class CreateCabdTableTests(unittest.TestCase):
 	def test_creates_table_without_source_with_passability_status_code(self):
 		cursor = FakeCursor()
 		ls.create_cabd_table(cursor, "model_test", "dams", 4617)
 		self.assertEqual(len(cursor.executed), 1)
 		sql, _ = cursor.executed[0]
-		self.assertIn("CREATE TABLE \"model_test\".\"cabd_dams\"", sql)
+		self.assertIn('CREATE TABLE "model_test"."cabd_dams"', sql)
 		self.assertNotIn("source", sql)
 		self.assertIn("passability_status_code integer", sql)
 		self.assertNotIn("all_barriers", sql)
@@ -368,6 +375,7 @@ class CreateCabdTableTests(unittest.TestCase):
 		cursor = FakeCursor()
 		with self.assertRaises(SystemExit):
 			ls.create_cabd_table(cursor, "model_test", "dams; DROP TABLE x", 4617)
+
 
 if __name__ == "__main__":
 	unittest.main()

@@ -178,7 +178,9 @@ class PropagateMultiTests(unittest.TestCase):
 		local_values = {eid: {"a": v, "b": v} for eid, v in length.items()}
 		is_reset = {"E1": {"a": True, "b": False}}
 
-		acc = gs.propagate_upstream_with_reset_multi(order_up, predecessors, local_values, is_reset, {"a": 0.0, "b": 0.0})
+		acc = gs.propagate_upstream_with_reset_multi(
+			order_up, predecessors, local_values, is_reset, {"a": 0.0, "b": 0.0}
+		)
 
 		expected_a = gs.propagate_upstream_with_reset(order_up, predecessors, length, {"E1": True})
 		expected_b = gs.propagate_upstream_with_reset(order_up, predecessors, length, {})
@@ -254,8 +256,18 @@ class IsImpassableTests(unittest.TestCase):
 class ComputeBarrierHereTests(unittest.TestCase):
 	def test_classifies_natural_vs_anthropogenic(self):
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 0}, "structure_type": "natural", "id": "b1"},
-			{"edge_id": "E1", "species_passability_value": {"es_rear": 0, "es_spawn": 0}, "structure_type": "anthropogenic", "id": "b2"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
+				"structure_type": "natural",
+				"id": "b1",
+			},
+			{
+				"edge_id": "E1",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
+				"structure_type": "anthropogenic",
+				"id": "b2",
+			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
 		self.assertEqual(result["es"]["natural"]["E3"], 1)
@@ -268,21 +280,36 @@ class ComputeBarrierHereTests(unittest.TestCase):
 
 	def test_passable_barrier_not_counted(self):
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 1, "es_spawn": 1}, "structure_type": "natural", "id": "b1"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 1, "es_spawn": 1},
+				"structure_type": "natural",
+				"id": "b1",
+			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
 		self.assertEqual(result["es"]["natural"]["E3"], 0)
 
 	def test_barrier_outside_component_ignored(self):
 		barriers = [
-			{"edge_id": "not-in-this-component", "species_passability_value": {"es_rear": 0, "es_spawn": 0}, "structure_type": "natural", "id": "b1"},
+			{
+				"edge_id": "not-in-this-component",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
+				"structure_type": "natural",
+				"id": "b1",
+			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
 		self.assertEqual(sum(result["es"]["natural"].values()), 0)
 
 	def test_lifestage_flags_are_independent(self):
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 1}, "structure_type": "natural", "id": "b1"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 1},
+				"structure_type": "natural",
+				"id": "b1",
+			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
 		self.assertEqual(result["es"]["natural_rear"]["E3"], 1)
@@ -302,7 +329,9 @@ class ComputeDownstreamFirstAnthropogenicBarrierPassabilityTests(unittest.TestCa
 		self.edge_ids = [e["id"] for e in self.edges]
 
 	def test_no_barriers_gives_full_passability(self):
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, [], ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, [], ["es"]
+		)
 		for eid in self.edge_ids:
 			self.assertEqual(result["es"]["rear"][eid], 1.0)
 			self.assertEqual(result["es"]["spawn"][eid], 1.0)
@@ -310,9 +339,16 @@ class ComputeDownstreamFirstAnthropogenicBarrierPassabilityTests(unittest.TestCa
 	def test_partial_passability_barrier_degrades_upstream_edges_only(self):
 		# barrier sits at E3's own start, so it's downstream of E1/E2 but not of E3/E4 itself.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.25, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0.25, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b1",
+			},
 		]
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, barriers, ["es"]
+		)
 		self.assertEqual(result["es"]["rear"]["E1"], 0.25)
 		self.assertEqual(result["es"]["rear"]["E2"], 0.25)
 		self.assertEqual(result["es"]["rear"]["E3"], 1.0)
@@ -323,9 +359,16 @@ class ComputeDownstreamFirstAnthropogenicBarrierPassabilityTests(unittest.TestCa
 		# unlike a general "nearest barrier of any type" lookup, a natural barrier is never
 		# considered -- it does not degrade the weighted length, and searching continues past it.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.25, "es_spawn": 0.25}, "structure_type": "natural", "id": "b1"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0.25, "es_spawn": 0.25},
+				"structure_type": "natural",
+				"id": "b1",
+			},
 		]
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, barriers, ["es"]
+		)
 		self.assertEqual(result["es"]["rear"]["E1"], 1.0)
 		self.assertEqual(result["es"]["rear"]["E3"], 1.0)
 
@@ -334,10 +377,22 @@ class ComputeDownstreamFirstAnthropogenicBarrierPassabilityTests(unittest.TestCa
 		# it neither degrades the value nor stops the search -- so a further downstream
 		# anthropogenic barrier with value < 1 supplies the degradation instead.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 1.0, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
-			{"edge_id": "E4", "species_passability_value": {"es_rear": 0.4, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b2"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 1.0, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b1",
+			},
+			{
+				"edge_id": "E4",
+				"species_passability_value": {"es_rear": 0.4, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b2",
+			},
 		]
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, barriers, ["es"]
+		)
 		self.assertEqual(result["es"]["rear"]["E1"], 0.4)
 		self.assertEqual(result["es"]["rear"]["E3"], 0.4)
 
@@ -345,17 +400,31 @@ class ComputeDownstreamFirstAnthropogenicBarrierPassabilityTests(unittest.TestCa
 		barriers = [
 			{"edge_id": "E3", "species_passability_value": {}, "structure_type": "anthropogenic", "id": "b1"},
 		]
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, barriers, ["es"]
+		)
 		self.assertEqual(result["es"]["rear"]["E1"], 0.0)
 
 	def test_only_nearest_downstream_barrier_applies(self):
 		# E1 -> E3 -> E4, barriers at both E3 and E4: E1's nearest downstream barrier is the one at
 		# E3 (0.5) -- the further E4 barrier (0.5) must NOT also be multiplied in.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
-			{"edge_id": "E4", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b2"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b1",
+			},
+			{
+				"edge_id": "E4",
+				"species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b2",
+			},
 		]
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, barriers, ["es"]
+		)
 		self.assertEqual(result["es"]["rear"]["E1"], 0.5)
 		self.assertEqual(result["es"]["rear"]["E3"], 0.5)
 		self.assertEqual(result["es"]["rear"]["E4"], 1.0)
@@ -364,21 +433,50 @@ class ComputeDownstreamFirstAnthropogenicBarrierPassabilityTests(unittest.TestCa
 		# two qualifying (anthropogenic, value < 1) barriers stacked at the same (nearest) edge
 		# still combine by product for that location.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b2"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b1",
+			},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b2",
+			},
 		]
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, barriers, ["es"]
+		)
 		self.assertAlmostEqual(result["es"]["rear"]["E1"], 0.25)
 
 	def test_natural_and_fully_passable_barriers_excluded_from_colocated_product(self):
 		# at the same nearest edge: a natural barrier and a fully-passable anthropogenic barrier
 		# must not contribute to the product -- only the qualifying anthropogenic barrier does.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b1"},
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0.1, "es_spawn": 1.0}, "structure_type": "natural", "id": "b2"},
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 1.0, "es_spawn": 1.0}, "structure_type": "anthropogenic", "id": "b3"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0.5, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b1",
+			},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0.1, "es_spawn": 1.0},
+				"structure_type": "natural",
+				"id": "b2",
+			},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 1.0, "es_spawn": 1.0},
+				"structure_type": "anthropogenic",
+				"id": "b3",
+			},
 		]
-		result = gs.compute_downstream_first_anthropogenic_barrier_passability(self.edge_ids, self.order_down, self.successor, barriers, ["es"])
+		result = gs.compute_downstream_first_anthropogenic_barrier_passability(
+			self.edge_ids, self.order_down, self.successor, barriers, ["es"]
+		)
 		self.assertEqual(result["es"]["rear"]["E1"], 0.5)
 
 
@@ -392,10 +490,17 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 
 	def test_end_to_end_barrier_and_accessibility(self):
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 0}, "structure_type": "anthropogenic", "id": "b1"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
+				"structure_type": "anthropogenic",
+				"id": "b1",
+			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)
-		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
+		stats = gs.compute_barrier_stats(
+			self.order_up, self.order_down, self.predecessors, self.successor, barrier_here
+		)
 
 		self.assertEqual(stats["es"]["downstream_anthro_spawnrear_count"]["E1"], 1)
 		self.assertEqual(stats["es"]["downstream_anthro_spawnrear_count"]["E2"], 1)
@@ -419,11 +524,23 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		# species' fields through one combined pass, this confirms one species' field values
 		# don't bleed into another's within that shared traversal.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 0, "wl_rear": 1, "wl_spawn": 1}, "structure_type": "anthropogenic", "id": "b_es"},
-			{"edge_id": "E1", "species_passability_value": {"es_rear": 1, "es_spawn": 1, "wl_rear": 0, "wl_spawn": 0}, "structure_type": "natural", "id": "b_wl"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 0, "wl_rear": 1, "wl_spawn": 1},
+				"structure_type": "anthropogenic",
+				"id": "b_es",
+			},
+			{
+				"edge_id": "E1",
+				"species_passability_value": {"es_rear": 1, "es_spawn": 1, "wl_rear": 0, "wl_spawn": 0},
+				"structure_type": "natural",
+				"id": "b_wl",
+			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es", "wl"], 1.0)
-		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
+		stats = gs.compute_barrier_stats(
+			self.order_up, self.order_down, self.predecessors, self.successor, barrier_here
+		)
 
 		self.assertEqual(stats["es"]["downstream_anthro_spawnrear_count"]["E1"], 1)
 		self.assertEqual(stats["es"]["downstream_anthro_spawn_ids"]["E1"], ["b_es"])
@@ -440,10 +557,17 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		# spawn_accessibility and rear_accessibility are computed independently: a barrier
 		# impassable only for spawn flips spawn_accessibility but leaves rear_accessibility alone.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 1, "es_spawn": 0}, "structure_type": "natural", "id": "b1"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 1, "es_spawn": 0},
+				"structure_type": "natural",
+				"id": "b1",
+			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)
-		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
+		stats = gs.compute_barrier_stats(
+			self.order_up, self.order_down, self.predecessors, self.successor, barrier_here
+		)
 		accessibility = gs.compute_accessibility(self.edge_ids, stats)
 		self.assertEqual(accessibility["es"]["spawn"]["E1"], gs.ACCESSIBILITY_INACCESSIBLE)
 		self.assertEqual(accessibility["es"]["rear"]["E1"], gs.ACCESSIBILITY_ACCESSIBLE)
@@ -452,10 +576,17 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		# mirror of the spawn-only case: a barrier impassable only for rear now flips
 		# rear_accessibility (unlike the old collapsed single-flag rule) but leaves spawn alone.
 		barriers = [
-			{"edge_id": "E3", "species_passability_value": {"es_rear": 0, "es_spawn": 1}, "structure_type": "natural", "id": "b1"},
+			{
+				"edge_id": "E3",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 1},
+				"structure_type": "natural",
+				"id": "b1",
+			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)
-		stats = gs.compute_barrier_stats(self.order_up, self.order_down, self.predecessors, self.successor, barrier_here)
+		stats = gs.compute_barrier_stats(
+			self.order_up, self.order_down, self.predecessors, self.successor, barrier_here
+		)
 		accessibility = gs.compute_accessibility(self.edge_ids, stats)
 		self.assertEqual(accessibility["es"]["rear"]["E1"], gs.ACCESSIBILITY_INACCESSIBLE)
 		self.assertEqual(accessibility["es"]["spawn"]["E1"], gs.ACCESSIBILITY_ACCESSIBLE)
@@ -466,10 +597,14 @@ class ComputeHabitatAssignmentTests(unittest.TestCase):
 		self.edge_ids = ["E1", "E2"]
 		self.species_params = {
 			"es": {
-				"rear_gradient_min": 0.0, "rear_gradient_max": 5.0,
-				"spawn_gradient_min": 0.0, "spawn_gradient_max": 2.0,
-				"strahler_order_rearing_min": 1, "strahler_order_rearing_max": 4,
-				"strahler_order_spawning_min": 1, "strahler_order_spawning_max": 4,
+				"rear_gradient_min": 0.0,
+				"rear_gradient_max": 5.0,
+				"spawn_gradient_min": 0.0,
+				"spawn_gradient_max": 2.0,
+				"strahler_order_rearing_min": 1,
+				"strahler_order_rearing_max": 4,
+				"strahler_order_spawning_min": 1,
+				"strahler_order_spawning_max": 4,
 			},
 		}
 
@@ -482,7 +617,9 @@ class ComputeHabitatAssignmentTests(unittest.TestCase):
 		}
 		gradient = {"E1": 1.0, "E2": 1.0}
 		strahler = {"E1": 2, "E2": 2}
-		result = gs.compute_habitat_assignment(self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params)
+		result = gs.compute_habitat_assignment(
+			self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params
+		)
 		self.assertTrue(result["es"]["rear"]["E1"])
 		self.assertTrue(result["es"]["spawn"]["E1"])
 
@@ -495,7 +632,9 @@ class ComputeHabitatAssignmentTests(unittest.TestCase):
 		}
 		gradient = {"E1": 1.0, "E2": 1.0}
 		strahler = {"E1": 2, "E2": 2}
-		result = gs.compute_habitat_assignment(self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params)
+		result = gs.compute_habitat_assignment(
+			self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params
+		)
 		self.assertFalse(result["es"]["rear"]["E1"])
 
 	def test_habitat_false_when_gradient_out_of_spawn_range(self):
@@ -507,7 +646,9 @@ class ComputeHabitatAssignmentTests(unittest.TestCase):
 		}
 		gradient = {"E1": 3.0, "E2": 3.0}  # ok for rear (0-5) but not spawn (0-2)
 		strahler = {"E1": 2, "E2": 2}
-		result = gs.compute_habitat_assignment(self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params)
+		result = gs.compute_habitat_assignment(
+			self.edge_ids, ["es"], accessibility, gradient, strahler, self.species_params
+		)
 		self.assertTrue(result["es"]["rear"]["E1"])
 		self.assertFalse(result["es"]["spawn"]["E1"])
 

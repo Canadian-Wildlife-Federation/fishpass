@@ -123,9 +123,7 @@ class LoadModelPlanTests(unittest.TestCase):
 
 	def test_natural_feature_types_override_applied(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(
-				tmp, "myplan", extra_yaml="natural_feature_types_override:\n  - dams\n"
-			)
+			models_dir = write_plan(tmp, "myplan", extra_yaml="natural_feature_types_override:\n  - dams\n")
 			plan = mp.load_model_plan("myplan", models_dir=models_dir)
 		self.assertEqual(plan["natural_feature_types_override"], ["dams"])
 
@@ -137,9 +135,7 @@ class LoadModelPlanTests(unittest.TestCase):
 
 	def test_invalid_natural_feature_types_override_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(
-				tmp, "myplan", extra_yaml="natural_feature_types_override: not_a_list"
-			)
+			models_dir = write_plan(tmp, "myplan", extra_yaml="natural_feature_types_override: not_a_list")
 			with self.assertRaises(SystemExit):
 				mp.load_model_plan("myplan", models_dir=models_dir)
 

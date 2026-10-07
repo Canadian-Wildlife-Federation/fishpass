@@ -28,12 +28,16 @@ def make_edges():
 
 SPECIES_PARAMS = {
 	"es": {
-		"stream_order_1_rearing_weight": 0.5, "stream_order_2_rearing_weight": 0.8,
-		"stream_order_1_spawning_weight": 0.6, "stream_order_2_spawning_weight": 0.9,
+		"stream_order_1_rearing_weight": 0.5,
+		"stream_order_2_rearing_weight": 0.8,
+		"stream_order_1_spawning_weight": 0.6,
+		"stream_order_2_spawning_weight": 0.9,
 	},
 	"wl": {
-		"stream_order_1_rearing_weight": 0.25, "stream_order_2_rearing_weight": None,
-		"stream_order_1_spawning_weight": 0.15, "stream_order_2_spawning_weight": None,
+		"stream_order_1_rearing_weight": 0.25,
+		"stream_order_2_rearing_weight": None,
+		"stream_order_1_spawning_weight": 0.15,
+		"stream_order_2_spawning_weight": None,
 	},
 }
 
@@ -68,8 +72,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 
 	def test_upstream_accessible_length_sums_effective_length(self):
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -80,8 +91,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 
 	def test_upstream_rear_length_all_habitat(self):
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -89,8 +107,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 
 	def test_upstream_spawn_length_excludes_non_habitat_edge(self):
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "spawn")],
 			self.downstream_first_barrier_passability,
 		)
@@ -99,8 +124,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 
 	def test_weighted_length_uses_strahler_order_weight(self):
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -109,8 +141,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 
 	def test_weighted_length_uses_spawning_weight_for_spawn_lifecycle(self):
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "spawn")],
 			self.downstream_first_barrier_passability,
 		)
@@ -122,8 +161,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		# There's no spawnrear stream-order weight, so there's no raw per-edge spawnrear_weighted_length
 		# field -- only rear/spawn get that.
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "spawnrear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -137,8 +183,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		# E2 (order1, not spawn habitat): rear 20*0.5=10, spawn 0 -> max 10
 		# E3 (order2): rear 5*0.8=4, spawn 5*0.9=4.5 -> max 4.5
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "spawnrear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -149,11 +202,21 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		# E3 has predecessors E1/E2, so a barrier there is observable at E4: with a reset,
 		# E4's functional total should only include E3's and E4's own length, not E1/E2's.
 		barrier_here = {
-			"es": {"natural": {eid: 0 for eid in self.edge_ids}, "anthro": {**{eid: 0 for eid in self.edge_ids}, "E3": 1}},
+			"es": {
+				"natural": {eid: 0 for eid in self.edge_ids},
+				"anthro": {**{eid: 0 for eid in self.edge_ids}, "E3": 1},
+			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -164,11 +227,21 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 	def test_functional_length_does_not_reset_at_natural_barrier(self):
 		# Same placement as the anthro case above, but as a natural barrier -- it must not reset.
 		barrier_here = {
-			"es": {"natural": {**{eid: 0 for eid in self.edge_ids}, "E3": 1}, "anthro": {eid: 0 for eid in self.edge_ids}},
+			"es": {
+				"natural": {**{eid: 0 for eid in self.edge_ids}, "E3": 1},
+				"anthro": {eid: 0 for eid in self.edge_ids},
+			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -177,8 +250,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 	def test_weighted_length_masked_by_habitat(self):
 		# E2 is not spawn habitat, so its weighted_length must be zeroed out.
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "spawn")],
 			self.downstream_first_barrier_passability,
 		)
@@ -192,12 +272,22 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		accessibility = {
 			"es": {
 				"spawn": {eid: gs.ACCESSIBILITY_ACCESSIBLE for eid in self.edge_ids},
-				"rear": {**{eid: gs.ACCESSIBILITY_ACCESSIBLE for eid in self.edge_ids}, "E1": gs.ACCESSIBILITY_INACCESSIBLE},
+				"rear": {
+					**{eid: gs.ACCESSIBILITY_ACCESSIBLE for eid in self.edge_ids},
+					"E1": gs.ACCESSIBILITY_INACCESSIBLE,
+				},
 			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -211,13 +301,26 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 		# other's (this is the bug the spawn/rear split fixes: previously both shared one flag).
 		accessibility = {
 			"es": {
-				"spawn": {**{eid: gs.ACCESSIBILITY_ACCESSIBLE for eid in self.edge_ids}, "E1": gs.ACCESSIBILITY_INACCESSIBLE},
-				"rear": {**{eid: gs.ACCESSIBILITY_ACCESSIBLE for eid in self.edge_ids}, "E2": gs.ACCESSIBILITY_INACCESSIBLE},
+				"spawn": {
+					**{eid: gs.ACCESSIBILITY_ACCESSIBLE for eid in self.edge_ids},
+					"E1": gs.ACCESSIBILITY_INACCESSIBLE,
+				},
+				"rear": {
+					**{eid: gs.ACCESSIBILITY_ACCESSIBLE for eid in self.edge_ids},
+					"E2": gs.ACCESSIBILITY_INACCESSIBLE,
+				},
 			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "spawn"), ("es", "rear")],
 			self.downstream_first_barrier_passability,
 		)
@@ -241,8 +344,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			downstream_first_barrier_passability,
 		)
@@ -258,8 +368,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			downstream_first_barrier_passability,
 		)
@@ -281,8 +398,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			downstream_first_barrier_passability,
 		)
@@ -299,8 +423,15 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 			},
 		}
 		result = ls.compute_species_length_stats(
-			self.order_up, self.predecessors, self.edge_ids, self.effective_length, self.strahler_order,
-			self.accessibility, self.habitat, self.barrier_here, SPECIES_PARAMS,
+			self.order_up,
+			self.predecessors,
+			self.edge_ids,
+			self.effective_length,
+			self.strahler_order,
+			self.accessibility,
+			self.habitat,
+			self.barrier_here,
+			SPECIES_PARAMS,
 			[("es", "rear")],
 			downstream_first_barrier_passability,
 		)
@@ -326,7 +457,9 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			"es": {"natural": {"E3": 0}, "anthro": {"E3": 1}},
 		}
 		species_length_stats = {"es": {}}
-		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		result = ls.compute_barrier_upstream_downstream_stats(
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats
+		)
 		# upstream count at E3 was 1 (including this barrier's own self-flag) -> excluding self = 0
 		self.assertEqual(result["b1"]["es"]["upstream_anthro_spawnrear_count"], 0)
 		self.assertEqual(result["b1"]["es"]["downstream_anthro_spawnrear_count"], 0)
@@ -353,7 +486,9 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			"es": {"natural": {"E3": 0}, "anthro": {"E3": 1}},
 		}
 		species_length_stats = {"es": {}}
-		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		result = ls.compute_barrier_upstream_downstream_stats(
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats
+		)
 		self.assertEqual(result["b1"]["es"]["upstream_anthro_spawn_ids"], ["b0"])
 		self.assertEqual(result["b1"]["es"]["upstream_anthro_rear_ids"], ["b0"])
 
@@ -375,17 +510,24 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			"es": {"natural_spawn": {"E3": 1}, "natural_rear": {"E3": 0}},
 		}
 		species_length_stats = {"es": {}}
-		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		result = ls.compute_barrier_upstream_downstream_stats(
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats
+		)
 		# upstream_natural_spawn_count at E3 was 1 (this barrier's own spawn-impassable flag) -> excluding self = 0
 		self.assertEqual(result["b1"]["es"]["upstream_natural_spawn_count"], 0)
 		self.assertEqual(result["b1"]["es"]["upstream_natural_rear_count"], 0)
 		self.assertEqual(result["b1"]["es"]["downstream_natural_spawn_count"], 0)
 
 	def test_length_fields_taken_as_is_at_upstream_edge(self):
-		barriers = [{
-			"id": "b1", "edge_id": "E3", "upstream_edge_id": "E2", "structure_type": "natural",
-			"species_passability_value": {"es_spawn": 0.4, "es_rear": 0.4},
-		}]
+		barriers = [
+			{
+				"id": "b1",
+				"edge_id": "E3",
+				"upstream_edge_id": "E2",
+				"structure_type": "natural",
+				"species_passability_value": {"es_spawn": 0.4, "es_rear": 0.4},
+			}
+		]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},
@@ -411,7 +553,9 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 				"rear_functional_weighted_upstream_length_base": {"E2": 4.0},
 			},
 		}
-		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		result = ls.compute_barrier_upstream_downstream_stats(
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats
+		)
 		self.assertEqual(result["b1"]["es"]["spawn_upstream_accessible_length"], 30.0)
 		self.assertEqual(result["b1"]["es"]["rear_upstream_accessible_length"], 35.0)
 		self.assertEqual(result["b1"]["es"]["rear_upstream_length"], 35.0)
@@ -426,10 +570,15 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		self.assertAlmostEqual(result["b1"]["es"]["rear_functional_weighted_disconnected_upstream_length"], 4.0 * 0.6)
 
 	def test_spawnrear_upstream_length_uses_min_of_spawn_and_rear_passability(self):
-		barriers = [{
-			"id": "b1", "edge_id": "E3", "upstream_edge_id": "E2", "structure_type": "anthropogenic",
-			"species_passability_value": {"es_spawn": 0.7, "es_rear": 0.3},
-		}]
+		barriers = [
+			{
+				"id": "b1",
+				"edge_id": "E3",
+				"upstream_edge_id": "E2",
+				"structure_type": "anthropogenic",
+				"species_passability_value": {"es_spawn": 0.7, "es_rear": 0.3},
+			}
+		]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},
@@ -446,22 +595,36 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			"es": {"natural": {"E3": 0}, "anthro": {"E3": 1}},
 		}
 		species_length_stats = {
-			"es": {"spawnrear_weighted_upstream_length_base": {"E2": 20.0}, "spawnrear_functional_weighted_upstream_length_base": {"E2": 10.0}},
+			"es": {
+				"spawnrear_weighted_upstream_length_base": {"E2": 20.0},
+				"spawnrear_functional_weighted_upstream_length_base": {"E2": 10.0},
+			},
 		}
-		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		result = ls.compute_barrier_upstream_downstream_stats(
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats
+		)
 		# min(0.7, 0.3) = 0.3
 		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_weighted_connected_upstream_length"], 20.0 * 0.3)
 		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_weighted_disconnected_upstream_length"], 20.0 * 0.7)
-		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_functional_weighted_connected_upstream_length"], 10.0 * 0.3)
-		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_functional_weighted_disconnected_upstream_length"], 10.0 * 0.7)
+		self.assertAlmostEqual(
+			result["b1"]["es"]["spawnrear_functional_weighted_connected_upstream_length"], 10.0 * 0.3
+		)
+		self.assertAlmostEqual(
+			result["b1"]["es"]["spawnrear_functional_weighted_disconnected_upstream_length"], 10.0 * 0.7
+		)
 
 	def test_upstream_length_treats_missing_passability_key_as_zero(self):
 		# missing species_lifestage key on this barrier's own species_passability_value is treated
 		# as 0 (full barrier), consistent with is_impassable's "missing = full barrier" convention.
-		barriers = [{
-			"id": "b1", "edge_id": "E3", "upstream_edge_id": "E2", "structure_type": "anthropogenic",
-			"species_passability_value": {},
-		}]
+		barriers = [
+			{
+				"id": "b1",
+				"edge_id": "E3",
+				"upstream_edge_id": "E2",
+				"structure_type": "anthropogenic",
+				"species_passability_value": {},
+			}
+		]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},
@@ -478,17 +641,27 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			"es": {"natural": {"E3": 0}, "anthro": {"E3": 1}},
 		}
 		species_length_stats = {
-			"es": {"rear_weighted_upstream_length_base": {"E2": 19.0}, "rear_functional_weighted_upstream_length_base": {"E2": 4.0}},
+			"es": {
+				"rear_weighted_upstream_length_base": {"E2": 19.0},
+				"rear_functional_weighted_upstream_length_base": {"E2": 4.0},
+			},
 		}
-		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		result = ls.compute_barrier_upstream_downstream_stats(
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats
+		)
 		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_connected_upstream_length"], 0.0)
 		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_disconnected_upstream_length"], 19.0)
 
 	def test_length_fields_none_when_upstream_edge_id_missing(self):
-		barriers = [{
-			"id": "b1", "edge_id": "E3", "upstream_edge_id": None, "structure_type": "natural",
-			"species_passability_value": {"es_rear": 0.4},
-		}]
+		barriers = [
+			{
+				"id": "b1",
+				"edge_id": "E3",
+				"upstream_edge_id": None,
+				"structure_type": "natural",
+				"species_passability_value": {"es_rear": 0.4},
+			}
+		]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},
@@ -511,7 +684,9 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 				"rear_functional_weighted_upstream_length_base": {"E1": 5.0, "E2": 5.0},
 			},
 		}
-		result = ls.compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats)
+		result = ls.compute_barrier_upstream_downstream_stats(
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats
+		)
 		self.assertIsNone(result["b1"]["es"]["rear_upstream_length"])
 		self.assertIsNone(result["b1"]["es"]["rear_weighted_connected_upstream_length"])
 		self.assertIsNone(result["b1"]["es"]["rear_weighted_disconnected_upstream_length"])

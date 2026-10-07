@@ -16,7 +16,6 @@ import logging
 import sys
 from pathlib import Path
 
-import psycopg
 import yaml
 
 from cabd_client import fetch_feature_type, map_passability
@@ -42,6 +41,7 @@ def load_natural_feature_types(config_path=DEFAULT_CLASSIFICATION_CONFIG):
 		data = yaml.safe_load(f) or {}
 	raw = (data.get("structure_classification") or {}).get("natural_feature_types") or []
 	return set(raw)
+
 
 def create_cabd_table(cursor, output_schema, feature_type, srid):
 	"""Create <output_schema>.cabd_<feature_type>, one per plan structure_types entry (the caller
@@ -83,10 +83,7 @@ def create_structures_table(cursor, output_schema, srid):
 			species_stats jsonb
 		);
 	""")
-	cursor.execute(
-		f"CREATE UNIQUE INDEX all_barriers_feature_id_idx ON {schema_ident}.all_barriers (feature_id);"
-	)
-
+	cursor.execute(f"CREATE UNIQUE INDEX all_barriers_feature_id_idx ON {schema_ident}.all_barriers (feature_id);")
 
 
 def _require_passability_object(status, lifestage, row_id):
@@ -96,7 +93,7 @@ def _require_passability_object(status, lifestage, row_id):
 	if not isinstance(status, dict):
 		raise ValueError(
 			f"passability_status_{lifestage} for row {row_id!r} must be a JSON object "
-			f"(e.g. {{\"es\": 0.25}}), got {status!r}"
+			f'(e.g. {{"es": 0.25}}), got {status!r}'
 		)
 
 
@@ -148,9 +145,7 @@ def build_cabd_row(feature, target_species):
 	passability_status_code = props.get("passability_status_code")
 	lon, lat = feature["geometry"]["coordinates"][:2]
 	value = map_passability(passability_status_code)
-	species_passability_value = {
-		f"{sp}_{lc}": value for sp in target_species for lc in STRUCTURE_LIFESTAGES
-	}
+	species_passability_value = {f"{sp}_{lc}": value for sp in target_species for lc in STRUCTURE_LIFESTAGES}
 	return (cabd_id, json.dumps(species_passability_value), passability_status_code, lon, lat)
 
 
@@ -256,7 +251,7 @@ def load_new_structures(cursor, output_schema, plan, srid):
 		insert_rows.append((new_structure_id, feature_type, json.dumps(species_map), bytes(point_wkb)))
 
 	schema_ident = quote_ident(output_schema)
-	
+
 	cursor.executemany(
 		f"""
 		INSERT INTO {schema_ident}.all_barriers
@@ -264,7 +259,7 @@ def load_new_structures(cursor, output_schema, plan, srid):
 		VALUES (%s, %s, %s::jsonb, 'new_structure', ST_SetSRID(ST_GeomFromWKB(%s), {srid}))
 		ON CONFLICT (feature_id) DO NOTHING
 		""",
-		insert_rows
+		insert_rows,
 	)
 	return len(insert_rows)
 
@@ -337,8 +332,8 @@ def add_gradient_barriers(cursor, output_schema, plan, srid):
 		return 0
 
 	cursor.execute(
-    	f"SELECT id, actual_species, ST_AsBinary(geometry) FROM {table_ident} WHERE workunit && %s::varchar[]",
-    	(short_names,),
+		f"SELECT id, actual_species, ST_AsBinary(geometry) FROM {table_ident} WHERE workunit && %s::varchar[]",
+		(short_names,),
 	)
 	rows = cursor.fetchall()
 	if not rows:
@@ -350,7 +345,7 @@ def add_gradient_barriers(cursor, output_schema, plan, srid):
 	]
 
 	schema_ident = quote_ident(output_schema)
-	
+
 	cursor.executemany(
 		f"""
 		INSERT INTO {schema_ident}.all_barriers
@@ -358,7 +353,7 @@ def add_gradient_barriers(cursor, output_schema, plan, srid):
 		VALUES (%s, 'gradients', %s::jsonb, 'gradient_barriers', ST_SetSRID(ST_GeomFromWKB(%s), {srid}))
 		ON CONFLICT (feature_id) DO NOTHING
 		""",
-		insert_rows
+		insert_rows,
 	)
 	return len(insert_rows)
 

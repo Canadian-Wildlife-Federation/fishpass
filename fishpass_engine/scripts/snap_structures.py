@@ -10,7 +10,6 @@ point snapping -- see network_snap.py.
 
 import logging
 
-import psycopg
 
 from db import quote_ident
 from network_snap import linestring_zm_wkb, point_xyzm, snap_points_to_edge
@@ -107,11 +106,17 @@ def snap_structures(conn, cursor, plan, srid):
 	edge_distance_m = plan["structure_snap_edge_distance_m"]
 	vertex_distance_m = plan["structure_snap_vertex_distance_m"]
 
-    # create necessary indexes to improve performance
-	#do this here after the data is loaded so data loading isn't affected
-	cursor.execute(f"CREATE INDEX all_barriers_geometry_idx ON {quote_ident(output_schema)}.all_barriers USING gist (geometry);")
-	cursor.execute(f"CREATE INDEX all_barriers_geometry_geog_idx ON {quote_ident(output_schema)}.all_barriers USING gist((geometry::geography))")
-	cursor.execute(f"CREATE INDEX streams_geometry_geog_idx ON {quote_ident(output_schema)}.streams USING gist((geometry::geography))")
+	# create necessary indexes to improve performance
+	# do this here after the data is loaded so data loading isn't affected
+	cursor.execute(
+		f"CREATE INDEX all_barriers_geometry_idx ON {quote_ident(output_schema)}.all_barriers USING gist (geometry);"
+	)
+	cursor.execute(
+		f"CREATE INDEX all_barriers_geometry_geog_idx ON {quote_ident(output_schema)}.all_barriers USING gist((geometry::geography))"
+	)
+	cursor.execute(
+		f"CREATE INDEX streams_geometry_geog_idx ON {quote_ident(output_schema)}.streams USING gist((geometry::geography))"
+	)
 
 	conn.commit()
 
@@ -151,8 +156,12 @@ def snap_structures(conn, cursor, plan, srid):
 	unmatched_count = total_unsnapped - snapped_count
 
 	# create after the data is loaded so data loading isn't affected
-	cursor.execute(f"CREATE INDEX all_barriers_downstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (downstream_edge_id);")
-	cursor.execute(f"CREATE INDEX all_barriers_upstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (upstream_edge_id);")
+	cursor.execute(
+		f"CREATE INDEX all_barriers_downstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (downstream_edge_id);"
+	)
+	cursor.execute(
+		f"CREATE INDEX all_barriers_upstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (upstream_edge_id);"
+	)
 
 	conn.commit()
 

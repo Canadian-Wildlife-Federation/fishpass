@@ -26,12 +26,12 @@ def parse_species_lifestage(entry):
 	rest = entry
 	if rest.startswith("not_"):
 		flag = False
-		rest = rest[len("not_"):]
+		rest = rest[len("not_") :]
 
 	for lifecycle in LIFECYCLES:
 		suffix = f"_{lifecycle}"
 		if rest.endswith(suffix):
-			return rest[:-len(suffix)], [lifecycle], flag
+			return rest[: -len(suffix)], [lifecycle], flag
 
 	return rest, list(LIFECYCLES), flag
 

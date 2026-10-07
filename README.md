@@ -21,3 +21,30 @@ The pipeline has three components, run in order:
    habitat, and upstream-length statistics. It then ranks barriers per species/lifecycle and
    rebuilds the plan's WCRP combined output view. Requires chyf_loader (and gradient_barriers,
    if the plan uses gradient barriers) to have already run.
+
+## Development
+
+Code formatting and linting are handled by [ruff](https://docs.astral.sh/ruff/), pinned in
+`pyproject.toml`. Install it with:
+
+```bash
+pip install --group dev
+```
+
+(requires pip 25.1+; on an older pip, install the pinned version directly with
+`pip install ruff==0.16.8` instead).
+
+Then, from the repo root:
+
+```bash
+ruff format .   # format all files
+ruff check .    # lint all files
+```
+
+A [pre-commit](https://pre-commit.com/) hook is configured to run both automatically on
+`git commit`, only against staged files. After installing the dev dependencies, enable it once
+per clone with:
+
+```bash
+pre-commit install
+```
