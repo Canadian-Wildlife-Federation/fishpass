@@ -21,6 +21,22 @@ SPECIES_LIFECYCLE_WEIGHTED_FIELDS = (
 	"weighted_connected_upstream_length", "weighted_disconnected_upstream_length",
 	"functional_weighted_connected_upstream_length", "functional_weighted_disconnected_upstream_length",
 )
+# Accessible-length fields, written for both spawn and rear for every target species
+# (independent of the plan's reporting_values).
+SPECIES_LENGTH_FIELDS = ("spawn_upstream_accessible_length", "rear_upstream_accessible_length")
+
+
+def barrier_length_fields(lifecycles):
+	"""Every length column (metres) on an anthropogenic_barriers_<species> /
+	natural_barriers_<species> view for a species reporting the given lifecycles, in view
+	column order: SPECIES_LENGTH_FIELDS, then <lc>_<field> for each lifecycle (sorted).
+	Single source of truth for these names -- rank_barriers.py and create_combined_view.py
+	derive their length columns from here too."""
+	fields = list(SPECIES_LENGTH_FIELDS)
+	for lc in sorted(lifecycles):
+		for field in SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS:
+			fields.append(f"{lc}_{field}")
+	return fields
 
 
 def _species_by_lifecycle_map(reporting_species_lifecycles):
@@ -78,12 +94,8 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'{field}'))::uuid[] AS {field}"
 			for field in BARRIER_STAT_ID_FIELDS
 		]
-		columns.append(f"({stats}->>'spawn_upstream_accessible_length')::double precision AS spawn_upstream_accessible_length")
-		columns.append(f"({stats}->>'rear_upstream_accessible_length')::double precision AS rear_upstream_accessible_length")
-		for lc in sorted(lifecycles):
-			for field in SPECIES_LIFECYCLE_FIELDS + SPECIES_LIFECYCLE_WEIGHTED_FIELDS:
-				column_name = f"{lc}_{field}"
-				columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
+		for column_name in barrier_length_fields(lifecycles):
+			columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
 		column_sql = ",\n\t\t\t".join(columns)
 
 		for table_prefix, structure_type in (("natural_barriers", "natural"), ("anthropogenic_barriers", "anthropogenic")):
