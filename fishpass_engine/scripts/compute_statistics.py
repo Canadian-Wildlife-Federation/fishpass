@@ -22,6 +22,10 @@ from graph_component import (
 	flush_stats_writes,
 	process_component,
 )
+from load_stream_network import (
+	create_streams_bulk_write_indexes,
+	drop_streams_bulk_write_indexes,
+)
 from network_break import break_network
 from species_params import load_species_params
 
@@ -45,7 +49,9 @@ def compute_effective_length_and_gradient(cursor, output_schema):
 	Step 4 (segment_gradient): (upstream_elevation - downstream_elevation) / length, where
 	"elevation" is the smoothed elevation stored in each vertex's M ordinate (same convention as
 	gradient_barriers), read from the segment's own first (upstream) and last (downstream)
-	vertex. NULL if length is 0 or either endpoint's M is missing (the NO_DATA sentinel or NaN)."""
+	vertex. NULL if length is 0 or either endpoint's M is missing (the NO_DATA sentinel or NaN).
+	Each endpoint is read once (NULLIF turns NO_DATA into NULL, which then propagates through the
+	subtraction) -- every extra reference to the geometry is another detoast per row."""
 
 	schema_ident = quote_ident(output_schema)
 
@@ -75,11 +81,10 @@ def compute_effective_length_and_gradient(cursor, output_schema):
 			END,
 			segment_gradient = CASE
 				WHEN s.length > 0
-					AND ST_M(ST_PointN(s.geometry, 1)) IS NOT NULL
-					AND ST_M(ST_PointN(s.geometry, 1)) != {NO_DATA}
-					AND ST_M(ST_PointN(s.geometry, ST_NPoints(s.geometry))) IS NOT NULL
-					AND ST_M(ST_PointN(s.geometry, ST_NPoints(s.geometry))) != {NO_DATA}
-				THEN (ST_M(ST_PointN(s.geometry, 1)) - ST_M(ST_PointN(s.geometry, ST_NPoints(s.geometry)))) / s.length
+				THEN (
+					NULLIF(ST_M(ST_StartPoint(s.geometry)), {NO_DATA})
+					- NULLIF(ST_M(ST_EndPoint(s.geometry)), {NO_DATA})
+				) / s.length
 				ELSE NULL
 			END
 		FROM best_mainstem_by_row r
@@ -150,6 +155,10 @@ def compute_statistics(conn, cursor, plan, srid):
 	# Step 1 (Load the stream network) -- <output_schema>.streams already holds the working
 	# network from Load Stream Network/Load Structures/Process Habitat; nothing to do here.
 
+	# Steps 2-9 rewrite every streams row (twice); see drop_streams_bulk_write_indexes.
+	drop_streams_bulk_write_indexes(cursor, output_schema)
+	conn.commit()
+
 	logger.info("Break Network")
 	new_segments = break_network(conn, cursor, plan, srid)  # step 2
 	logger.info("Break Network - done: %d new segment(s).", new_segments)
@@ -164,6 +173,11 @@ def compute_statistics(conn, cursor, plan, srid):
 	barrier_rows = run_component_statistics(cursor, output_schema, plan, species_params_by_code)  # steps 5-9
 	conn.commit()
 	logger.info("Compute Edge Statistics - done: (%d barrier(s) processed).", len(barrier_rows))
+
+	logger.info("Rebuilding streams indexes")
+	create_streams_bulk_write_indexes(cursor, output_schema)
+	conn.commit()
+	logger.info("Rebuilding streams indexes - done.")
 
 	logger.info("Writing barrier stat tables")
 	write_barrier_stat_tables(cursor, output_schema, barrier_rows)
