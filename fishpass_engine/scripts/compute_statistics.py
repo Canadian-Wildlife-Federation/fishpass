@@ -122,8 +122,11 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 			all_barrier_rows.extend(barrier_rows)
 			pending_write_rows.extend(build_stats_write_rows(species_stats, route_measures))
 
+			# Sliced rather than flushed whole: one component can add millions of rows at once,
+			# and a single statement carrying all of them exceeds Postgres's 1GB message limit.
 			if len(pending_write_rows) >= WRITE_BATCH_SIZE:
-				flush_stats_writes(cursor, output_schema, pending_write_rows)
+				for start in range(0, len(pending_write_rows), WRITE_BATCH_SIZE):
+					flush_stats_writes(cursor, output_schema, pending_write_rows[start:start + WRITE_BATCH_SIZE])
 				pending_write_rows.clear()
 
 			if components_done % 100 == 0 or components_done == total_components:
