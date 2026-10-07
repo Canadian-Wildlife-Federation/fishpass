@@ -75,10 +75,14 @@ def require_env():
 
 def target_conn_args():
 	return [
-		"-h", os.environ["FISHPASS_HOST"],
-		"-p", os.environ["FISHPASS_PORT"],
-		"-d", os.environ["FISHPASS_DBNAME"],
-		"-U", os.environ["FISHPASS_USER"],
+		"-h",
+		os.environ["FISHPASS_HOST"],
+		"-p",
+		os.environ["FISHPASS_PORT"],
+		"-d",
+		os.environ["FISHPASS_DBNAME"],
+		"-U",
+		os.environ["FISHPASS_USER"],
 	]
 
 
@@ -98,8 +102,7 @@ def schema_var_args(schema_vars):
 def resolve_workunit_ids(short_names, dry_run, schema_vars):
 	names_literal = "{" + ",".join(short_names) + "}"
 	query = (
-		"SELECT coalesce(array_agg(id), '{}') FROM :source_aoi_table "
-		"WHERE short_name = ANY(:'short_names'::varchar[]);"
+		"SELECT coalesce(array_agg(id), '{}') FROM :source_aoi_table WHERE short_name = ANY(:'short_names'::varchar[]);"
 	)
 
 	if dry_run:
@@ -108,9 +111,7 @@ def resolve_workunit_ids(short_names, dry_run, schema_vars):
 
 	# psql on this environment does not interpolate :variables when the SQL is
 	# passed via -c, only when read from a file via -f, so write it to a temp file.
-	with tempfile.NamedTemporaryFile(
-		mode="w", suffix=".sql", delete=False
-	) as query_file:
+	with tempfile.NamedTemporaryFile(mode="w", suffix=".sql", delete=False) as query_file:
 		query_file.write(query)
 		query_path = query_file.name
 
@@ -119,14 +120,17 @@ def resolve_workunit_ids(short_names, dry_run, schema_vars):
 			"psql",
 			*target_conn_args(),
 			*schema_var_args(schema_vars),
-			"-v", f"short_names={names_literal}",
-			"-t", "-A",
-			"-f", query_path,
+			"-v",
+			f"short_names={names_literal}",
+			"-t",
+			"-A",
+			"-f",
+			query_path,
 		]
 		if logger.isEnabledFor(logging.DEBUG):
-			resolved_query = query.replace(
-				":source_aoi_table", schema_vars["source_aoi_table"]
-			).replace(":'short_names'", f"'{names_literal}'")
+			resolved_query = query.replace(":source_aoi_table", schema_vars["source_aoi_table"]).replace(
+				":'short_names'", f"'{names_literal}'"
+			)
 			logger.debug("Resolving workunit ids with query:\n%s", resolved_query)
 			logger.debug("Command: %s", " ".join(cmd))
 
@@ -158,10 +162,13 @@ def run_reload_sql(workunit_ids, dry_run, schema_vars):
 		cmd = [
 			"psql",
 			*target_conn_args(),
-			"-v", "ON_ERROR_STOP=1",
-			"-v", f"workunit_ids={workunit_ids_literal}",
+			"-v",
+			"ON_ERROR_STOP=1",
+			"-v",
+			f"workunit_ids={workunit_ids_literal}",
 			*schema_var_args(schema_vars),
-			"-f", str(sql_file),
+			"-f",
+			str(sql_file),
 		]
 		if dry_run:
 			logger.info("[dry-run] would run: %s", " ".join(cmd))

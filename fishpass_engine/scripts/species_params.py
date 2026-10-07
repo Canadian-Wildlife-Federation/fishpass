@@ -1,5 +1,4 @@
-"""Load the fish species parameter file (docs/fish_species_parameter_file.md).
-"""
+"""Load the fish species parameter file (docs/fish_species_parameter_file.md)."""
 
 import sys
 from pathlib import Path
@@ -82,7 +81,7 @@ def habitat_strahler_ok(params, lifecycle, strahler_order):
 
 
 def stream_order_weight(params, lifecycle, strahler_order):
-	"""Weighted-length multiplier for strahler_order (used in compute statistics): 
+	"""Weighted-length multiplier for strahler_order (used in compute statistics):
 	stream_order_{1,2}_{spawning,rearing}_weight from the species
 	parameter file for orders 1 and 2, 1.0 (no downweighting) for every order >= 3. lifecycle
 	must be "rear" or "spawn" -- weighted length is not computed for "spawnrear"."""

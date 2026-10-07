@@ -169,10 +169,7 @@ def propagate_downstream_multi(order_down, successor, local_values, zeros):
 			continue
 		succ_acc = acc[succ]
 		succ_values = local_values.get(succ, {})
-		acc[edge_id] = {
-			field: succ_acc[field] + succ_values.get(field, zero)
-			for field, zero in zeros.items()
-		}
+		acc[edge_id] = {field: succ_acc[field] + succ_values.get(field, zero) for field, zero in zeros.items()}
 	return acc
 
 
@@ -218,11 +215,10 @@ def compute_route_measures(edges_by_id, predecessors, successor):
 
 	result = {}
 	mouths = [
-		eid for eid, e in edges_by_id.items()
-		if e["mainstem_id"] is not None and (
-			successor.get(eid) is None
-			or edges_by_id[successor[eid]]["mainstem_id"] != e["mainstem_id"]
-		)
+		eid
+		for eid, e in edges_by_id.items()
+		if e["mainstem_id"] is not None
+		and (successor.get(eid) is None or edges_by_id[successor[eid]]["mainstem_id"] != e["mainstem_id"])
 	]
 	for mouth in mouths:
 		mainstem_id = edges_by_id[mouth]["mainstem_id"]
@@ -282,12 +278,10 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 	result = {}
 	for species in species_list:
 		lifestage_flags = {
-			f"{struct}_{lc}": {eid: 0 for eid in edge_ids}
-			for struct in ("natural", "anthro") for lc in LIFESTAGES
+			f"{struct}_{lc}": {eid: 0 for eid in edge_ids} for struct in ("natural", "anthro") for lc in LIFESTAGES
 		}
 		lifestage_ids = {
-			f"{struct}_{lc}_ids": {eid: [] for eid in edge_ids}
-			for struct in ("natural", "anthro") for lc in LIFESTAGES
+			f"{struct}_{lc}_ids": {eid: [] for eid in edge_ids} for struct in ("natural", "anthro") for lc in LIFESTAGES
 		}
 
 		for b in barriers:
@@ -300,12 +294,20 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 					lifestage_flags[f"{struct}_{lc}"][eid] = 1
 					lifestage_ids[f"{struct}_{lc}_ids"][eid].append(b["id"])
 
-		natural = {eid: int(bool(lifestage_flags["natural_spawn"][eid] or lifestage_flags["natural_rear"][eid])) for eid in edge_ids}
-		anthro = {eid: int(bool(lifestage_flags["anthro_spawn"][eid] or lifestage_flags["anthro_rear"][eid])) for eid in edge_ids}
+		natural = {
+			eid: int(bool(lifestage_flags["natural_spawn"][eid] or lifestage_flags["natural_rear"][eid]))
+			for eid in edge_ids
+		}
+		anthro = {
+			eid: int(bool(lifestage_flags["anthro_spawn"][eid] or lifestage_flags["anthro_rear"][eid]))
+			for eid in edge_ids
+		}
 
 		result[species] = {
-			"natural": natural, "anthro": anthro,
-			**lifestage_flags, **lifestage_ids,
+			"natural": natural,
+			"anthro": anthro,
+			**lifestage_flags,
+			**lifestage_ids,
 		}
 	return result
 
@@ -366,12 +368,22 @@ def compute_barrier_stats(order_up, order_down, predecessors, successor, barrier
 	for species in barrier_here_by_species:
 		species_stats = {}
 		for lc in LIFESTAGES:
-			species_stats[f"upstream_anthro_{lc}_ids"] = {eid: v[f"{species}:upstream_anthro_{lc}_ids"] for eid, v in up_acc.items()}
-			species_stats[f"downstream_anthro_{lc}_ids"] = {eid: v[f"{species}:downstream_anthro_{lc}_ids"] for eid, v in down_acc.items()}
-			species_stats[f"downstream_natural_{lc}_ids"] = {eid: v[f"{species}:downstream_natural_{lc}_ids"] for eid, v in down_acc.items()}
+			species_stats[f"upstream_anthro_{lc}_ids"] = {
+				eid: v[f"{species}:upstream_anthro_{lc}_ids"] for eid, v in up_acc.items()
+			}
+			species_stats[f"downstream_anthro_{lc}_ids"] = {
+				eid: v[f"{species}:downstream_anthro_{lc}_ids"] for eid, v in down_acc.items()
+			}
+			species_stats[f"downstream_natural_{lc}_ids"] = {
+				eid: v[f"{species}:downstream_natural_{lc}_ids"] for eid, v in down_acc.items()
+			}
 		for _data_key, count_key in count_keys:
-			species_stats[f"upstream_{count_key}_count"] = {eid: v[f"{species}:upstream_{count_key}_count"] for eid, v in up_acc.items()}
-			species_stats[f"downstream_{count_key}_count"] = {eid: v[f"{species}:downstream_{count_key}_count"] for eid, v in down_acc.items()}
+			species_stats[f"upstream_{count_key}_count"] = {
+				eid: v[f"{species}:upstream_{count_key}_count"] for eid, v in up_acc.items()
+			}
+			species_stats[f"downstream_{count_key}_count"] = {
+				eid: v[f"{species}:downstream_{count_key}_count"] for eid, v in down_acc.items()
+			}
 		stats[species] = species_stats
 	return stats
 
@@ -415,10 +427,7 @@ def compute_downstream_first_anthropogenic_barrier_passability(edge_ids, order_d
 		if succ is None:
 			acc[eid] = dict(ones)
 		else:
-			acc[eid] = {
-				key: local_by_edge[succ][key] if qualifies[succ][key] else acc[succ][key]
-				for key in keys
-			}
+			acc[eid] = {key: local_by_edge[succ][key] if qualifies[succ][key] else acc[succ][key] for key in keys}
 
 	result = {species: {lifestage: {} for lifestage in LIFESTAGES} for species in species_list}
 	for eid, values in acc.items():
@@ -444,13 +453,23 @@ def compute_accessibility(edge_ids, barrier_stats):
 		spawn = {}
 		rear = {}
 		for eid in edge_ids:
-			spawn[eid] = ACCESSIBILITY_ACCESSIBLE if stats["downstream_natural_spawn_count"][eid] == 0 else ACCESSIBILITY_INACCESSIBLE
-			rear[eid] = ACCESSIBILITY_ACCESSIBLE if stats["downstream_natural_rear_count"][eid] == 0 else ACCESSIBILITY_INACCESSIBLE
+			spawn[eid] = (
+				ACCESSIBILITY_ACCESSIBLE
+				if stats["downstream_natural_spawn_count"][eid] == 0
+				else ACCESSIBILITY_INACCESSIBLE
+			)
+			rear[eid] = (
+				ACCESSIBILITY_ACCESSIBLE
+				if stats["downstream_natural_rear_count"][eid] == 0
+				else ACCESSIBILITY_INACCESSIBLE
+			)
 		result[species] = {"spawn": spawn, "rear": rear}
 	return result
 
 
-def compute_habitat_assignment(edge_ids, species_list, accessibility, edge_gradient, edge_strahler, species_params_by_code):
+def compute_habitat_assignment(
+	edge_ids, species_list, accessibility, edge_gradient, edge_strahler, species_params_by_code
+):
 	"""Compute Statistics step 7. edge_gradient/edge_strahler:
 	{edge_id: value or None}. accessibility is compute_accessibility's output -- rear habitat gates
 	on accessibility[species]["rear"], spawn habitat gates on accessibility[species]["spawn"],
@@ -468,9 +487,15 @@ def compute_habitat_assignment(edge_ids, species_list, accessibility, edge_gradi
 			spawn_accessible = accessibility[species]["spawn"][eid] == ACCESSIBILITY_ACCESSIBLE
 			gradient = edge_gradient.get(eid)
 			strahler = edge_strahler.get(eid)
-			rear[eid] = rear_accessible and sp_mod.habitat_gradient_ok(params, "rear", gradient) and \
-				sp_mod.habitat_strahler_ok(params, "rear", strahler)
-			spawn[eid] = spawn_accessible and sp_mod.habitat_gradient_ok(params, "spawn", gradient) and \
-				sp_mod.habitat_strahler_ok(params, "spawn", strahler)
+			rear[eid] = (
+				rear_accessible
+				and sp_mod.habitat_gradient_ok(params, "rear", gradient)
+				and sp_mod.habitat_strahler_ok(params, "rear", strahler)
+			)
+			spawn[eid] = (
+				spawn_accessible
+				and sp_mod.habitat_gradient_ok(params, "spawn", gradient)
+				and sp_mod.habitat_strahler_ok(params, "spawn", strahler)
+			)
 		result[species] = {"rear": rear, "spawn": spawn}
 	return result

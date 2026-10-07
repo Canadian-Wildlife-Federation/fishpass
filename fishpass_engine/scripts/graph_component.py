@@ -9,7 +9,6 @@ here are only whatever falls inside the requested AOI(s) during load stream netw
 
 import json
 
-import psycopg
 
 from db import quote_ident
 from graph_stats import (
@@ -30,8 +29,14 @@ from length_stats import (
 )
 
 STREAM_STAT_FIELDS = (
-	"id", "from_nexus_id", "to_nexus_id", "mainstem_id",
-	"length", "effective_length", "segment_gradient", "strahler_order",
+	"id",
+	"from_nexus_id",
+	"to_nexus_id",
+	"mainstem_id",
+	"length",
+	"effective_length",
+	"segment_gradient",
+	"strahler_order",
 )
 
 
@@ -107,8 +112,11 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 	for graph_id, *row in cursor.fetchall():
 		by_graph.setdefault(graph_id, []).append(
 			{
-				"id": row[0], "edge_id": row[1], "upstream_edge_id": row[2],
-				"species_passability_value": row[3], "structure_type": row[4],
+				"id": row[0],
+				"edge_id": row[1],
+				"upstream_edge_id": row[2],
+				"species_passability_value": row[3],
+				"structure_type": row[4],
 			}
 		)
 	return by_graph
@@ -136,15 +144,20 @@ def fetch_bundle_habitat_updates(cursor, output_schema, graph_ids):
 	by_graph = {}
 	for up_graph_id, down_graph_id, *row in cursor.fetchall():
 		update = {
-			"id": row[0], "species_lifestage": row[1], "location_type": row[2],
-			"upstream_snapped_edge_id": row[3], "downstream_snapped_edge_id": row[4],
+			"id": row[0],
+			"species_lifestage": row[1],
+			"location_type": row[2],
+			"upstream_snapped_edge_id": row[3],
+			"downstream_snapped_edge_id": row[4],
 		}
 		for graph_id in {up_graph_id, down_graph_id} - {None}:
 			by_graph.setdefault(graph_id, []).append(update)
 	return by_graph
 
 
-def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats):
+def assemble_edge_json(
+	edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats
+):
 	"""Returns species_stats, {edge_id: {...}} ready for json.dumps, matching the
 	Outputs section fields for <output_schema>.streams. Upstream length fields (accessible
 	length, and per-lifecycle upstream/functional upstream/weighted upstream length aggregates)
@@ -186,8 +199,12 @@ def assemble_edge_json(edge_ids, reporting_species_lifecycles, accessibility, ba
 			for lc in ("rear", "spawn"):
 				if lc in lifecycles:
 					s[f"{lc}_weighted_length"] = species_length_stats[species][f"{lc}_weighted_length"][eid]
-					s[f"{lc}_weighted_connected_length"] = species_length_stats[species][f"{lc}_weighted_connected_length"][eid]
-					s[f"{lc}_weighted_disconnected_length"] = species_length_stats[species][f"{lc}_weighted_disconnected_length"][eid]
+					s[f"{lc}_weighted_connected_length"] = species_length_stats[species][
+						f"{lc}_weighted_connected_length"
+					][eid]
+					s[f"{lc}_weighted_disconnected_length"] = species_length_stats[species][
+						f"{lc}_weighted_disconnected_length"
+					][eid]
 			entry[species] = s
 		species_stats[eid] = entry
 
@@ -257,24 +274,45 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 
 	edge_gradient = {eid: edges_by_id[eid]["segment_gradient"] for eid in edge_ids}
 	edge_strahler = {eid: edges_by_id[eid]["strahler_order"] for eid in edge_ids}
-	habitat = compute_habitat_assignment(edge_ids, species_list, accessibility, edge_gradient, edge_strahler, species_params_by_code)
+	habitat = compute_habitat_assignment(
+		edge_ids, species_list, accessibility, edge_gradient, edge_strahler, species_params_by_code
+	)
 
 	apply_habitat_access_overrides(habitat, edges_by_id, predecessors, successor, habitat_rows)
 	derive_spawnrear_habitat(habitat)
 
 	effective_length = {eid: edges_by_id[eid]["effective_length"] for eid in edge_ids}
 	downstream_first_barrier_passability = compute_downstream_first_anthropogenic_barrier_passability(
-		edge_ids, order_down, successor, barriers, species_list,
+		edge_ids,
+		order_down,
+		successor,
+		barriers,
+		species_list,
 	)
 	species_length_stats = compute_species_length_stats(
-		order_up, predecessors, edge_ids, effective_length, edge_strahler,
-		accessibility, habitat, barrier_here, species_params_by_code,
-		reporting_species_lifecycles, downstream_first_barrier_passability,
+		order_up,
+		predecessors,
+		edge_ids,
+		effective_length,
+		edge_strahler,
+		accessibility,
+		habitat,
+		barrier_here,
+		species_params_by_code,
+		reporting_species_lifecycles,
+		downstream_first_barrier_passability,
 	)
 	species_stats_json = assemble_edge_json(
-		edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats,
+		edge_ids,
+		reporting_species_lifecycles,
+		accessibility,
+		barrier_stats,
+		habitat,
+		species_length_stats,
 	)
 
-	barrier_stats_by_id = compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here, species_length_stats)
+	barrier_stats_by_id = compute_barrier_upstream_downstream_stats(
+		barriers, barrier_stats, barrier_here, species_length_stats
+	)
 	barrier_rows = [{**b, "stats": barrier_stats_by_id[b["id"]]} for b in barriers]
 	return species_stats_json, barrier_rows, route_measures

@@ -17,7 +17,6 @@ vertices, and each edge's geometry is only written back to the database once.
 import logging
 import sys
 
-import psycopg
 import shapely
 
 from db import quote_ident, quote_qualified_ident
@@ -54,9 +53,7 @@ def create_habitat_updates_table(cursor, output_schema, srid):
 			downstream_snapped_point geometry(point, {srid})
 		);
 	""")
-	cursor.execute(
-		f"CREATE INDEX habitat_updates_points_idx ON {schema_ident}.habitat_updates USING gist (points);"
-	)
+	cursor.execute(f"CREATE INDEX habitat_updates_points_idx ON {schema_ident}.habitat_updates USING gist (points);")
 
 
 def load_habitat_updates_rows(cursor, output_schema, plan):
@@ -171,7 +168,9 @@ def snap_to_edge(cursor, output_schema, edge_cache, edge_id, edge_wkb, closest_p
 	return edge_id, (x, y, z, m)
 
 
-def resolve_point(cursor, output_schema, edge_cache, srid, xy, edge_distance_m, vertex_distance_m, specific_edge_id, end, habitat_id):
+def resolve_point(
+	cursor, output_schema, edge_cache, srid, xy, edge_distance_m, vertex_distance_m, specific_edge_id, end, habitat_id
+):
 	"""Resolve one habitat point (upstream or downstream role, `end`) to (edge_id, (x, y, z, m)).
 
 	If specific_edge_id is given, the point is projected onto that edge and must be within
@@ -188,17 +187,17 @@ def resolve_point(cursor, output_schema, edge_cache, srid, xy, edge_distance_m, 
 	if specific_edge_id is not None:
 		found = find_edge_by_id(cursor, output_schema, specific_edge_id, xy, srid)
 		if found is None:
-			sys.exit(f"chyf_{end}_edge_id {specific_edge_id} not found in {output_schema}.streams"
-				f"\n***STOPPING***"
-			)
+			sys.exit(f"chyf_{end}_edge_id {specific_edge_id} not found in {output_schema}.streams\n***STOPPING***")
 		edge_wkb, closest_point_wkb, dist = found
 		if dist > edge_distance_m:
-			sys.exit(				
+			sys.exit(
 				f"Habitat {end} point {habitat_id} is {dist:.1f}m from chyf_{end}_edge_id {specific_edge_id}, "
 				f"exceeding habitat_point_snap_edge_distance_m ({edge_distance_m}m)."
 				f"\n***STOPPING***"
 			)
-		return snap_to_edge(cursor, output_schema, edge_cache, specific_edge_id, edge_wkb, closest_point_wkb, vertex_distance_m)
+		return snap_to_edge(
+			cursor, output_schema, edge_cache, specific_edge_id, edge_wkb, closest_point_wkb, vertex_distance_m
+		)
 
 	nearest = find_nearest_edge(cursor, output_schema, xy, srid, edge_distance_m)
 	if nearest is None:
@@ -237,8 +236,16 @@ def process_habitat_row(cursor, output_schema, edge_cache, srid, row, edge_dista
 	result = {}
 	for end, xy in points_for_role(location_type, coords, habitat_id):
 		result[end] = resolve_point(
-			cursor, output_schema, edge_cache, srid, xy,
-			edge_distance_m, vertex_distance_m, specific_edge_id[end], end, habitat_id,
+			cursor,
+			output_schema,
+			edge_cache,
+			srid,
+			xy,
+			edge_distance_m,
+			vertex_distance_m,
+			specific_edge_id[end],
+			end,
+			habitat_id,
 		)
 	return habitat_id, result.get("upstream"), result.get("downstream")
 
@@ -249,13 +256,18 @@ def write_habitat_snap_results(cursor, output_schema, srid, snap_results):
 	for habitat_id, up, down in snap_results:
 		up_edge_id, up_xy = (up[0], up[1][:2]) if up else (None, None)
 		down_edge_id, down_xy = (down[0], down[1][:2]) if down else (None, None)
-		rows.append((
-			up_edge_id, up_xy[0] if up_xy else None, up_xy[1] if up_xy else None,
-			down_edge_id, down_xy[0] if down_xy else None, down_xy[1] if down_xy else None,
-			habitat_id,
-		))
+		rows.append(
+			(
+				up_edge_id,
+				up_xy[0] if up_xy else None,
+				up_xy[1] if up_xy else None,
+				down_edge_id,
+				down_xy[0] if down_xy else None,
+				down_xy[1] if down_xy else None,
+				habitat_id,
+			)
+		)
 
-	
 	cursor.executemany(
 		f"""
 		UPDATE {schema_ident}.habitat_updates AS h
@@ -269,7 +281,7 @@ def write_habitat_snap_results(cursor, output_schema, srid, snap_results):
 				 %s::uuid, %s::double precision, %s::double precision, %s::uuid)) AS v(up_edge_id, up_x, up_y, down_edge_id, down_x, down_y, habitat_id)
 		WHERE h.id = v.habitat_id
 		""",
-		rows
+		rows,
 	)
 
 
@@ -293,8 +305,9 @@ def snap_habitat_points(conn, cursor, plan, srid):
 		habitat_id, up, down = process_habitat_row(
 			cursor, output_schema, edge_cache, srid, row, edge_distance_m, vertex_distance_m
 		)
-		if (row[3] is None and up is None and row[1] in ("upstream", "between")) or \
-		   (row[4] is None and down is None and row[1] in ("downstream", "between")):
+		if (row[3] is None and up is None and row[1] in ("upstream", "between")) or (
+			row[4] is None and down is None and row[1] in ("downstream", "between")
+		):
 			ignored_count += 1
 		snap_results.append((habitat_id, up, down))
 
@@ -306,14 +319,19 @@ def snap_habitat_points(conn, cursor, plan, srid):
 		write_habitat_snap_results(cursor, output_schema, srid, snap_results)
 
 	# create after the data is loaded so data loading isn't affected
-	cursor.execute(f"CREATE INDEX habitat_updates_upstream_snapped_edge_id_idx ON {quote_ident(output_schema)}.habitat_updates (upstream_snapped_edge_id);")
-	cursor.execute(f"CREATE INDEX habitat_updates_downstream_snapped_edge_id_idx ON {quote_ident(output_schema)}.habitat_updates (downstream_snapped_edge_id);")
+	cursor.execute(
+		f"CREATE INDEX habitat_updates_upstream_snapped_edge_id_idx ON {quote_ident(output_schema)}.habitat_updates (upstream_snapped_edge_id);"
+	)
+	cursor.execute(
+		f"CREATE INDEX habitat_updates_downstream_snapped_edge_id_idx ON {quote_ident(output_schema)}.habitat_updates (downstream_snapped_edge_id);"
+	)
 
 	conn.commit()
 	logger.info(
-		"Snapped %d/%d habitat update row(s) "
-		"(%d had an unresolvable point and were left partially unsnapped).",
-		len(rows) - ignored_count, len(rows), ignored_count,
+		"Snapped %d/%d habitat update row(s) (%d had an unresolvable point and were left partially unsnapped).",
+		len(rows) - ignored_count,
+		len(rows),
+		ignored_count,
 	)
 	return len(rows), ignored_count
 

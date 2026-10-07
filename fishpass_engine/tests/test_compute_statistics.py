@@ -84,17 +84,20 @@ class ComputeStatisticsIndexTests(unittest.TestCase):
 			def _recorder(*args, **kwargs):
 				calls.append(name)
 				return return_value
+
 			return _recorder
 
 		plan = {"output_schema": "model_test", "include_gradient_barriers": False}
 
-		with mock.patch.object(cs, "drop_streams_bulk_write_indexes", side_effect=record("drop")), \
-			mock.patch.object(cs, "break_network", side_effect=record("break", 0)), \
-			mock.patch.object(cs, "compute_effective_length_and_gradient", side_effect=record("gradient")), \
-			mock.patch.object(cs, "load_species_params", return_value={}), \
-			mock.patch.object(cs, "run_component_statistics", side_effect=record("stats", [])), \
-			mock.patch.object(cs, "create_streams_bulk_write_indexes", side_effect=record("create")), \
-			mock.patch.object(cs, "write_barrier_stat_tables", side_effect=record("barrier_tables")):
+		with (
+			mock.patch.object(cs, "drop_streams_bulk_write_indexes", side_effect=record("drop")),
+			mock.patch.object(cs, "break_network", side_effect=record("break", 0)),
+			mock.patch.object(cs, "compute_effective_length_and_gradient", side_effect=record("gradient")),
+			mock.patch.object(cs, "load_species_params", return_value={}),
+			mock.patch.object(cs, "run_component_statistics", side_effect=record("stats", [])),
+			mock.patch.object(cs, "create_streams_bulk_write_indexes", side_effect=record("create")),
+			mock.patch.object(cs, "write_barrier_stat_tables", side_effect=record("barrier_tables")),
+		):
 			cs.compute_statistics(mock.Mock(), FakeCursor(), plan, 4617)
 
 		self.assertEqual(calls, ["drop", "break", "gradient", "stats", "create", "barrier_tables"])
@@ -129,14 +132,16 @@ class RunComponentStatisticsTests(unittest.TestCase):
 		def fake_flush(cursor, output_schema, rows):
 			flush_calls.append(list(rows))
 
-		with mock.patch.object(cs, "BUNDLE_EDGE_BUDGET", 15), \
-			mock.patch.object(cs, "WRITE_BATCH_SIZE", 2), \
-			mock.patch.object(cs, "fetch_graph_id_counts", return_value=graph_id_counts), \
-			mock.patch.object(cs, "fetch_bundle_edges", side_effect=fake_fetch_edges), \
-			mock.patch.object(cs, "fetch_bundle_barriers", side_effect=fake_fetch_empty), \
-			mock.patch.object(cs, "fetch_bundle_habitat_updates", side_effect=fake_fetch_empty), \
-			mock.patch.object(cs, "process_component", side_effect=self._fake_process_component), \
-			mock.patch.object(cs, "flush_stats_writes", side_effect=fake_flush):
+		with (
+			mock.patch.object(cs, "BUNDLE_EDGE_BUDGET", 15),
+			mock.patch.object(cs, "WRITE_BATCH_SIZE", 2),
+			mock.patch.object(cs, "fetch_graph_id_counts", return_value=graph_id_counts),
+			mock.patch.object(cs, "fetch_bundle_edges", side_effect=fake_fetch_edges),
+			mock.patch.object(cs, "fetch_bundle_barriers", side_effect=fake_fetch_empty),
+			mock.patch.object(cs, "fetch_bundle_habitat_updates", side_effect=fake_fetch_empty),
+			mock.patch.object(cs, "process_component", side_effect=self._fake_process_component),
+			mock.patch.object(cs, "flush_stats_writes", side_effect=fake_flush),
+		):
 			cs.run_component_statistics(cursor, "model_test", plan, species_params)
 
 		# One write row per component (3 total), flushed in batches of WRITE_BATCH_SIZE=2:
@@ -156,13 +161,15 @@ class RunComponentStatisticsTests(unittest.TestCase):
 			if rows:  # the trailing flush of an empty remainder is a no-op in the real function
 				flush_calls.append(list(rows))
 
-		with mock.patch.object(cs, "WRITE_BATCH_SIZE", 2), \
-			mock.patch.object(cs, "fetch_graph_id_counts", return_value=[(1, 5)]), \
-			mock.patch.object(cs, "fetch_bundle_edges", return_value={1: [{"id": "E0"}]}), \
-			mock.patch.object(cs, "fetch_bundle_barriers", return_value={}), \
-			mock.patch.object(cs, "fetch_bundle_habitat_updates", return_value={}), \
-			mock.patch.object(cs, "process_component", side_effect=fake_process_component), \
-			mock.patch.object(cs, "flush_stats_writes", side_effect=fake_flush):
+		with (
+			mock.patch.object(cs, "WRITE_BATCH_SIZE", 2),
+			mock.patch.object(cs, "fetch_graph_id_counts", return_value=[(1, 5)]),
+			mock.patch.object(cs, "fetch_bundle_edges", return_value={1: [{"id": "E0"}]}),
+			mock.patch.object(cs, "fetch_bundle_barriers", return_value={}),
+			mock.patch.object(cs, "fetch_bundle_habitat_updates", return_value={}),
+			mock.patch.object(cs, "process_component", side_effect=fake_process_component),
+			mock.patch.object(cs, "flush_stats_writes", side_effect=fake_flush),
+		):
 			cs.run_component_statistics(object(), "model_test", {}, {})
 
 		self.assertEqual([len(rows) for rows in flush_calls], [2, 2, 1])
@@ -174,13 +181,15 @@ class RunComponentStatisticsTests(unittest.TestCase):
 		species_params = {}
 		graph_id_counts = [(1, 500)]
 
-		with mock.patch.object(cs, "BUNDLE_EDGE_BUDGET", 100), \
-			mock.patch.object(cs, "fetch_graph_id_counts", return_value=graph_id_counts), \
-			mock.patch.object(cs, "fetch_bundle_edges", return_value={1: [{"id": "E1"}]}) as fetch_edges, \
-			mock.patch.object(cs, "fetch_bundle_barriers", return_value={}), \
-			mock.patch.object(cs, "fetch_bundle_habitat_updates", return_value={}), \
-			mock.patch.object(cs, "process_component", side_effect=self._fake_process_component), \
-			mock.patch.object(cs, "flush_stats_writes"):
+		with (
+			mock.patch.object(cs, "BUNDLE_EDGE_BUDGET", 100),
+			mock.patch.object(cs, "fetch_graph_id_counts", return_value=graph_id_counts),
+			mock.patch.object(cs, "fetch_bundle_edges", return_value={1: [{"id": "E1"}]}) as fetch_edges,
+			mock.patch.object(cs, "fetch_bundle_barriers", return_value={}),
+			mock.patch.object(cs, "fetch_bundle_habitat_updates", return_value={}),
+			mock.patch.object(cs, "process_component", side_effect=self._fake_process_component),
+			mock.patch.object(cs, "flush_stats_writes"),
+		):
 			cs.run_component_statistics(cursor, "model_test", plan, species_params)
 
 		fetch_edges.assert_called_once_with(cursor, "model_test", [1])

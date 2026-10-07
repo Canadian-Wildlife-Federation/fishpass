@@ -133,8 +133,10 @@ class BreakEdgeTests(unittest.TestCase):
 
 	def test_multiple_split_points_produce_ordered_segments(self):
 		vertices = [
-			[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 10.0],
-			[2.0, 0.0, 0.0, 20.0], [3.0, 0.0, 0.0, 30.0],
+			[0.0, 0.0, 0.0, 0.0],
+			[1.0, 0.0, 0.0, 10.0],
+			[2.0, 0.0, 0.0, 20.0],
+			[3.0, 0.0, 0.0, 30.0],
 		]
 		edge = make_edge(vertices)
 		points = [(1.0, 0.0, "barrier", "b1"), (2.0, 0.0, "barrier", "b2")]
@@ -211,9 +213,7 @@ class BreakNetworkEndMarkerTests(unittest.TestCase):
 		conn = mock.Mock()
 		plan = {"output_schema": "out"}
 
-		with mock.patch.object(
-			nb.uuid, "uuid4", side_effect=[_FakeUUID("new-nexus-1"), _FakeUUID("new-seg-1")]
-		):
+		with mock.patch.object(nb.uuid, "uuid4", side_effect=[_FakeUUID("new-nexus-1"), _FakeUUID("new-seg-1")]):
 			nb.break_network(conn, cursor, plan, srid=4326)
 
 		return cursor
@@ -285,13 +285,10 @@ class BreakNetworkBatchingTests(unittest.TestCase):
 		plan = {"output_schema": "out"}
 
 		new_ids = [_FakeUUID(f"new-{i}") for i in range(len(edge_ids) * 2)]
-		with mock.patch.object(nb, "BATCH_SIZE", 1), \
-			mock.patch.object(nb.uuid, "uuid4", side_effect=new_ids):
+		with mock.patch.object(nb, "BATCH_SIZE", 1), mock.patch.object(nb.uuid, "uuid4", side_effect=new_ids):
 			nb.break_network(conn, cursor, plan, srid=4326)
 
-		update_flushes = [
-			call for call in cursor.executemany_calls if "UPDATE" in call[0] and "streams" in call[0]
-		]
+		update_flushes = [call for call in cursor.executemany_calls if "UPDATE" in call[0] and "streams" in call[0]]
 		insert_flushes = [
 			call for call in cursor.executemany_calls if call[0].startswith("INSERT INTO") and "streams" in call[0]
 		]

@@ -44,7 +44,9 @@ def masked_local_value(edge_ids, effective_length, flag):
 	return {eid: effective_length[eid] if flag.get(eid, False) else 0.0 for eid in edge_ids}
 
 
-def base_weighted_length(edge_ids, effective_length, strahler_order, species_params, lifecycle, habitat_flag, accessible):
+def base_weighted_length(
+	edge_ids, effective_length, strahler_order, species_params, lifecycle, habitat_flag, accessible
+):
 	"""{edge_id: effective_length * stream_order_weight} -- the base weighted-length formula (step
 	9), with no barrier degradation applied. This is a per-edge value, not an upstream aggregate.
 	The result is 0.0 for an edge that is not <lifecycle> habitat (habitat_flag) or whose
@@ -76,9 +78,17 @@ def connected_disconnected_weighted_length(base_weighted, downstream_first_barri
 
 
 def compute_species_length_stats(
-	order_up, predecessors, edge_ids, effective_length, strahler_order,
-	accessibility, habitat, barrier_here_by_species, species_params_by_code,
-	reporting_species_lifecycles, downstream_first_barrier_passability,
+	order_up,
+	predecessors,
+	edge_ids,
+	effective_length,
+	strahler_order,
+	accessibility,
+	habitat,
+	barrier_here_by_species,
+	species_params_by_code,
+	reporting_species_lifecycles,
+	downstream_first_barrier_passability,
 ):
 	"""Returns {species: {"spawn_upstream_accessible_length": {edge_id: float},
 	"rear_upstream_accessible_length": {edge_id: float},
@@ -125,22 +135,20 @@ def compute_species_length_stats(
 	disconnected_by_species_lc = {}
 
 	for species in species_list:
-		spawn_accessible_bool = {eid: accessibility[species]["spawn"][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids}
-		rear_accessible_bool = {eid: accessibility[species]["rear"][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids}
+		spawn_accessible_bool = {
+			eid: accessibility[species]["spawn"][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids
+		}
+		rear_accessible_bool = {
+			eid: accessibility[species]["rear"][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids
+		}
 		for lc_key, accessible_bool in (("spawn", spawn_accessible_bool), ("rear", rear_accessible_bool)):
-			accessible_local = {
-				eid: effective_length[eid] if accessible_bool[eid] else 0.0
-				for eid in edge_ids
-			}
+			accessible_local = {eid: effective_length[eid] if accessible_bool[eid] else 0.0 for eid in edge_ids}
 			accessible_field = f"{species}:{lc_key}_upstream_accessible_length"
 			plain_zeros[accessible_field] = 0.0
 			for eid in edge_ids:
 				plain_local[eid][accessible_field] = accessible_local[eid]
 
-		is_barrier = {
-			eid: bool(barrier_here_by_species[species]["anthro"].get(eid))
-			for eid in edge_ids
-		}
+		is_barrier = {eid: bool(barrier_here_by_species[species]["anthro"].get(eid)) for eid in edge_ids}
 		lifecycles = {lc for sp, lc in reporting_species_lifecycles if sp == species}
 		lifecycles_by_species[species] = lifecycles
 		params = species_params_by_code[species]
@@ -150,8 +158,13 @@ def compute_species_length_stats(
 			per_lc_accessible = {"rear": rear_accessible_bool, "spawn": spawn_accessible_bool}
 			for base_lc in ("rear", "spawn"):
 				rear_spawn_base_weighted[base_lc] = base_weighted_length(
-					edge_ids, effective_length, strahler_order, params, base_lc,
-					habitat[species][base_lc], per_lc_accessible[base_lc],
+					edge_ids,
+					effective_length,
+					strahler_order,
+					params,
+					base_lc,
+					habitat[species][base_lc],
+					per_lc_accessible[base_lc],
 				)
 
 		for lc in lifecycles:
@@ -161,7 +174,8 @@ def compute_species_length_stats(
 				weighted_length = rear_spawn_base_weighted[lc]
 				weighted_length_by_species_lc[(species, lc)] = weighted_length
 				connected, disconnected = connected_disconnected_weighted_length(
-					weighted_length, downstream_first_barrier_passability[species][lc],
+					weighted_length,
+					downstream_first_barrier_passability[species][lc],
 				)
 				connected_by_species_lc[(species, lc)] = connected
 				disconnected_by_species_lc[(species, lc)] = disconnected
@@ -200,14 +214,26 @@ def compute_species_length_stats(
 	result = {}
 	for species in species_list:
 		species_result = {
-			"spawn_upstream_accessible_length": {eid: v[f"{species}:spawn_upstream_accessible_length"] for eid, v in plain_acc.items()},
-			"rear_upstream_accessible_length": {eid: v[f"{species}:rear_upstream_accessible_length"] for eid, v in plain_acc.items()},
+			"spawn_upstream_accessible_length": {
+				eid: v[f"{species}:spawn_upstream_accessible_length"] for eid, v in plain_acc.items()
+			},
+			"rear_upstream_accessible_length": {
+				eid: v[f"{species}:rear_upstream_accessible_length"] for eid, v in plain_acc.items()
+			},
 		}
 		for lc in lifecycles_by_species[species]:
-			species_result[f"{lc}_upstream_length"] = {eid: v[f"{species}:{lc}_upstream_length"] for eid, v in plain_acc.items()}
-			species_result[f"{lc}_functional_upstream_length"] = {eid: v[f"{species}:{lc}_functional_upstream_length"] for eid, v in reset_acc.items()}
-			species_result[f"{lc}_weighted_upstream_length_base"] = {eid: v[f"{species}:{lc}_weighted_upstream_length_base"] for eid, v in plain_acc.items()}
-			species_result[f"{lc}_functional_weighted_upstream_length_base"] = {eid: v[f"{species}:{lc}_functional_weighted_upstream_length_base"] for eid, v in reset_acc.items()}
+			species_result[f"{lc}_upstream_length"] = {
+				eid: v[f"{species}:{lc}_upstream_length"] for eid, v in plain_acc.items()
+			}
+			species_result[f"{lc}_functional_upstream_length"] = {
+				eid: v[f"{species}:{lc}_functional_upstream_length"] for eid, v in reset_acc.items()
+			}
+			species_result[f"{lc}_weighted_upstream_length_base"] = {
+				eid: v[f"{species}:{lc}_weighted_upstream_length_base"] for eid, v in plain_acc.items()
+			}
+			species_result[f"{lc}_functional_weighted_upstream_length_base"] = {
+				eid: v[f"{species}:{lc}_functional_weighted_upstream_length_base"] for eid, v in reset_acc.items()
+			}
 			if lc != "spawnrear":
 				species_result[f"{lc}_weighted_length"] = weighted_length_by_species_lc[(species, lc)]
 				species_result[f"{lc}_weighted_connected_length"] = connected_by_species_lc[(species, lc)]
@@ -288,38 +314,58 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 				],
 			}
 			for data_key, count_key in count_keys:
-				species_stats[f"upstream_{count_key}_count"] = (
-					stats.get(f"upstream_{count_key}_count", {}).get(edge_id, 0) - here.get(data_key, {}).get(edge_id, 0)
+				species_stats[f"upstream_{count_key}_count"] = stats.get(f"upstream_{count_key}_count", {}).get(
+					edge_id, 0
+				) - here.get(data_key, {}).get(edge_id, 0)
+				species_stats[f"downstream_{count_key}_count"] = stats.get(f"downstream_{count_key}_count", {}).get(
+					edge_id, 0
 				)
-				species_stats[f"downstream_{count_key}_count"] = stats.get(f"downstream_{count_key}_count", {}).get(edge_id, 0)
 
 			length_stats = species_length_stats.get(species, {})
 			base_suffix = "_weighted_upstream_length_base"
 			func_base_suffix = "_functional_weighted_upstream_length_base"
 			lifecycles = [
-				field[: -len(base_suffix)] for field in length_stats
+				field[: -len(base_suffix)]
+				for field in length_stats
 				if field.endswith(base_suffix) and not field.endswith(func_base_suffix)
 			]
 			for field, values in length_stats.items():
-				if field.endswith(base_suffix):  # covers func_base_suffix too, since it's a longer suffix ending the same way
+				if field.endswith(
+					base_suffix
+				):  # covers func_base_suffix too, since it's a longer suffix ending the same way
 					continue
 				species_stats[field] = values.get(upstream_edge_id) if upstream_edge_id is not None else None
 
 			for lc in lifecycles:
 				if lc == "spawnrear":
 					passability = min(
-						passability_value.get(f"{species}_spawn", 0), passability_value.get(f"{species}_rear", 0),
+						passability_value.get(f"{species}_spawn", 0),
+						passability_value.get(f"{species}_rear", 0),
 					)
 				else:
 					passability = passability_value.get(f"{species}_{lc}", 0)
 
-				plain_base = length_stats[f"{lc}{base_suffix}"].get(upstream_edge_id) if upstream_edge_id is not None else None
-				func_base = length_stats[f"{lc}{func_base_suffix}"].get(upstream_edge_id) if upstream_edge_id is not None else None
+				plain_base = (
+					length_stats[f"{lc}{base_suffix}"].get(upstream_edge_id) if upstream_edge_id is not None else None
+				)
+				func_base = (
+					length_stats[f"{lc}{func_base_suffix}"].get(upstream_edge_id)
+					if upstream_edge_id is not None
+					else None
+				)
 
-				species_stats[f"{lc}_weighted_connected_upstream_length"] = plain_base * passability if plain_base is not None else None
-				species_stats[f"{lc}_weighted_disconnected_upstream_length"] = plain_base * (1 - passability) if plain_base is not None else None
-				species_stats[f"{lc}_functional_weighted_connected_upstream_length"] = func_base * passability if func_base is not None else None
-				species_stats[f"{lc}_functional_weighted_disconnected_upstream_length"] = func_base * (1 - passability) if func_base is not None else None
+				species_stats[f"{lc}_weighted_connected_upstream_length"] = (
+					plain_base * passability if plain_base is not None else None
+				)
+				species_stats[f"{lc}_weighted_disconnected_upstream_length"] = (
+					plain_base * (1 - passability) if plain_base is not None else None
+				)
+				species_stats[f"{lc}_functional_weighted_connected_upstream_length"] = (
+					func_base * passability if func_base is not None else None
+				)
+				species_stats[f"{lc}_functional_weighted_disconnected_upstream_length"] = (
+					func_base * (1 - passability) if func_base is not None else None
+				)
 
 			per_species[species] = species_stats
 		result[barrier_id] = per_species

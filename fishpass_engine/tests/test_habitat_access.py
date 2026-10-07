@@ -98,7 +98,12 @@ class ResolveSegmentsTests(unittest.TestCase):
 		self.assertEqual(result, ["E4", "E3", "E1"])
 
 	def test_between_on_different_mainstems_exits_gracefully(self):
-		row = {"id": "H1", "location_type": "between", "upstream_snapped_edge_id": "E1", "downstream_snapped_edge_id": "E2"}
+		row = {
+			"id": "H1",
+			"location_type": "between",
+			"upstream_snapped_edge_id": "E1",
+			"downstream_snapped_edge_id": "E2",
+		}
 		with self.assertRaises(SystemExit) as ctx:
 			ha.resolve_segments(row, self.edges_by_id, self.predecessors, self.successor)
 		self.assertIn("H1", str(ctx.exception))
@@ -112,13 +117,19 @@ class ApplyHabitatAccessOverridesTests(unittest.TestCase):
 		self.successor, self.predecessors, self.roots = gs.build_graph(self.edges)
 		self.edge_ids = [e["id"] for e in self.edges]
 		# start with everything False for a single species "es"
-		self.habitat = {"es": {"rear": {eid: False for eid in self.edge_ids}, "spawn": {eid: False for eid in self.edge_ids}}}
+		self.habitat = {
+			"es": {"rear": {eid: False for eid in self.edge_ids}, "spawn": {eid: False for eid in self.edge_ids}}
+		}
 
 	def test_upstream_row_sets_rearing_true(self):
-		rows = [{
-			"location_type": "upstream", "upstream_snapped_edge_id": "E3", "downstream_snapped_edge_id": None,
-			"species_lifestage": ["es_rear"],
-		}]
+		rows = [
+			{
+				"location_type": "upstream",
+				"upstream_snapped_edge_id": "E3",
+				"downstream_snapped_edge_id": None,
+				"species_lifestage": ["es_rear"],
+			}
+		]
 		ha.apply_habitat_access_overrides(self.habitat, self.edges_by_id, self.predecessors, self.successor, rows)
 		self.assertTrue(self.habitat["es"]["rear"]["E3"])
 		self.assertTrue(self.habitat["es"]["rear"]["E1"])
@@ -127,20 +138,28 @@ class ApplyHabitatAccessOverridesTests(unittest.TestCase):
 
 	def test_not_rearing_sets_false(self):
 		self.habitat["es"]["rear"] = {eid: True for eid in self.edge_ids}
-		rows = [{
-			"location_type": "downstream", "upstream_snapped_edge_id": None, "downstream_snapped_edge_id": "E1",
-			"species_lifestage": ["not_es_rear"],
-		}]
+		rows = [
+			{
+				"location_type": "downstream",
+				"upstream_snapped_edge_id": None,
+				"downstream_snapped_edge_id": "E1",
+				"species_lifestage": ["not_es_rear"],
+			}
+		]
 		ha.apply_habitat_access_overrides(self.habitat, self.edges_by_id, self.predecessors, self.successor, rows)
 		self.assertFalse(self.habitat["es"]["rear"]["E1"])
 		self.assertFalse(self.habitat["es"]["rear"]["E3"])
 		self.assertFalse(self.habitat["es"]["rear"]["E4"])
 
 	def test_bare_species_sets_both_lifecycles_true(self):
-		rows = [{
-			"location_type": "upstream", "upstream_snapped_edge_id": "E3", "downstream_snapped_edge_id": None,
-			"species_lifestage": ["es"],
-		}]
+		rows = [
+			{
+				"location_type": "upstream",
+				"upstream_snapped_edge_id": "E3",
+				"downstream_snapped_edge_id": None,
+				"species_lifestage": ["es"],
+			}
+		]
 		ha.apply_habitat_access_overrides(self.habitat, self.edges_by_id, self.predecessors, self.successor, rows)
 		self.assertTrue(self.habitat["es"]["rear"]["E3"])
 		self.assertTrue(self.habitat["es"]["spawn"]["E3"])
@@ -148,29 +167,45 @@ class ApplyHabitatAccessOverridesTests(unittest.TestCase):
 	def test_not_bare_species_clears_both_lifecycles(self):
 		self.habitat["es"]["rear"] = {eid: True for eid in self.edge_ids}
 		self.habitat["es"]["spawn"] = {eid: True for eid in self.edge_ids}
-		rows = [{
-			"location_type": "upstream", "upstream_snapped_edge_id": "E3", "downstream_snapped_edge_id": None,
-			"species_lifestage": ["not_es"],
-		}]
+		rows = [
+			{
+				"location_type": "upstream",
+				"upstream_snapped_edge_id": "E3",
+				"downstream_snapped_edge_id": None,
+				"species_lifestage": ["not_es"],
+			}
+		]
 		ha.apply_habitat_access_overrides(self.habitat, self.edges_by_id, self.predecessors, self.successor, rows)
 		self.assertFalse(self.habitat["es"]["rear"]["E3"])
 		self.assertFalse(self.habitat["es"]["spawn"]["E3"])
 
 	def test_later_row_wins_on_overlap(self):
 		rows = [
-			{"location_type": "upstream", "upstream_snapped_edge_id": "E4", "downstream_snapped_edge_id": None,
-			 "species_lifestage": ["es_rear"]},
-			{"location_type": "upstream", "upstream_snapped_edge_id": "E4", "downstream_snapped_edge_id": None,
-			 "species_lifestage": ["not_es_rear"]},
+			{
+				"location_type": "upstream",
+				"upstream_snapped_edge_id": "E4",
+				"downstream_snapped_edge_id": None,
+				"species_lifestage": ["es_rear"],
+			},
+			{
+				"location_type": "upstream",
+				"upstream_snapped_edge_id": "E4",
+				"downstream_snapped_edge_id": None,
+				"species_lifestage": ["not_es_rear"],
+			},
 		]
 		ha.apply_habitat_access_overrides(self.habitat, self.edges_by_id, self.predecessors, self.successor, rows)
 		self.assertFalse(self.habitat["es"]["rear"]["E4"])  # second row overwrote the first
 
 	def test_species_not_in_habitat_is_skipped(self):
-		rows = [{
-			"location_type": "upstream", "upstream_snapped_edge_id": "E3", "downstream_snapped_edge_id": None,
-			"species_lifestage": ["zz_rear"],
-		}]
+		rows = [
+			{
+				"location_type": "upstream",
+				"upstream_snapped_edge_id": "E3",
+				"downstream_snapped_edge_id": None,
+				"species_lifestage": ["zz_rear"],
+			}
+		]
 		# should not raise
 		ha.apply_habitat_access_overrides(self.habitat, self.edges_by_id, self.predecessors, self.successor, rows)
 		self.assertFalse(self.habitat["es"]["rear"]["E3"])

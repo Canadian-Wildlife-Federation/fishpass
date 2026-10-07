@@ -40,8 +40,18 @@ VERTEX_MATCH_TOLERANCE = 1e-9  # degrees -- exact float match expected, no repro
 BATCH_SIZE = 5000
 
 STREAM_FIELDS = (
-	"id", "aoi_id", "ef_type", "ef_subtype", "rank", "from_nexus_id", "to_nexus_id",
-	"ecatchment_id", "mainstem_id", "graph_id", "is_isolated", "strahler_order",
+	"id",
+	"aoi_id",
+	"ef_type",
+	"ef_subtype",
+	"rank",
+	"from_nexus_id",
+	"to_nexus_id",
+	"ecatchment_id",
+	"mainstem_id",
+	"graph_id",
+	"is_isolated",
+	"strahler_order",
 )
 
 
@@ -124,12 +134,14 @@ def break_edge(edge, points, new_id_factory=lambda: str(uuid.uuid4())):
 
 	segments = []
 	for start, end in zip(boundaries, boundaries[1:]):
-		segments.append({
-			"vertices": vertices[start:end + 1],
-			"from_nexus_id": edge["from_nexus_id"] if start == 0 else new_nexus_id[start],
-			"to_nexus_id": edge["to_nexus_id"] if end == n - 1 else new_nexus_id[end],
-			"start_markers": markers_by_index.get(start, []),
-		})
+		segments.append(
+			{
+				"vertices": vertices[start : end + 1],
+				"from_nexus_id": edge["from_nexus_id"] if start == 0 else new_nexus_id[start],
+				"to_nexus_id": edge["to_nexus_id"] if end == n - 1 else new_nexus_id[end],
+				"start_markers": markers_by_index.get(start, []),
+			}
+		)
 	return segments, end_markers
 
 
@@ -161,12 +173,26 @@ def build_segment_writes(edge_row, srid, segments):
 		if seg_num == 0:
 			update_row = (seg["from_nexus_id"], seg["to_nexus_id"], wkb, srid, wkb, srid, seg_id)
 		else:
-			insert_rows.append((
-				seg_id, edge_row["aoi_id"], edge_row["ef_type"], edge_row["ef_subtype"], edge_row["rank"],
-				seg["from_nexus_id"], seg["to_nexus_id"], edge_row["ecatchment_id"], edge_row["mainstem_id"],
-				edge_row["graph_id"], edge_row["is_isolated"], edge_row["strahler_order"],
-				wkb, srid, wkb, srid,
-			))
+			insert_rows.append(
+				(
+					seg_id,
+					edge_row["aoi_id"],
+					edge_row["ef_type"],
+					edge_row["ef_subtype"],
+					edge_row["rank"],
+					seg["from_nexus_id"],
+					seg["to_nexus_id"],
+					edge_row["ecatchment_id"],
+					edge_row["mainstem_id"],
+					edge_row["graph_id"],
+					edge_row["is_isolated"],
+					edge_row["strahler_order"],
+					wkb,
+					srid,
+					wkb,
+					srid,
+				)
+			)
 			for kind, ref_id in seg["start_markers"]:
 				if kind == "barrier":
 					reassignments[("barrier_downstream", ref_id)] = seg_id
@@ -229,7 +255,7 @@ def apply_edge_id_reassignments(cursor, output_schema, reassignments):
 	for kind, rows in grouped.items():
 		table, column = tables_and_columns[kind]
 		for i in range(0, len(rows), BATCH_SIZE):
-			chunk = rows[i:i + BATCH_SIZE]
+			chunk = rows[i : i + BATCH_SIZE]
 			cursor.executemany(f"UPDATE {table} SET {column} = %s WHERE id = %s", chunk)
 			done += len(chunk)
 			logger.info("  reassigned %d/%d edge id(s)", done, total)

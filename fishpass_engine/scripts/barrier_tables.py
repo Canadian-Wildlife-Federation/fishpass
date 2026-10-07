@@ -1,20 +1,17 @@
-""" Writes the computed barriers statistic to the all_barriers table. Creates the cached
+"""Writes the computed barriers statistic to the all_barriers table. Creates the cached
 version of the gradient barrers (if required).
 """
 
 import json
-import sys
 
-import psycopg
 
 from db import quote_ident
-from model_plan import IDENTIFIER_RE
 
 
 def write_barrier_stat_tables(cursor, output_schema, barrier_rows):
 	"""Writes each barrier's stats into all_barriers.species_stats -- only structures that
 	successfully snapped onto a processed edge appear here, so species_stats stays NULL for
-	those rows """
+	those rows"""
 
 	if not barrier_rows:
 		return
@@ -29,8 +26,9 @@ def write_barrier_stat_tables(cursor, output_schema, barrier_rows):
 		FROM (VALUES (%s::text, %s::uuid)) AS v(species_stats, id)
 		WHERE {schema_ident}.all_barriers.id = v.id
 		""",
-		rows
+		rows,
 	)
+
 
 def create_and_populate_gradient_barriers_cache(cursor, output_schema, srid):
 	"""<output_schema>.gradient_barriers -- only called when the plan includes gradient_barriers

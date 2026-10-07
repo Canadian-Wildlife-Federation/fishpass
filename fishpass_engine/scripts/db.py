@@ -104,9 +104,7 @@ def get_db_roles(config_path=DEFAULT_CONFIG_FILE):
 	if not isinstance(owner, str) or not ROLE_NAME_RE.match(owner):
 		sys.exit(f"database_roles.owner must be a valid role name, got {owner!r}")
 	for key, roles in (("grant_all", grant_all), ("grant_select", grant_select)):
-		if not isinstance(roles, list) or not all(
-			isinstance(r, str) and ROLE_NAME_RE.match(r) for r in roles
-		):
+		if not isinstance(roles, list) or not all(isinstance(r, str) and ROLE_NAME_RE.match(r) for r in roles):
 			sys.exit(f"database_roles.{key} must be a list of valid role names, got {roles!r}")
 	return {"owner": owner, "grant_all": tuple(grant_all), "grant_select": tuple(grant_select)}
 
@@ -145,6 +143,7 @@ def wcrp_tracking_enums(config_path=DEFAULT_CONFIG_FILE):
 # =================================================================================
 #  ROLE SWITCHING + CATALOG CHECKS
 # =================================================================================
+
 
 @contextmanager
 def as_role(conn, cursor, role):

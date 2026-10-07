@@ -23,9 +23,9 @@ import time
 from compute_statistics import compute_statistics
 from create_combined_view import check_cabd_fdw_sources, create_combined_view
 from create_wcrp_tracking_table import (
-    check_tracking_table_columns,
-    ensure_tracking_table,
-    sync_wcrp_tracking_enums,
+	check_tracking_table_columns,
+	ensure_tracking_table,
+	sync_wcrp_tracking_enums,
 )
 from db import db_connect, require_env
 from load_habitat import load_habitat

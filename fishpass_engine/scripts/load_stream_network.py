@@ -15,16 +15,25 @@ from graph_stats import build_graph, upstream_closure
 logger = logging.getLogger(__name__)
 
 STREAMS_FIELDS = (
-	"id", "aoi_id", "ef_type", "ef_subtype", "rank", "length",
-	"from_nexus_id", "to_nexus_id", "ecatchment_id", "mainstem_id",
-	"graph_id", "is_isolated", "strahler_order", "geometry",
+	"id",
+	"aoi_id",
+	"ef_type",
+	"ef_subtype",
+	"rank",
+	"length",
+	"from_nexus_id",
+	"to_nexus_id",
+	"ecatchment_id",
+	"mainstem_id",
+	"graph_id",
+	"is_isolated",
+	"strahler_order",
+	"geometry",
 )
 
 
 def get_source_srid(cursor):
-	cursor.execute(
-		"SELECT ST_SRID(geometry) FROM chyf_raw.flowpath WHERE geometry IS NOT NULL LIMIT 1"
-	)
+	cursor.execute("SELECT ST_SRID(geometry) FROM chyf_raw.flowpath WHERE geometry IS NOT NULL LIMIT 1")
 	row = cursor.fetchone()
 	if row is None or row[0] is None:
 		sys.exit("Could not determine SRID from chyf_raw.flowpath -- is the table empty?")
@@ -141,16 +150,11 @@ def create_streams_table(cursor, output_schema, srid):
 		);
 	""")
 
+
 def create_indexes(cursor, output_schema):
-	cursor.execute(
-		f"CREATE INDEX streams_geometry_idx ON {quote_ident(output_schema)}.streams USING gist (geometry);"
-	)
-	cursor.execute(
-		f"CREATE INDEX streams_graph_id_idx ON {quote_ident(output_schema)}.streams (graph_id);"
-	)
-	cursor.execute(
-		f"CREATE INDEX streams_aoi_id_idx ON {quote_ident(output_schema)}.streams (aoi_id);"
-	)
+	cursor.execute(f"CREATE INDEX streams_geometry_idx ON {quote_ident(output_schema)}.streams USING gist (geometry);")
+	cursor.execute(f"CREATE INDEX streams_graph_id_idx ON {quote_ident(output_schema)}.streams (graph_id);")
+	cursor.execute(f"CREATE INDEX streams_aoi_id_idx ON {quote_ident(output_schema)}.streams (aoi_id);")
 
 
 def drop_streams_bulk_write_indexes(cursor, output_schema):
@@ -171,7 +175,9 @@ def create_streams_bulk_write_indexes(cursor, output_schema):
 
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"CREATE INDEX streams_geometry_idx ON {schema_ident}.streams USING gist (geometry);")
-	cursor.execute(f"CREATE INDEX streams_geometry_geog_idx ON {schema_ident}.streams USING gist((geometry::geography))")
+	cursor.execute(
+		f"CREATE INDEX streams_geometry_geog_idx ON {schema_ident}.streams USING gist((geometry::geography))"
+	)
 	cursor.execute(f"CREATE INDEX streams_aoi_id_idx ON {schema_ident}.streams (aoi_id);")
 	cursor.execute(f"ANALYZE {schema_ident}.streams;")
 
@@ -184,10 +190,13 @@ def copy_aois(cursor, output_schema, aoi_ids):
 			SELECT id, short_name, province_territory_code FROM chyf_raw.aoi;
 		""")
 	else:
-		cursor.execute(f"""
+		cursor.execute(
+			f"""
 			INSERT INTO {schema_ident}.aoi (id, short_name, province_territory_code)
 			SELECT id, short_name, province_territory_code FROM chyf_raw.aoi WHERE id = ANY(%s);
-		""", (aoi_ids,))
+		""",
+			(aoi_ids,),
+		)
 	return cursor.rowcount
 
 
@@ -200,10 +209,13 @@ def copy_streams(cursor, output_schema, aoi_ids):
 			SELECT {fields} FROM chyf_raw.flowpath;
 		""")
 	else:
-		cursor.execute(f"""
+		cursor.execute(
+			f"""
 			INSERT INTO {schema_ident}.streams ({fields})
 			SELECT {fields} FROM chyf_raw.flowpath WHERE aoi_id = ANY (%s);
-		""", (aoi_ids,))
+		""",
+			(aoi_ids,),
+		)
 	return cursor.rowcount
 
 
@@ -272,7 +284,7 @@ def load_stream_network(conn, cursor, plan):
 		stream_count -= deleted
 		conn.commit()
 
-	create_indexes(cursor, output_schema);
+	create_indexes(cursor, output_schema)
 
 	logger.info("Loaded %d AOI(s) and %d stream edge(s) into %s.", aoi_count, stream_count, output_schema)
 	return stream_count
