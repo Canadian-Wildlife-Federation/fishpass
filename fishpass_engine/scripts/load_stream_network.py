@@ -152,6 +152,30 @@ def create_indexes(cursor, output_schema):
 		f"CREATE INDEX streams_aoi_id_idx ON {quote_ident(output_schema)}.streams (aoi_id);"
 	)
 
+
+def drop_streams_bulk_write_indexes(cursor, output_schema):
+	"""Drop the streams indexes that only snapping needs (the two spatial indexes, the second
+	created by snap_structures) plus aoi_id, ahead of Compute Statistics' whole-table rewrites --
+	none of those updates are HOT, so every rewritten row would otherwise get a new entry in each
+	of them. The primary key and streams_graph_id_idx stay: the write-back joins on id and the
+	bundle fetches filter on graph_id. See create_streams_bulk_write_indexes."""
+
+	schema_ident = quote_ident(output_schema)
+	for index_name in ("streams_geometry_idx", "streams_geometry_geog_idx", "streams_aoi_id_idx"):
+		cursor.execute(f"DROP INDEX IF EXISTS {schema_ident}.{index_name};")
+
+
+def create_streams_bulk_write_indexes(cursor, output_schema):
+	"""Recreate the indexes dropped by drop_streams_bulk_write_indexes, so the finished output
+	schema has the same indexes as before, and refresh planner statistics after the rewrites."""
+
+	schema_ident = quote_ident(output_schema)
+	cursor.execute(f"CREATE INDEX streams_geometry_idx ON {schema_ident}.streams USING gist (geometry);")
+	cursor.execute(f"CREATE INDEX streams_geometry_geog_idx ON {schema_ident}.streams USING gist((geometry::geography))")
+	cursor.execute(f"CREATE INDEX streams_aoi_id_idx ON {schema_ident}.streams (aoi_id);")
+	cursor.execute(f"ANALYZE {schema_ident}.streams;")
+
+
 def copy_aois(cursor, output_schema, aoi_ids):
 	schema_ident = quote_ident(output_schema)
 	if aoi_ids is None:
