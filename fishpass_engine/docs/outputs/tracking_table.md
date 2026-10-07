@@ -8,7 +8,7 @@ Hand-entered, per-barrier tracking data for a WCRP (e.g. structure list status, 
 
 **No foreign key:** `barrier_id` matches `<output_schema>.all_barriers.feature_id` in type, but a foreign key into the ephemeral output schema couldn't survive the rebuild. Instead, every model run checks each `barrier_id` against the freshly built `all_barriers` and logs any that don't match (see [ranked_barriers.md](./ranked_barriers.md)).
 
-**Support objects:** the `support.tt_*` enum types used below and the `support.blank2null()` trigger function come from [init/database/wcrp_support.sql](../../../init/database/wcrp_support.sql), which every model run applies before the tracking table is created or checked. To add an allowable value, add it to that file; the next model run applies it.
+**Support objects:** the `support.tt_*` enum types used below are defined in the `wcrp.tracking_table_enums` section of [config/fishpass.yaml](../../../config/fishpass.yaml), and every model run syncs them into the database before the tracking table is created or checked. The `support.blank2null()` trigger function comes from [init/database/wcrp_support.sql](../../../init/database/wcrp_support.sql), which is run by hand once per database.
 
 **Dropdowns and blank values:** the enum columns show up as dropdowns in QGIS. Every enum also includes a blank (`''`) option, last in the list, because QGIS writes `''` when a user clears a dropdown and PostgreSQL rejects any value that isn't in the enum. The `blank2null_trg` trigger (`BEFORE INSERT OR UPDATE`, calling `support.blank2null()`) then turns any `''` in an enum column into NULL, so blanks are never actually stored.
 
@@ -53,4 +53,6 @@ Table Structure (in column order; `<sp>` = species code):
 
 The per-species columns are grouped: all `structure_list_status_<sp>` columns follow `private_owner_details`, and all `partial_passability_<sp>` / `partial_passability_notes_<sp>` pairs follow `method_of_exclusion`.
 
-Allowable enum values come from the BC Tracking Table Guidance on Notion. To add a value, add it to the type's list in `wcrp_support.sql`. The next model run adds it to the end of the dropdown (just before the blank) without touching existing data. Renaming or removing a value has to be done by hand (see the comments in `wcrp_support.sql`).
+Allowable enum values come from the BC Tracking Table Guidance on Notion. To add a value, add it to the type's list under `wcrp.tracking_table_enums` in `config/fishpass.yaml`. The next model run adds it to the end of the dropdown (just before the blank) without touching existing data. The blank is added automatically, so don't list it in the YAML.
+
+Renaming or removing a value in the YAML is not applied to the database and has to be done by hand. To rename, run `ALTER TYPE support.<type> RENAME VALUE 'old' TO 'new';` (existing rows follow automatically) and make the same change in the YAML. PostgreSQL can't drop an enum value, so removing one means updating any rows that use it and then rebuilding the type.

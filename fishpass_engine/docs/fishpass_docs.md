@@ -6,7 +6,7 @@ This engine will be implemented in python.
 
 This process will be initiated via a GitHub action. A plan file will control parameters for the run. This plan file will be selected by the user when launching the action. Each run will clear all existing data out of the output schema and generate new output data.
 
-Every model run also produces the WCRP outputs (barrier rankings and the combined output view -- see [WCRP Outputs](#wcrp-outputs)), which rely on a per-plan WCRP tracking table. Before anything else, each model run applies the database-wide WCRP support objects (`init/database/wcrp_support.sql`), then checks for the plan's tracking table. If the table doesn't exist (e.g. on a plan's first run), it is created. If it already exists, creation is skipped and the table and its data are left unchanged. Both steps are reported in the log and the GitHub Actions job summary.
+Every model run also produces the WCRP outputs: barrier rankings and the combined output view (see [WCRP Outputs](#wcrp-outputs)). These rely on a per-plan tracking table that holds hand-entered data. The tracking table and the WCRP outputs live in a separate `<code>_wcrp` schema, which is not cleared between runs. The tracking table is created on a plan's first run and never modified by the scripts after that; the rankings and the combined view are rebuilt on every run.
 
 ### GitHub Limitation
 
@@ -18,6 +18,8 @@ If these limitations prevent us from using a GitHub job, we can containerize the
 ## FishPass Database
 
 The database connection uses the `FISHPASS_HOST/PORT/DBNAME/USER/PASSWORD` environment variable / GitHub secrets.
+
+The database must be configured before the first model run. See [Database Setup](../README.md#database-setup) in the README for the scripts to run.
 
 ## Input Datasets
 
@@ -124,26 +126,31 @@ rear passability (matching the combined "impassable if either lifestage fails" r
 The model run is a single sequence of phases against one database connection/transaction scope,
 in this order. If any phase raises an error the whole run is rolled back.
 
-### Set Up WCRP Support Objects and Tracking Table
+### Sync WCRP Enums and Set Up Tracking Table
 
-Before anything else, so that nothing is dropped or recomputed first:
+This is the first phase of a model run. It runs before the output schema is dropped, so if it
+fails, the previous run's outputs are still in place.
 
-1. Apply `init/database/wcrp_support.sql` as the `database_roles.owner` role. This creates any
-   missing `support.tt_*` enum types, adds any new enum values, and creates or replaces
-   `support.blank2null()`. Every statement in the file is safe to re-run, so if nothing has
-   changed, nothing changes in the database. Any types, values, or functions it adds are reported
-   in the job summary. If applying the file fails (most likely because the owner role doesn't own
-   the `support` objects), the run stops.
-2. Check for the plan's `<code>_wcrp.tracking_table_<code>`. If it doesn't exist, create it (along
-   with the `<code>_wcrp` schema, if needed). If it exists, skip creation and leave the table and
-   its data unchanged. Either outcome is reported in the log and the job summary.
-3. Check the prerequisites of the WCRP phases that run last (Rank Barriers, Create Combined View),
-   so a problem stops the run now and not after the whole model has been computed:
-   - the tracking table has every column the run reads, including the per-species columns for
-     each reporting species. An existing tracking table is never altered, so a species added to
-     the plan later needs its columns added by hand.
-   - the `cabd_fdw` foreign tables the combined view joins exist and have the attributes it
-     surfaces (see `init/database/fishpass_cabd_raw_init.sql`).
+The run first syncs the `support.tt_*` enum types from the `wcrp.tracking_table_enums` section of
+`config/fishpass.yaml`. A type that doesn't exist is created with the listed values plus a blank
+(`''`) value last. For a type that exists, any listed value it doesn't have is added just before
+the blank. Existing values and data are never changed, so if nothing has changed in the YAML,
+nothing changes in the database. Values removed or renamed in the YAML are not applied (see
+[tracking_table.md](./outputs/tracking_table.md)).
+
+It then checks for the plan's `<code>_wcrp.tracking_table_<code>`. If the table doesn't exist, it
+is created (along with the `<code>_wcrp` schema, if needed). If it exists, creation is skipped and
+the table and its data are left unchanged. Either outcome is reported in the log and the job
+summary. The run stops here if `support.blank2null()` is missing (see
+[Database Setup](../README.md#database-setup)).
+
+Finally, it checks the prerequisites of the WCRP phases that run last (Rank Barriers, Create
+Combined View), so a problem stops the run now and not after the whole model has been computed.
+The tracking table must have every column the run reads, including the per-species columns for
+each reporting species. An existing tracking table is never altered, so a species added to the
+plan later needs its columns added by hand. The `cabd_fdw` foreign tables the combined view joins
+must also exist and have the attributes it surfaces (see
+`init/database/fishpass_cabd_raw_init.sql`).
 
 ### Initialize
 
@@ -156,13 +163,10 @@ Outputs above, created here directly rather than as a separate `<output_schema>.
 that gets copied again later. It accumulates the statistics columns from Compute Statistics in
 place, and is split into more rows in place during that phase's network-breaking step.
 
-Inputs: 
+Inputs: `chyf_raw.flowpath`, `chyf_raw.aoi`
 
-`chyf_raw.flowpath`, `chyf_raw.aoi`
+Outputs:  `<output_schema>.streams`, `<output_schema>.aoi`
 
-Outputs: 
-
-The output schema is populated from the output_schema parameter in the model parameter file. 
 
 `<output_schema>.aoi`
 | Field | Type | 
@@ -229,7 +233,7 @@ object keyed by species code, rather than one SQL column per species -- species 
 plan-defined (from `target_species`), not a fixed schema, so a dynamic column set isn't practical.
 Same pattern as `all_barriers.species_passability_value`/`species_stats`.
 
-Copy Filters:
+**Copy Filters**
 
 Model Parameter File: aoi_filter
 

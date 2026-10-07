@@ -21,10 +21,12 @@ type) but carries NO foreign key -- a cross-schema FK into the ephemeral
 output_schema couldn't survive the rebuild. rank_barriers.py validates every
 tracking barrier_id against the freshly-built all_barriers on each run instead.
 
-Database-wide prerequisites (NOT created here): the support.tt_* enum types and
-the generic support.blank2null() trigger function both come from
-init/database/wcrp_support.sql, run by hand once per database. This script
-checks they exist and stops with a clear message if not.
+Database-wide prerequisites: the support.tt_* enum types are defined in
+config/fishpass.yaml (wcrp.tracking_table_enums) and synced into the database by
+sync_wcrp_tracking_enums(), which run_model.py and the standalone entry point
+both call first. The generic support.blank2null() trigger function is NOT
+created here: it comes from init/database/wcrp_support.sql, run by hand once per
+database. This script checks both exist and stops with a clear message if not.
 
 Guarantees:
   * An existing tracking table is never dropped, replaced, or altered.
@@ -108,9 +110,6 @@ def sync_wcrp_tracking_enums(conn, cursor, config_path=None):
     conn.commit()
 
 
-# Keep the legacy module-level name used by the tests and callers.
-WCRP_TRACKING_ENUMS = wcrp_tracking_enums
-
 # Non-species columns, in the canonical cheticamp order. Each entry is
 # (column_name, type_sql). Enum types are qualified to the support schema. The
 # per-species blocks are spliced in at the right positions in _build_columns().
@@ -175,10 +174,6 @@ def _validate_species(species_list):
             sys.exit(f"Invalid species code (unsafe for a column name): {sp!r}")
 
 
-# Backward-compatible alias used by tests and callers.
-wcrp_tracking_enums = WCRP_TRACKING_ENUMS
-
-
 def _build_columns(species_list):
     """Return the ordered (name, type_sql) column list, splicing per-species
     enum columns into their canonical positions."""
@@ -233,20 +228,29 @@ def _required_enum_types(species_list):
 
 
 def _check_support_objects(cursor, species_list):
-    """Stop with a clear message if wcrp_support.sql hasn't been run on this
-    database (enum types or blank2null() missing)."""
-    missing = [
+    """Stop with a clear message if a database-wide support object is missing:
+    an enum type (synced from config/fishpass.yaml) or blank2null() (created by
+    wcrp_support.sql)."""
+    missing_types = [
         f"{SUPPORT}.{t}"
         for t in _required_enum_types(species_list)
         if not _type_exists(cursor, SUPPORT, t)
     ]
-    if not function_exists(cursor, SUPPORT, BLANK2NULL_FUNCTION):
-        missing.append(f"{SUPPORT}.{BLANK2NULL_FUNCTION}()")
-    if missing:
-        sys.exit(
-            f"Missing database-wide WCRP support object(s): {', '.join(missing)}. "
-            f"Run {SUPPORT_SQL_SCRIPT} against this database first."
+    problems = []
+    if missing_types:
+        problems.append(
+            f"Missing WCRP enum type(s): {', '.join(missing_types)}. These are synced "
+            f"from the wcrp.tracking_table_enums section of config/fishpass.yaml at the "
+            f"start of each run -- check that each type is listed there with at least "
+            f"one value."
         )
+    if not function_exists(cursor, SUPPORT, BLANK2NULL_FUNCTION):
+        problems.append(
+            f"Missing {SUPPORT}.{BLANK2NULL_FUNCTION}(). Run {SUPPORT_SQL_SCRIPT} "
+            f"against this database first."
+        )
+    if problems:
+        sys.exit(" ".join(problems))
 
 
 def _type_exists(cursor, schema, type_name):

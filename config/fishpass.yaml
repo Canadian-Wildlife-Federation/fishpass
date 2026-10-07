@@ -24,9 +24,13 @@ database_roles:
   grant_select:
     - cwf_user
 
-# WCRP tracking-table enum defaults. These values are synced into the support schema at the
-# start of each model run so the database remains aligned with the YAML source of truth.
+# WCRP settings: the tracking-table enum definitions, then the ranking/reporting defaults.
 wcrp:
+  # Tracking-table enum types (support.tt_*). Synced into the database at the start of each
+  # model run: missing types are created, and values added here are added to the existing
+  # type. Not overridable per plan. Don't list the blank ('') value -- the software automatically adds
+  # it last. Renaming or removing a value here is NOT applied to the database (see
+  # fishpass_engine/docs/outputs/tracking_table.md).
   tracking_table_enums:
     tt_structure_type:
       - 'Dam'
@@ -108,6 +112,10 @@ wcrp:
       - 'Leave until end of lifecycle'
       - 'Non-actionable'
       - 'N/A - project complete'
+  #
+  # WCRP ranking/reporting defaults. Each can be overridden per plan by setting a field of
+  # the same name in config/models/<plan_code>.yaml (see fishpass_engine/docs/inputs/model_plan_file.md).
+  #
   # combined_output_table_vw flags label_in_wcrp_<sp>_<lc> = 'yes' when the barrier's
   # rank_combined is at or above (numerically <=) this rank.
   label_in_wcrp_rank_threshold: 30
