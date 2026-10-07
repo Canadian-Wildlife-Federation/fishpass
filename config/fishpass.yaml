@@ -9,3 +9,116 @@ structure_classification:
   natural_feature_types:
     - waterfalls
     - gradients
+
+# Database roles applied to the objects the WCRP scripts create (the <code>_wcrp schema,
+# tracking table, ranked_barriers_* tables, and combined_output_table_vw).
+#   owner        -- owns every object; scripts SET ROLE to it while creating them, so the
+#                   connecting user must be (or be a granted member of) this role.
+#   grant_all    -- roles granted ALL on each object.
+#   grant_select -- roles granted SELECT only.
+database_roles:
+  owner: fishpass
+  grant_all:
+    - cwf_analyst
+    - cwf_tech
+  grant_select:
+    - cwf_user
+
+# WCRP settings: the tracking-table enum definitions, then the ranking/reporting defaults.
+wcrp:
+  # Tracking-table enum types (support.tt_*). Synced into the database at the start of each
+  # model run: missing types are created, and values added here are added to the existing
+  # type. Not overridable per plan. Don't list the blank ('') value -- the software automatically adds
+  # it last. Renaming or removing a value here is NOT applied to the database (see
+  # fishpass_engine/docs/outputs/tracking_table.md).
+  tracking_table_enums:
+    tt_structure_type:
+      - 'Dam'
+      - 'Stream crossing - OBS'
+      - 'Stream crossing - CBS'
+      - 'Stream crossing - Ford'
+      - 'Other'
+      - 'None'
+    tt_structure_list_status_type:
+      - 'Excluded structure'
+      - 'Data-deficient barrier'
+      - 'Non-actionable barrier'
+      - 'Priority barrier'
+      - 'Rehabilitated barrier'
+    tt_passability_asmt_type:
+      - 'Informal assessment'
+      - 'Rapid assessment'
+      - 'Full assessment'
+    tt_assessment_step_type:
+      - 'Informal assessment'
+      - 'Passability assessment'
+      - 'Habitat confirmation'
+      - 'Detailed habitat investigation'
+      - 'Engineering design'
+      - 'Rehabilitated'
+      - 'Post-rehabilitation monitoring'
+      - 'Other'
+    tt_excl_reason_type:
+      - 'Passable'
+      - 'No structure'
+      - 'No key upstream habitat'
+      - 'No structure and key upstream habitat'
+    tt_excl_method_type:
+      - 'Imagery review'
+      - 'Informal assessment'
+      - 'Field assessment'
+      - 'Local knowledge'
+    tt_partial_passability_type:
+      - 'Yes'
+      - 'No'
+      - 'Unknown'
+    tt_partial_passability_notes_type:
+      - 'Proportion of individuals'
+      - 'Proportion of time'
+    tt_upstr_hab_quality_type:
+      - 'High'
+      - 'Medium'
+      - 'Low'
+      - 'N/A or unassessed'
+    tt_constructability_type:
+      - 'Difficult'
+      - 'Moderate'
+      - 'Easy'
+    tt_priority_type:
+      - 'High'
+      - 'Medium'
+      - 'Low'
+    tt_rehab_type:
+      - 'Removal/decommissioned'
+      - 'Replacement - OBS'
+      - 'Replacement - CBS'
+      - 'Retrofit'
+    tt_next_steps_type:
+      - 'Barrier assessment'
+      - 'Barrier reassessment'
+      - 'In-depth passage assessment'
+      - 'Habitat confirmation'
+      - 'In-depth habitat investigation'
+      - 'Identify barrier owner'
+      - 'Engage with barrier owner'
+      - 'Engage with partners'
+      - 'Engage in public consultation'
+      - 'Bring barrier to regulator'
+      - 'Commission engineering designs'
+      - 'Fundraise'
+      - 'Rehabilitation'
+      - 'Post-rehabilitation monitoring'
+      - 'Correct deficiencies'
+      - 'Leave until end of lifecycle'
+      - 'Non-actionable'
+      - 'N/A - project complete'
+  #
+  # WCRP ranking/reporting defaults. Each can be overridden per plan by setting a field of
+  # the same name in config/models/<plan_code>.yaml (see fishpass_engine/docs/inputs/model_plan_file.md).
+  #
+  # combined_output_table_vw flags label_in_wcrp_<sp>_<lc> = 'yes' when the barrier's
+  # rank_combined is at or above (numerically <=) this rank.
+  label_in_wcrp_rank_threshold: 30
+  # Minimum weighted average gain per barrier (km). Groups below this are pushed to the
+  # bottom of the immediate-gain ranking (rank_w_avg_gain_tiered).
+  min_avg_gain_km: 0.5

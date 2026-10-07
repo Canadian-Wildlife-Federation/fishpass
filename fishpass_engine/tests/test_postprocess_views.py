@@ -244,8 +244,48 @@ class CreateSpeciesViewsTests(unittest.TestCase):
 			pv.create_species_views(cursor, "model_test", [("as; DROP TABLE x", "rear")])
 
 
+class CreateWatershedSummaryStatisticsTests(unittest.TestCase):
+    def test_creates_watershed_summary_statistics_view(self):
+        cursor = FakeCursor()
+        reporting_species_lifecycles = [("as", "rear"), ("as", "spawn"), ("ae", "rear")]
+        
+        pv.create_watershed_summary_statistics(
+            cursor, "model_test", reporting_species_lifecycles
+        )
+
+        self.assertEqual(len(cursor.executed), 1)
+        sql, params = cursor.executed[0]
+
+        # Verify target view and schema name
+        self.assertIn('CREATE MATERIALIZED VIEW "model_test".watershed_summary_stats', sql)
+
+        # Verify key single-pass CTE constructs
+        self.assertIn("LATERAL jsonb_each", sql)
+        self.assertIn("WHERE sp.key IN ('as', 'ae')", sql)
+        self.assertIn("GROUP BY species", sql)
+
+        # Verify expected columns and calculations
+        self.assertIn("total_km", sql)
+        self.assertIn("total_spawn_km", sql)
+        self.assertIn("total_rear_km", sql)
+        self.assertIn("total_spawnrear_km", sql)
+        self.assertIn("connected_spawn_km", sql)
+        self.assertIn("disconnected_spawn_km", sql)
+        self.assertIn("connected_spawnrear_km", sql)
+        self.assertIn("disconnected_spawnrear_km", sql)
+        self.assertIn("pct_disconnected_spawn", sql)
+        self.assertIn("pct_disconnected_rear", sql)
+        self.assertIn("pct_disconnected_spawnrear", sql)
+
+    def test_rejects_unsafe_species_code(self):
+        cursor = FakeCursor()
+        with self.assertRaises(SystemExit):
+            pv.create_watershed_summary_statistics(
+                cursor, "model_test", [("as; DROP TABLE x", "rear")]
+            )
+
 class CreateBarrierViewsOrchestratorTests(unittest.TestCase):
-	def test_creates_all_views_and_commits_twice(self):
+	def test_creates_all_views_and_commits(self):
 		cursor = FakeCursor()
 		conn = FakeConn()
 		plan = {
@@ -264,7 +304,8 @@ class CreateBarrierViewsOrchestratorTests(unittest.TestCase):
 		self.assertIn("CREATE VIEW \"model_test\".unsnapped_barriers", executed_sql)
 		self.assertIn("CREATE VIEW \"model_test\".\"streams_as\"", executed_sql)
 		self.assertIn("CREATE VIEW \"model_test\".\"streams_ae\"", executed_sql)
-		self.assertEqual(conn.commits, 2)
+		self.assertIn('CREATE MATERIALIZED VIEW \"model_test\".watershed_summary_stats', executed_sql)
+		self.assertEqual(conn.commits, 3)
 
 
 if __name__ == "__main__":

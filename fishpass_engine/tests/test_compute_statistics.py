@@ -58,11 +58,46 @@ class ComputeEffectiveLengthAndGradientTests(unittest.TestCase):
 		cursor = FakeCursor()
 		cs.compute_effective_length_and_gradient(cursor, "model_test")
 		sql, _ = cursor.executed[0]
-		self.assertIn("ST_M(ST_PointN(s.geometry, 1))", sql)
-		self.assertIn("ST_M(ST_PointN(s.geometry, ST_NPoints(s.geometry)))", sql)
-		self.assertIn(f"!= {cs.NO_DATA}", sql)
+		self.assertIn(f"NULLIF(ST_M(ST_StartPoint(s.geometry)), {cs.NO_DATA})", sql)
+		self.assertIn(f"NULLIF(ST_M(ST_EndPoint(s.geometry)), {cs.NO_DATA})", sql)
+		self.assertIn("WHEN s.length > 0", sql)
+		self.assertIn("/ s.length", sql)
 		self.assertIn("SET", sql)
 		self.assertIn("segment_gradient = CASE", sql)
+
+	def test_gradient_reads_each_endpoint_once(self):
+		# Every reference to s.geometry is a detoast per row -- one per endpoint, no more.
+		cursor = FakeCursor()
+		cs.compute_effective_length_and_gradient(cursor, "model_test")
+		sql, _ = cursor.executed[0]
+		self.assertEqual(sql.count("s.geometry"), 2)
+
+
+class ComputeStatisticsIndexTests(unittest.TestCase):
+	"""compute_statistics drops the snapping-only streams indexes before the whole-table
+	rewrites (network break, steps 3-4, steps 5-9) and rebuilds them once those are done."""
+
+	def test_indexes_dropped_before_and_rebuilt_after_rewrites(self):
+		calls = []
+
+		def record(name, return_value=None):
+			def _recorder(*args, **kwargs):
+				calls.append(name)
+				return return_value
+			return _recorder
+
+		plan = {"output_schema": "model_test", "include_gradient_barriers": False}
+
+		with mock.patch.object(cs, "drop_streams_bulk_write_indexes", side_effect=record("drop")), \
+			mock.patch.object(cs, "break_network", side_effect=record("break", 0)), \
+			mock.patch.object(cs, "compute_effective_length_and_gradient", side_effect=record("gradient")), \
+			mock.patch.object(cs, "load_species_params", return_value={}), \
+			mock.patch.object(cs, "run_component_statistics", side_effect=record("stats", [])), \
+			mock.patch.object(cs, "create_streams_bulk_write_indexes", side_effect=record("create")), \
+			mock.patch.object(cs, "write_barrier_stat_tables", side_effect=record("barrier_tables")):
+			cs.compute_statistics(mock.Mock(), FakeCursor(), plan, 4617)
+
+		self.assertEqual(calls, ["drop", "break", "gradient", "stats", "create", "barrier_tables"])
 
 
 class RunComponentStatisticsTests(unittest.TestCase):
@@ -108,6 +143,30 @@ class RunComponentStatisticsTests(unittest.TestCase):
 		# a mid-loop flush of 2 rows once the threshold is crossed, then a final flush of the
 		# 1 remaining row.
 		self.assertEqual([len(rows) for rows in flush_calls], [2, 1])
+
+	def test_large_component_writes_are_sliced(self):
+		# A single component returning more rows than WRITE_BATCH_SIZE must not go out as one
+		# statement -- it's split into WRITE_BATCH_SIZE slices.
+		def fake_process_component(graph_id, edges, barriers, habitat_rows, plan, species_params):
+			return {f"E{i}": {} for i in range(5)}, [], {}
+
+		flush_calls = []
+
+		def fake_flush(cursor, output_schema, rows):
+			if rows:  # the trailing flush of an empty remainder is a no-op in the real function
+				flush_calls.append(list(rows))
+
+		with mock.patch.object(cs, "WRITE_BATCH_SIZE", 2), \
+			mock.patch.object(cs, "fetch_graph_id_counts", return_value=[(1, 5)]), \
+			mock.patch.object(cs, "fetch_bundle_edges", return_value={1: [{"id": "E0"}]}), \
+			mock.patch.object(cs, "fetch_bundle_barriers", return_value={}), \
+			mock.patch.object(cs, "fetch_bundle_habitat_updates", return_value={}), \
+			mock.patch.object(cs, "process_component", side_effect=fake_process_component), \
+			mock.patch.object(cs, "flush_stats_writes", side_effect=fake_flush):
+			cs.run_component_statistics(object(), "model_test", {}, {})
+
+		self.assertEqual([len(rows) for rows in flush_calls], [2, 2, 1])
+		self.assertEqual(sum(len(rows) for rows in flush_calls), 5)
 
 	def test_large_component_processed_alone(self):
 		cursor = object()

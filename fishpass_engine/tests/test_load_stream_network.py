@@ -180,3 +180,31 @@ class SchemaIdentifierQuotingTests(unittest.TestCase):
 
 if __name__ == "__main__":
 	unittest.main()
+
+
+class StreamsBulkWriteIndexTests(unittest.TestCase):
+	INDEX_NAMES = ("streams_geometry_idx", "streams_geometry_geog_idx", "streams_aoi_id_idx")
+
+	def test_drop_targets_snapping_only_indexes(self):
+		cursor = FakeCursor()
+		lsn.drop_streams_bulk_write_indexes(cursor, "model_test")
+		self.assertEqual(
+			[sql for sql, _ in cursor.executed],
+			[f'DROP INDEX IF EXISTS "model_test".{name};' for name in self.INDEX_NAMES],
+		)
+
+	def test_drop_keeps_graph_id_index(self):
+		# streams_graph_id_idx is what the steps 5-9 bundle fetches filter on.
+		cursor = FakeCursor()
+		lsn.drop_streams_bulk_write_indexes(cursor, "model_test")
+		self.assertFalse(any("streams_graph_id_idx" in sql for sql, _ in cursor.executed))
+
+	def test_create_rebuilds_every_dropped_index_then_analyzes(self):
+		cursor = FakeCursor()
+		lsn.create_streams_bulk_write_indexes(cursor, "model_test")
+		statements = [sql for sql, _ in cursor.executed]
+		for name in self.INDEX_NAMES:
+			self.assertTrue(any(f"CREATE INDEX {name} ON" in sql for sql in statements), name)
+		self.assertIn("USING gist (geometry)", statements[0])
+		self.assertIn("USING gist((geometry::geography))", statements[1])
+		self.assertEqual(statements[-1], 'ANALYZE "model_test".streams;')

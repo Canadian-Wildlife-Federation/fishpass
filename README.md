@@ -18,8 +18,9 @@ The pipeline has three components, run in order:
 3. **[fishpass_engine](fishpass_engine/README.md)** -- Runs a model plan end-to-end: loads the
    stream network, barriers, and habitat data for the plan's AOI, applies structure/habitat
    updates, snaps everything onto the network, and computes per-species/lifecycle accessibility,
-   habitat, and upstream-length statistics. Requires chyf_loader (and gradient_barriers, if the
-   plan uses gradient barriers) to have already run.
+   habitat, and upstream-length statistics. It then ranks barriers per species/lifecycle and
+   rebuilds the plan's WCRP combined output view. Requires chyf_loader (and gradient_barriers,
+   if the plan uses gradient barriers) to have already run.
 
 ## Development
 
