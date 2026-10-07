@@ -214,6 +214,8 @@ class SQLBuildersTests(unittest.TestCase):
         self.assertIn("DROP TABLE IF EXISTS", sql)
         self.assertIn("SELECT b.*", sql)
         self.assertIn('LEFT JOIN "ns_wcrp"."tracking_table_ns" tt', sql)
+        self.assertIn("ON tt.barrier_id = b.feature_id", sql)
+        self.assertNotIn("ON tt.barrier_id = b.id", sql)
         self.assertIn("'Rehabilitated barrier'", sql)
 
     def test_convert_lengths_covers_every_view_length_column(self):

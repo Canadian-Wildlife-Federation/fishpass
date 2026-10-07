@@ -208,7 +208,7 @@ def sql_create_working_table(c):
         INTO {c.work}
     FROM {c.barriers_view} b
     LEFT JOIN {c.tracking_table} tt
-        ON tt.barrier_id = b.id
+        ON tt.barrier_id = b.feature_id
     WHERE (
                 {passability_predicate}
              OR tt.{c.col_tracking_status} = '{REHABILITATED_STATUS}'

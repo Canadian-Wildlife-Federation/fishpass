@@ -239,6 +239,13 @@ class SupportObjectTests(unittest.TestCase):
         """blank2null() moved to init/database/wcrp_support.sql."""
         self.assertFalse(hasattr(ctt, "BLANK2NULL_FUNCTION_SQL"))
 
+    def test_yaml_enum_defs_are_loaded_for_sync(self):
+        """The WCRP enum definitions live in fishpass.yaml and are synced at runtime."""
+        enums = ctt.wcrp_tracking_enums()
+        self.assertIn("tt_structure_type", enums)
+        self.assertIn("Dam", enums["tt_structure_type"])
+        self.assertIn("Rehabilitated barrier", enums["tt_structure_list_status_type"])
+
     def test_required_enum_types(self):
         """_required_enum_types lists every support.tt_* type the table uses."""
         types_needed = ctt._required_enum_types(["chn"])

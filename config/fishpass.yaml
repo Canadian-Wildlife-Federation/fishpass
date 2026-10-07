@@ -24,9 +24,90 @@ database_roles:
   grant_select:
     - cwf_user
 
-# WCRP ranking/reporting defaults. Each can be overridden per plan by setting a field of
-# the same name in config/models/<plan_code>.yaml (see fishpass_engine/docs/inputs/model_plan_file.md).
+# WCRP tracking-table enum defaults. These values are synced into the support schema at the
+# start of each model run so the database remains aligned with the YAML source of truth.
 wcrp:
+  tracking_table_enums:
+    tt_structure_type:
+      - 'Dam'
+      - 'Stream crossing - OBS'
+      - 'Stream crossing - CBS'
+      - 'Stream crossing - Ford'
+      - 'Other'
+      - 'None'
+    tt_structure_list_status_type:
+      - 'Excluded structure'
+      - 'Data-deficient barrier'
+      - 'Non-actionable barrier'
+      - 'Priority barrier'
+      - 'Rehabilitated barrier'
+    tt_passability_asmt_type:
+      - 'Informal assessment'
+      - 'Rapid assessment'
+      - 'Full assessment'
+    tt_assessment_step_type:
+      - 'Informal assessment'
+      - 'Passability assessment'
+      - 'Habitat confirmation'
+      - 'Detailed habitat investigation'
+      - 'Engineering design'
+      - 'Rehabilitated'
+      - 'Post-rehabilitation monitoring'
+      - 'Other'
+    tt_excl_reason_type:
+      - 'Passable'
+      - 'No structure'
+      - 'No key upstream habitat'
+      - 'No structure and key upstream habitat'
+    tt_excl_method_type:
+      - 'Imagery review'
+      - 'Informal assessment'
+      - 'Field assessment'
+      - 'Local knowledge'
+    tt_partial_passability_type:
+      - 'Yes'
+      - 'No'
+      - 'Unknown'
+    tt_partial_passability_notes_type:
+      - 'Proportion of individuals'
+      - 'Proportion of time'
+    tt_upstr_hab_quality_type:
+      - 'High'
+      - 'Medium'
+      - 'Low'
+      - 'N/A or unassessed'
+    tt_constructability_type:
+      - 'Difficult'
+      - 'Moderate'
+      - 'Easy'
+    tt_priority_type:
+      - 'High'
+      - 'Medium'
+      - 'Low'
+    tt_rehab_type:
+      - 'Removal/decommissioned'
+      - 'Replacement - OBS'
+      - 'Replacement - CBS'
+      - 'Retrofit'
+    tt_next_steps_type:
+      - 'Barrier assessment'
+      - 'Barrier reassessment'
+      - 'In-depth passage assessment'
+      - 'Habitat confirmation'
+      - 'In-depth habitat investigation'
+      - 'Identify barrier owner'
+      - 'Engage with barrier owner'
+      - 'Engage with partners'
+      - 'Engage in public consultation'
+      - 'Bring barrier to regulator'
+      - 'Commission engineering designs'
+      - 'Fundraise'
+      - 'Rehabilitation'
+      - 'Post-rehabilitation monitoring'
+      - 'Correct deficiencies'
+      - 'Leave until end of lifecycle'
+      - 'Non-actionable'
+      - 'N/A - project complete'
   # combined_output_table_vw flags label_in_wcrp_<sp>_<lc> = 'yes' when the barrier's
   # rank_combined is at or above (numerically <=) this rank.
   label_in_wcrp_rank_threshold: 30

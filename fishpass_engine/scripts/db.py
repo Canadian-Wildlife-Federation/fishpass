@@ -128,6 +128,20 @@ def wcrp_setting(plan, key, config_path=DEFAULT_CONFIG_FILE):
 	return value
 
 
+def wcrp_tracking_enums(config_path=DEFAULT_CONFIG_FILE):
+	"""Return the tracking-table enum definitions from fishpass.yaml as an ordered dict."""
+	section = config_section("wcrp", config_path)
+	enums = section.get("tracking_table_enums")
+	if not isinstance(enums, dict):
+		sys.exit(f"Config file {config_path} is missing the 'wcrp.tracking_table_enums' section")
+	for name, values in enums.items():
+		if not isinstance(name, str) or not name.startswith("tt_"):
+			sys.exit(f"Invalid WCRP enum name in {config_path}: {name!r}")
+		if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+			sys.exit(f"WCRP enum values for {name!r} must be a list of strings in {config_path}")
+	return enums
+
+
 # =================================================================================
 #  ROLE SWITCHING + CATALOG CHECKS
 # =================================================================================

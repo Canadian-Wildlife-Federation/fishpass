@@ -22,7 +22,11 @@ import time
 
 from compute_statistics import compute_statistics
 from create_combined_view import check_cabd_fdw_sources, create_combined_view
-from create_wcrp_tracking_table import check_tracking_table_columns, ensure_tracking_table
+from create_wcrp_tracking_table import (
+    check_tracking_table_columns,
+    ensure_tracking_table,
+    sync_wcrp_tracking_enums,
+)
 from db import db_connect, require_env
 from load_habitat import load_habitat
 from load_stream_network import get_source_srid, init_output_schema, load_stream_network
@@ -67,6 +71,8 @@ def main():
 	conn = db_connect()
 	try:
 		with conn.cursor() as cursor:
+			logger.info("Syncing WCRP enums from config/fishpass.yaml")
+			sync_wcrp_tracking_enums(conn, cursor)
 			logger.info("Setting up WCRP tracking table")
 			tracking_table = f"{plan['code']}_wcrp.tracking_table_{plan['code']}"
 			if ensure_tracking_table(conn, cursor, plan):

@@ -57,6 +57,7 @@ from db import (
     require_env,
     table_columns,
     table_exists,
+    wcrp_tracking_enums,
 )
 from model_plan import IDENTIFIER_RE, load_model_plan
 
@@ -68,11 +69,47 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# Enum types AND the blank2null trigger function live in the shared support schema
-# (both created by init/database/wcrp_support.sql).
+# The blank2null trigger function lives in the shared support schema and is created once
+# by init/database/wcrp_support.sql. The enum types are synced from config/fishpass.yaml
+# at the start of each run.
 SUPPORT = "support"
 BLANK2NULL_FUNCTION = "blank2null"
 SUPPORT_SQL_SCRIPT = "init/database/wcrp_support.sql"
+
+
+def sync_wcrp_tracking_enums(conn, cursor, config_path=None):
+    """Ensure each support.tt_* enum matches the configured YAML values, appending '' last."""
+    enum_defs = wcrp_tracking_enums(config_path) if config_path else wcrp_tracking_enums()
+    cursor.execute("create schema if not exists support;")
+    for type_name, values in enum_defs.items():
+        if not values:
+            continue
+        type_qualified = f"{SUPPORT}.{quote_ident(type_name)}"
+        escaped_values = [v.replace("'", "''") for v in values]
+        value_sql = ", ".join(f"'{v}'" for v in escaped_values)
+
+        cursor.execute(
+            f"SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+            f"WHERE n.nspname = %s AND t.typname = %s;",
+            (SUPPORT, type_name),
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(
+                f"CREATE TYPE {type_qualified} AS ENUM ({value_sql}, '');"
+            )
+            logger.info("Created enum %s from config/fishpass.yaml", type_qualified)
+            continue
+
+        cursor.execute(f"ALTER TYPE {type_qualified} ADD VALUE IF NOT EXISTS '';")
+        for value in escaped_values:
+            cursor.execute(
+                f"ALTER TYPE {type_qualified} ADD VALUE IF NOT EXISTS '{value}' BEFORE '';"
+            )
+    conn.commit()
+
+
+# Keep the legacy module-level name used by the tests and callers.
+WCRP_TRACKING_ENUMS = wcrp_tracking_enums
 
 # Non-species columns, in the canonical cheticamp order. Each entry is
 # (column_name, type_sql). Enum types are qualified to the support schema. The
@@ -136,6 +173,10 @@ def _validate_species(species_list):
     for sp in species_list:
         if not isinstance(sp, str) or not IDENTIFIER_RE.match(sp):
             sys.exit(f"Invalid species code (unsafe for a column name): {sp!r}")
+
+
+# Backward-compatible alias used by tests and callers.
+wcrp_tracking_enums = WCRP_TRACKING_ENUMS
 
 
 def _build_columns(species_list):
@@ -373,6 +414,7 @@ def main():
     conn = db_connect()
     try:
         with conn.cursor() as cursor:
+            sync_wcrp_tracking_enums(conn, cursor)
             create_tracking_table(conn, cursor, plan)
     except Exception:
         conn.rollback()
