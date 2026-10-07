@@ -109,6 +109,30 @@ class RunComponentStatisticsTests(unittest.TestCase):
 		# 1 remaining row.
 		self.assertEqual([len(rows) for rows in flush_calls], [2, 1])
 
+	def test_large_component_writes_are_sliced(self):
+		# A single component returning more rows than WRITE_BATCH_SIZE must not go out as one
+		# statement -- it's split into WRITE_BATCH_SIZE slices.
+		def fake_process_component(graph_id, edges, barriers, habitat_rows, plan, species_params):
+			return {f"E{i}": {} for i in range(5)}, [], {}
+
+		flush_calls = []
+
+		def fake_flush(cursor, output_schema, rows):
+			if rows:  # the trailing flush of an empty remainder is a no-op in the real function
+				flush_calls.append(list(rows))
+
+		with mock.patch.object(cs, "WRITE_BATCH_SIZE", 2), \
+			mock.patch.object(cs, "fetch_graph_id_counts", return_value=[(1, 5)]), \
+			mock.patch.object(cs, "fetch_bundle_edges", return_value={1: [{"id": "E0"}]}), \
+			mock.patch.object(cs, "fetch_bundle_barriers", return_value={}), \
+			mock.patch.object(cs, "fetch_bundle_habitat_updates", return_value={}), \
+			mock.patch.object(cs, "process_component", side_effect=fake_process_component), \
+			mock.patch.object(cs, "flush_stats_writes", side_effect=fake_flush):
+			cs.run_component_statistics(object(), "model_test", {}, {})
+
+		self.assertEqual([len(rows) for rows in flush_calls], [2, 2, 1])
+		self.assertEqual(sum(len(rows) for rows in flush_calls), 5)
+
 	def test_large_component_processed_alone(self):
 		cursor = object()
 		plan = {}
