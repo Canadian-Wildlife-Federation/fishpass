@@ -19,7 +19,7 @@ Table Structure:
 
 | Field | Type | Comment |
 | :---- | :---- | :---- |
-| barrier_id | uuid | primary key; `all_barriers.id` of the barrier (note: `id`, not `feature_id`) |
+| feature_id | uuid | primary key; `all_barriers.feature_id` of the barrier (CABD `cabd_id`, gradient barrier id, or new structure id); matches the combined output view and tracking table |
 | group_id | numeric | Barrier group. Barriers start grouped by `mainstem_id`; each group is then repeatedly split at the barrier that maximizes the running average of `<lifecycle>_functional_weighted_disconnected_upstream_length_km`, working from the barrier with the most upstream barriers to the one with the fewest. NULL if the barrier couldn't be placed on a mainstem. |
 | num_barriers_group | integer | number of barriers in the group (1 if `group_id` is NULL) |
 | total_\<lifecycle\>_hab_gain_group_km | numeric | sum of `<lifecycle>_functional_upstream_length_km` over the group |
@@ -33,4 +33,4 @@ Table Structure:
 | \<species\>_spawn_passability | numeric | the barrier's spawn passability for the species (from `passability_status_spawn`) |
 | \<species\>_rear_passability | numeric | the barrier's rear passability for the species (from `passability_status_rear`) |
 
-**Tracking-table check:** before ranking, every tracking-table `barrier_id` is checked against `<output_schema>.all_barriers.feature_id` (this replaces a foreign key, which couldn't survive the output schema rebuild). Any ids with no match are logged as a warning and those rows can't affect ranking (e.g. a rehabilitated barrier won't be added back in) until they're corrected.
+**Tracking-table check:** before ranking, every tracking-table `feature_id` is checked against `<output_schema>.all_barriers.feature_id` (this replaces a foreign key, which couldn't survive the output schema rebuild). Any ids with no match are logged as a warning and those rows can't affect ranking (e.g. a rehabilitated barrier won't be added back in) until they're corrected.

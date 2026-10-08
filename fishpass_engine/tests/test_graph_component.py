@@ -119,14 +119,15 @@ class FetchBundleEdgesTests(unittest.TestCase):
 
 class FetchBundleBarriersTests(unittest.TestCase):
 	def test_groups_by_graph_id(self):
-		cursor = FakeCursor(fetch_results=[[(5, "b1", "e1", "e0", {"es_rear": 0}, "natural")]])
+		cursor = FakeCursor(fetch_results=[[(5, "internal-b1", "feature-b1", "e1", "e0", {"es_rear": 0}, "natural")]])
 		result = gc.fetch_bundle_barriers(cursor, "model_test", [5, 6])
 		self.assertEqual(
 			result,
 			{
 				5: [
 					{
-						"id": "b1",
+						"id": "internal-b1",
+						"feature_id": "feature-b1",
 						"edge_id": "e1",
 						"upstream_edge_id": "e0",
 						"species_passability_value": {"es_rear": 0},
@@ -137,6 +138,7 @@ class FetchBundleBarriersTests(unittest.TestCase):
 		)
 		sql, params = cursor.executed[0]
 		self.assertIn("s.upstream_edge_id", sql)
+		self.assertIn("s.feature_id", sql)
 		self.assertIn("WHERE e.graph_id = ANY(%s)", sql)
 		self.assertEqual(params, ([5, 6],))
 
@@ -355,6 +357,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "feature-b1",
 				"edge_id": "E3",
 				"upstream_edge_id": None,
 				"species_passability_value": {"es_rear": 1, "es_spawn": 0},
@@ -387,6 +390,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "feature-b1",
 				"edge_id": "E3",
 				"species_passability_value": {"es_rear": 0, "es_spawn": 1},
 				"structure_type": "natural",
@@ -444,6 +448,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		return [
 			{
 				"id": "b1",
+				"feature_id": "feature-b1",
 				"edge_id": "E8",
 				"upstream_edge_id": "E7",
 				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0},
@@ -451,6 +456,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 			},
 			{
 				"id": "b2",
+				"feature_id": "feature-b2",
 				"edge_id": "E9",
 				"upstream_edge_id": "E8",
 				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0.25},
@@ -586,8 +592,8 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		self.assertEqual(stats["downstream_natural_spawn_count"], 0)
 		self.assertEqual(stats["downstream_natural_rear_count"], 0)
 		self.assertEqual(stats["downstream_natural_spawnrear_count"], 0)
-		self.assertEqual(stats["downstream_anthro_spawn_ids"], ["b2"])
-		self.assertEqual(stats["downstream_anthro_rear_ids"], ["b2"])
+		self.assertEqual(stats["downstream_anthro_spawn_ids"], ["feature-b2"])
+		self.assertEqual(stats["downstream_anthro_rear_ids"], ["feature-b2"])
 		self.assertEqual(stats["downstream_natural_spawn_ids"], [])
 		self.assertEqual(stats["downstream_natural_rear_ids"], [])
 

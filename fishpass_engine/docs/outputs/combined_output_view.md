@@ -13,9 +13,9 @@ The single WCRP reporting view, with one row per actionable barrier. Rebuilt by 
 | `<output_schema>.all_barriers` (base) | -- |
 | `cabd_fdw.dams_view_en` | `cabd_id = all_barriers.feature_id` (NULL for non-dams / non-CABD structures) |
 | `cabd_fdw.stream_crossings_sites_structures_view_en` | `cabd_id = all_barriers.feature_id` (NULL for non-crossings / non-CABD structures) |
-| `<code>_wcrp.tracking_table_<code>` | `barrier_id = all_barriers.feature_id` |
-| `<output_schema>.anthropogenic_barriers_<sp>` (per species) | `id = all_barriers.id` |
-| `<code>_wcrp.ranked_barriers_<sp>_<lc>_<code>` (per species/lifecycle) | `barrier_id = all_barriers.id` |
+| `<code>_wcrp.tracking_table_<code>` | `feature_id = all_barriers.feature_id` |
+| `<output_schema>.anthropogenic_barriers_<sp>` (per species) | `feature_id = all_barriers.feature_id` |
+| `<code>_wcrp.ranked_barriers_<sp>_<lc>_<code>` (per species/lifecycle) | `feature_id = all_barriers.feature_id` |
 
 All joins are LEFT JOINs, so a missing match gives NULLs and never drops the barrier.
 
@@ -27,7 +27,7 @@ View Structure, in column order. `<sp>` = each reporting species and `<lc>` = ea
 
 | Field | Type | Comment |
 | :---- | :---- | :---- |
-| barrier_id | uuid | `all_barriers.feature_id` (cabd_id, gradient barrier id, or new structure id) -- the same id the tracking table uses |
+| feature_id | uuid | `all_barriers.feature_id` (CABD `cabd_id`, gradient barrier id, or new structure id); the same value stored in the tracking table |
 | feature_type | varchar | from `all_barriers` |
 | snapped_geometry | point | from `all_barriers` |
 | dam_name_en, dam_use, owner, ownership_type, structure_type, construction_material, up_passage_type, down_passage_route | (CABD) | CABD dam attributes; NULL unless the barrier is a CABD dam. Set by `DAM_ATTRIBUTES` in `create_combined_view.py`. |
@@ -53,7 +53,7 @@ View Structure, in column order. `<sp>` = each reporting species and `<lc>` = ea
 | rank_w_total_upstr_hab_\<sp\>_\<lc\> | numeric | potential gain rank (ranked table `rank_w_total_upstr_<lc>_hab`) |
 | rank_combined_\<sp\>_\<lc\> | numeric | combined rank, from the ranked table |
 | label_in_wcrp_\<sp\>_\<lc\> | text | `yes` when `rank_combined <= label_in_wcrp_rank_threshold`, otherwise `no` (including barriers that weren't ranked) |
-| internal_name ... supporting_links | (tracking) | every non-species tracking table column, in tracking-table order (see [tracking_table.md](./tracking_table.md)), except `barrier_id`. `road_name` and `structure_type` are renamed `tracking_road_name` and `tracking_structure_type` so they don't clash with the CABD columns of the same name. Set by `TRACKING_NON_SPECIES_COLUMNS`. |
+| internal_name ... supporting_links | (tracking) | every non-species tracking table column, in tracking-table order (see [tracking_table.md](./tracking_table.md)), except `feature_id`. `road_name` and `structure_type` are renamed `tracking_road_name` and `tracking_structure_type` so they don't clash with the CABD columns of the same name. Set by `TRACKING_NON_SPECIES_COLUMNS`. |
 | structure_list_status_\<sp\>, partial_passability_\<sp\>, partial_passability_notes_\<sp\> | (tracking) | per-species tracking columns, for each reporting species |
 
 The per-species blocks are ordered by species code, and the per-(species, lifecycle) ranking blocks by (species, lifecycle).

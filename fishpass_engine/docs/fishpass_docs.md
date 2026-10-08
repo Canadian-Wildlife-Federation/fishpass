@@ -358,7 +358,7 @@ computed directly from `streams.species_stats` in one pass over the network (see
 build `<code>_wcrp.ranked_barriers_<species>_<lifecycle>_<code>` (see
 [outputs/ranked_barriers.md](./outputs/ranked_barriers.md)):
 
-- First, check every tracking-table `barrier_id` against the freshly built `all_barriers.feature_id`
+- First, check every tracking-table `feature_id` against the freshly built `all_barriers.feature_id`
   (this replaces a foreign key, which couldn't survive the output schema rebuild). Ids with no match
   are logged as a warning; those rows can't affect ranking until corrected.
 - Select the barriers from `anthropogenic_barriers_<species>` that are not fully passable for the
@@ -370,7 +370,7 @@ build `<code>_wcrp.ranked_barriers_<species>_<lifecycle>_<code>` (see
 - Compute per-group habitat gains, downstream group ids, and three ranks: immediate gain
   (`rank_w_avg_gain_tiered`, with groups below `min_avg_gain_km` moved to the bottom), potential
   gain (`rank_w_total_upstr_<lifecycle>_hab`), and their combination (`rank_combined`).
-- Write a slim output table containing only `barrier_id` and the ranking fields.
+- Write a slim output table containing only `feature_id` and the ranking fields.
 
 ### Create Combined View
 

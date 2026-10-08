@@ -8,8 +8,8 @@ All structures used in the analysis, including those loaded from the CABD databa
 
 | Field Name | Values | Description |
 | :---- | :---- | :---- |
-| id | uuid | Unique system defined identifier. |
-| feature\_id | uuid | Identifier of the source feature (cabd\_id, gradient barrier id or new structure id) |
+| id | uuid | Internal system identifier, generated when `all_barriers` is rebuilt; not stable between model runs. |
+| feature\_id | uuid | Stable source identifier (CABD `cabd_id`, gradient barrier id, or persistent new structure id); this is the barrier key used in exports and tracking. |
 | feature\_type | varchar | Barrier feature type. |
 | source | varchar | Source of barrier (cabd, gradient, new structure) |
 | structure\_type | varchar | Natural vs anthropogenic |
@@ -68,9 +68,11 @@ This column contains the following fields for each species identifies in the mod
 
 ### Views: `<output_schema>.anthropogenic_barriers_<species>` and `<output_schema>.natural_barriers_<species>`
 
-Each output species there will be an anthropogenic_barriers and natural_barriers view that includes each of the statistics fields computed available as a column.
+Each reporting species has anthropogenic and natural views with the computed statistics available as columns. Both expose one identifier, `feature_id`, whose value is `all_barriers.feature_id`. They omit the per-run `all_barriers.id`, which is used internally by the ranking work table.
 
 
 ### Views: `<output_schema>.unsnapped_barriers`
 
-This table contains a list of all the barriers that could not be snapped to the stream network.
+This view contains barriers that could not be snapped to the stream network. It exposes one identifier, `feature_id`, and omits the per-run `all_barriers.id`.
+
+The `*_ids` columns in barrier and stream statistics contain `all_barriers.feature_id` values, not the per-run `all_barriers.id`.

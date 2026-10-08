@@ -22,8 +22,8 @@ _km, matching the ranked tables. The length columns are not hand-listed: they
 come from postprocess_views.barrier_length_fields(), the same source that
 defines the anthropogenic_barriers_<sp> view columns.
 
-Join keys (they differ, by design of the upstream pipeline):
-  * ranking tables  -> all_barriers.id       (ranked_barriers.barrier_id = id)
+Join keys:
+	* ranking tables -> all_barriers.feature_id (ranked_barriers.feature_id = feature_id)
   * tracking table  -> all_barriers.feature_id
   * CABD dam/xing   -> all_barriers.feature_id = <fdw>.cabd_id  (empty for new
                        structures like beaver dams that aren't in the CABD)
@@ -87,7 +87,7 @@ STREAM_CROSSING_ATTRIBUTES = [
 # see build_view_sql. Each is output as <species>_<column>_km, in km.
 
 # Tracking columns to surface (non-species). Mirrors create_wcrp_tracking_table.py.
-# barrier_id is intentionally omitted (the view's barrier_id comes from
+# tracking_table.feature_id is intentionally omitted (the view's feature_id comes from
 # all_barriers). road_name and structure_type collide with CABD crossing/dam
 # attribute names, so they are re-aliased on output (see TRACKING_ALIAS_OVERRIDES).
 TRACKING_NON_SPECIES_COLUMNS = [
@@ -267,7 +267,7 @@ def build_view_sql(plan, natural_feature_types):
 	select_cols = []
 
 	# 1. Identity + base all_barriers fields.
-	select_cols.append(f"{ab}.{quote_ident('feature_id')} AS {quote_ident('barrier_id')}")
+	select_cols.append(f"{ab}.{quote_ident('feature_id')}")
 	select_cols.append(f"{ab}.{quote_ident('feature_type')}")
 	select_cols.append(f"{ab}.{quote_ident('snapped_geometry')}")
 
@@ -307,20 +307,20 @@ def build_view_sql(plan, natural_feature_types):
 		f"LEFT JOIN {STREAM_CROSSINGS_FDW} {sc} "
 		f"ON {sc}.{quote_ident(CABD_JOIN_KEY)} = {ab}.{quote_ident('feature_id')}",
 		f"LEFT JOIN {wcrp_id}.{quote_ident('tracking_table_' + watershed)} {tt} "
-		f"ON {tt}.{quote_ident('barrier_id')} = {ab}.{quote_ident('feature_id')}",
+		f"ON {tt}.{quote_ident('feature_id')} = {ab}.{quote_ident('feature_id')}",
 	]
 	for sp in sorted(by_species):
 		bp = f"bp_{sp}"
 		joins.append(
 			f"LEFT JOIN {schema_id}.{quote_ident('anthropogenic_barriers_' + sp)} {bp} "
-			f"ON {bp}.{quote_ident('id')} = {ab}.{quote_ident('id')}"
+			f"ON {bp}.{quote_ident('feature_id')} = {ab}.{quote_ident('feature_id')}"
 		)
 	for sp, lc in pairs:
 		rk = f"rk_{sp}_{lc}"
 		ranked_table = f"ranked_barriers_{sp}_{lc}_{watershed}"
 		joins.append(
 			f"LEFT JOIN {wcrp_id}.{quote_ident(ranked_table)} {rk} "
-			f"ON {rk}.{quote_ident('barrier_id')} = {ab}.{quote_ident('id')}"
+			f"ON {rk}.{quote_ident('feature_id')} = {ab}.{quote_ident('feature_id')}"
 		)
 
 	# --- WHERE: exclude natural feature types (waterfalls, gradients, ...). Any
