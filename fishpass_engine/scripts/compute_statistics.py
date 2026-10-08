@@ -14,12 +14,12 @@ from barrier_tables import (
 from db import quote_ident
 from graph_component import (
 	build_graph_id_bundles,
-	build_stats_write_rows,
 	fetch_bundle_barriers,
 	fetch_bundle_edges,
 	fetch_bundle_habitat_updates,
 	fetch_graph_id_counts,
 	flush_stats_writes,
+	iter_stats_write_rows,
 	process_component,
 )
 from load_stream_network import (
@@ -33,7 +33,10 @@ logger = logging.getLogger(__name__)
 
 NO_DATA = -9999  # sentinel used in chyf_raw for a missing smoothed-elevation (M ordinate) value
 BUNDLE_EDGE_BUDGET = 100_000  # max total edge count packed into one bulk-fetch bundle of graph_ids
-WRITE_BATCH_SIZE = 5000  # streams.species_stats write-back chunk size
+WRITE_BATCH_SIZE = 5000  # streams.species_stats write-back chunk size (rows)
+# Cap on the same chunk in serialised JSON characters: an edge low on a large river carries the id
+# of every barrier upstream of it, so WRITE_BATCH_SIZE such rows can exceed Postgres's 1GB message limit.
+WRITE_BATCH_BYTES = 100_000_000
 
 
 def compute_effective_length_and_gradient(cursor, output_schema):
@@ -97,46 +100,56 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 	written in bundles of up to BUNDLE_EDGE_BUDGET total edges to cut down on per-component
 	round trips without loading the whole network into memory at once -- components are bundled
 	largest-first (fetch_graph_id_counts), so large components end up alone in their own bundle
-	and small components pack together. Returns the full list of barrier stat rows (across every
-	component) for write_barrier_stat_tables."""
+	and small components pack together. Each component's edge stats are serialised and flushed
+	to streams as they are produced, and each bundle's barrier stats are written to all_barriers
+	before the next bundle is fetched, so neither accumulates across the run. Returns the number
+	of barriers written."""
 
 	graph_id_counts = fetch_graph_id_counts(cursor, output_schema)
 	bundles = build_graph_id_bundles(graph_id_counts, BUNDLE_EDGE_BUDGET)
 	total_components = len(graph_id_counts)
 	logger.info("Step 5-9: processing %d connected component(s) in %d bundle(s)...", total_components, len(bundles))
 
-	all_barrier_rows = []
 	pending_write_rows = []
+	pending_write_bytes = 0
 	components_done = 0
+	barriers_done = 0
 
 	for bundle_num, graph_ids in enumerate(bundles, start=1):
 		edges_by_graph = fetch_bundle_edges(cursor, output_schema, graph_ids)
 		barriers_by_graph = fetch_bundle_barriers(cursor, output_schema, graph_ids)
 		habitat_by_graph = fetch_bundle_habitat_updates(cursor, output_schema, graph_ids)
+		bundle_barrier_rows = []
 
 		for graph_id in graph_ids:
-			edges = edges_by_graph.get(graph_id, [])
+			# Popped (and edges dropped below) so a component's fetched rows are released once
+			# it has been processed, rather than held while its stats are written out.
+			edges = edges_by_graph.pop(graph_id, [])
 			components_done += 1
 			if not edges:
 				continue
 
-			species_stats, barrier_rows, route_measures = process_component(
+			edge_stats, barrier_rows, route_measures = process_component(
 				graph_id,
 				edges,
-				barriers_by_graph.get(graph_id, []),
-				habitat_by_graph.get(graph_id, []),
+				barriers_by_graph.pop(graph_id, []),
+				habitat_by_graph.pop(graph_id, []),
 				plan,
 				species_params_by_code,
 			)
-			all_barrier_rows.extend(barrier_rows)
-			pending_write_rows.extend(build_stats_write_rows(species_stats, route_measures))
+			del edges
+			bundle_barrier_rows.extend(barrier_rows)
 
-			# Sliced rather than flushed whole: one component can add millions of rows at once,
-			# and a single statement carrying all of them exceeds Postgres's 1GB message limit.
-			if len(pending_write_rows) >= WRITE_BATCH_SIZE:
-				for start in range(0, len(pending_write_rows), WRITE_BATCH_SIZE):
-					flush_stats_writes(cursor, output_schema, pending_write_rows[start : start + WRITE_BATCH_SIZE])
-				pending_write_rows.clear()
+			# Flushed as edge_stats is consumed rather than once per component: one component
+			# can produce millions of rows, and holding all of their JSON at once is the largest
+			# single allocation in this phase.
+			for row in iter_stats_write_rows(edge_stats, route_measures):
+				pending_write_rows.append(row)
+				pending_write_bytes += len(row[0])
+				if len(pending_write_rows) >= WRITE_BATCH_SIZE or pending_write_bytes >= WRITE_BATCH_BYTES:
+					flush_stats_writes(cursor, output_schema, pending_write_rows)
+					pending_write_rows.clear()
+					pending_write_bytes = 0
 
 			if components_done % 100 == 0 or components_done == total_components:
 				logger.info(
@@ -147,8 +160,11 @@ def run_component_statistics(cursor, output_schema, plan, species_params_by_code
 					len(bundles),
 				)
 
+		write_barrier_stat_tables(cursor, output_schema, bundle_barrier_rows)
+		barriers_done += len(bundle_barrier_rows)
+
 	flush_stats_writes(cursor, output_schema, pending_write_rows)
-	return all_barrier_rows
+	return barriers_done
 
 
 def compute_statistics(conn, cursor, plan, srid):
@@ -177,19 +193,15 @@ def compute_statistics(conn, cursor, plan, srid):
 
 	logger.info("Compute Edge Statistics")
 	species_params_by_code = load_species_params()
-	barrier_rows = run_component_statistics(cursor, output_schema, plan, species_params_by_code)  # steps 5-9
+	# steps 5-9; also writes each barrier's stats to all_barriers.species_stats as it goes
+	barriers_done = run_component_statistics(cursor, output_schema, plan, species_params_by_code)
 	conn.commit()
-	logger.info("Compute Edge Statistics - done: (%d barrier(s) processed).", len(barrier_rows))
+	logger.info("Compute Edge Statistics - done: (%d barrier(s) processed).", barriers_done)
 
 	logger.info("Rebuilding streams indexes")
 	create_streams_bulk_write_indexes(cursor, output_schema)
 	conn.commit()
 	logger.info("Rebuilding streams indexes - done.")
-
-	logger.info("Writing barrier stat tables")
-	write_barrier_stat_tables(cursor, output_schema, barrier_rows)
-	conn.commit()
-	logger.info("Writing barrier stat tables - done.")
 
 	if plan["include_gradient_barriers"]:
 		create_and_populate_gradient_barriers_cache(cursor, output_schema, srid)
