@@ -48,7 +48,7 @@ BEGIN
 		SELECT 1 FROM information_schema.foreign_tables
 		WHERE foreign_table_schema = 'chyf2_fdw' AND foreign_table_name = 'eflowpath'
 	) THEN
-		EXECUTE 'IMPORT FOREIGN SCHEMA chyf2 LIMIT TO (eflowpath, eflowpath_properties, aoi, shoreline) FROM SERVER chyf2_fdw_server INTO chyf2_fdw';
+		EXECUTE 'IMPORT FOREIGN SCHEMA chyf2 LIMIT TO (eflowpath, eflowpath_properties, aoi, shoreline, names) FROM SERVER chyf2_fdw_server INTO chyf2_fdw';
 	END IF;
 END
 $$;
