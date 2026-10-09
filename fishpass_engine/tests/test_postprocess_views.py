@@ -45,8 +45,12 @@ class CreateNaturalAnthropogenicViewsTests(unittest.TestCase):
 		sql_natural, _ = cursor.executed[0]
 		sql_anthro, _ = cursor.executed[1]
 		self.assertIn('CREATE VIEW "model_test".natural_barriers', sql_natural)
+		self.assertIn("SELECT feature_id, feature_type", sql_natural)
+		self.assertNotIn("SELECT id, feature_id", sql_natural)
 		self.assertIn("WHERE structure_type = 'natural' AND species_stats IS NOT NULL", sql_natural)
 		self.assertIn('CREATE VIEW "model_test".anthropogenic_barriers', sql_anthro)
+		self.assertIn("SELECT feature_id, feature_type", sql_anthro)
+		self.assertNotIn("SELECT id, feature_id", sql_anthro)
 		self.assertIn("WHERE structure_type = 'anthropogenic' AND species_stats IS NOT NULL", sql_anthro)
 
 
@@ -66,7 +70,11 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 
 		sql_natural_as = next(sql for sql, _ in cursor.executed if 'natural_barriers_as"' in sql)
 		self.assertIn("WHERE structure_type = 'natural' AND species_stats IS NOT NULL", sql_natural_as)
-		self.assertIn("id, feature_id, feature_type,", sql_natural_as)
+		self.assertIn("SELECT feature_id, feature_type,", sql_natural_as)
+		self.assertNotIn("SELECT id, feature_id", sql_natural_as)
+		sql_anthro_as = next(sql for sql, _ in cursor.executed if 'anthropogenic_barriers_as"' in sql)
+		self.assertIn("SELECT feature_id, feature_type,", sql_anthro_as)
+		self.assertNotIn("SELECT id, feature_id", sql_anthro_as)
 		self.assertIn(
 			"(species_passability_value->>'as_spawn')::double precision AS passability_status_spawn",
 			sql_natural_as,
@@ -217,6 +225,8 @@ class CreateUnsnappedBarriersViewTests(unittest.TestCase):
 		sql, _ = cursor.executed[0]
 		self.assertIn('CREATE VIEW "model_test".unsnapped_barriers', sql)
 		self.assertIn('FROM "model_test".all_barriers', sql)
+		self.assertIn("SELECT feature_id, feature_type", sql)
+		self.assertNotIn("SELECT id, feature_id", sql)
 		self.assertIn("WHERE snapped_geometry IS NULL", sql)
 
 

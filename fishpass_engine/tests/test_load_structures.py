@@ -132,6 +132,26 @@ class FakeCursor:
 		return self._fetchone_results.pop(0) if self._fetchone_results else None
 
 
+class LoadNewStructuresTests(unittest.TestCase):
+	def test_persistent_new_structure_id_becomes_feature_id(self):
+		cursor = FakeCursor(
+			fetch_results=[[("persistent-structure-id", "beaver_dam", {"es": 0.25}, {"es": 1.0}, b"point")]]
+		)
+		plan = {
+			"structure_new_table": "support.new_structures",
+			"structure_types": ["beaver_dam"],
+			"update_scope": ["all"],
+			"target_species": ["es"],
+		}
+
+		self.assertEqual(ls.load_new_structures(cursor, "model_test", plan, 4617), 1)
+		select_sql, _ = cursor.executed[0]
+		insert_sql, params = cursor.executemany_calls[0]
+		self.assertIn("SELECT new_structure_id", select_sql)
+		self.assertIn('(feature_id, feature_type, species_passability_value, source, geometry)', insert_sql)
+		self.assertEqual(params[0][0], "persistent-structure-id")
+
+
 class ExplodeStructureUpdateTests(unittest.TestCase):
 	def test_rear_only_sets_only_rear_key(self):
 		result = ls.explode_structure_update({"es": 0.5}, None, ["es"])
@@ -178,6 +198,7 @@ class ApplyStructureUpdatesOrderingTests(unittest.TestCase):
 		)
 		self.assertEqual(updated, 1)
 		update_sql, update_params = cursor.executed[-1]
+		self.assertIn("SELECT feature_id, passability_status_rear", cursor.executed[0][0])
 		self.assertIn("species_passability_value || %s::jsonb", update_sql)
 		self.assertEqual(json.loads(update_params[0]), {"es_rear": 0})
 		self.assertEqual(update_params[1], "f1")

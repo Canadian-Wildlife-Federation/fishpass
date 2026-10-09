@@ -37,15 +37,14 @@ def create_and_populate_gradient_barriers_cache(cursor, output_schema, srid):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"""
 		CREATE TABLE {schema_ident}.gradient_barriers (
-			id uuid PRIMARY KEY,
-			feature_id uuid NOT NULL,
+			feature_id uuid PRIMARY KEY,
 			species_passability_value jsonb NOT NULL,
 			geometry geometry(point, {srid}) NOT NULL,
 			snapped_geometry geometry(point, 4617)
 		);
 	""")
 	cursor.execute(f"""
-		INSERT INTO {schema_ident}.gradient_barriers (id, feature_id, species_passability_value, geometry, snapped_geometry)
-		SELECT id, feature_id, species_passability_value, geometry, snapped_geometry
+		INSERT INTO {schema_ident}.gradient_barriers (feature_id, species_passability_value, geometry, snapped_geometry)
+		 SELECT feature_id, species_passability_value, geometry, snapped_geometry
 		FROM {schema_ident}.all_barriers WHERE source = 'gradient_barriers'
 	""")

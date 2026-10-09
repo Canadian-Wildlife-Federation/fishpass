@@ -440,7 +440,7 @@ class ComputeSpeciesLengthStatsTests(unittest.TestCase):
 
 class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 	def test_excludes_barriers_own_position_from_upstream_count(self):
-		barriers = [{"id": "b1", "edge_id": "E3", "structure_type": "anthropogenic"}]
+		barriers = [{"id": "b1", "feature_id": "b1", "edge_id": "E3", "structure_type": "anthropogenic"}]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0, "E4": 0},
@@ -465,7 +465,7 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		self.assertEqual(result["b1"]["es"]["downstream_anthro_spawnrear_count"], 0)
 
 	def test_upstream_anthro_ids_excludes_own_id_but_keeps_others(self):
-		barriers = [{"id": "b1", "edge_id": "E3", "structure_type": "anthropogenic"}]
+		barriers = [{"id": "internal-b1", "feature_id": "feature-b1", "edge_id": "E3", "structure_type": "anthropogenic"}]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},
@@ -476,10 +476,10 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 				"downstream_natural_rear_ids": {"E3": []},
 				"downstream_anthro_spawn_ids": {"E3": []},
 				"downstream_anthro_rear_ids": {"E3": []},
-				# "E3"'s accumulated upstream_anthro_*_ids includes this barrier's own id (b1,
+				# "E3"'s accumulated upstream_anthro_*_ids includes this barrier's own feature_id,
 				# appended at "here") plus one further upstream barrier (b0), for both lifestages.
-				"upstream_anthro_spawn_ids": {"E3": ["b0", "b1"]},
-				"upstream_anthro_rear_ids": {"E3": ["b0", "b1"]},
+				"upstream_anthro_spawn_ids": {"E3": ["feature-b0", "feature-b1"]},
+				"upstream_anthro_rear_ids": {"E3": ["feature-b0", "feature-b1"]},
 			},
 		}
 		barrier_here_by_species = {
@@ -489,11 +489,11 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		result = ls.compute_barrier_upstream_downstream_stats(
 			barriers, barrier_stats, barrier_here_by_species, species_length_stats
 		)
-		self.assertEqual(result["b1"]["es"]["upstream_anthro_spawn_ids"], ["b0"])
-		self.assertEqual(result["b1"]["es"]["upstream_anthro_rear_ids"], ["b0"])
+		self.assertEqual(result["internal-b1"]["es"]["upstream_anthro_spawn_ids"], ["feature-b0"])
+		self.assertEqual(result["internal-b1"]["es"]["upstream_anthro_rear_ids"], ["feature-b0"])
 
 	def test_lifestage_specific_counts_exclude_own_position_upstream(self):
-		barriers = [{"id": "b1", "edge_id": "E3", "structure_type": "natural"}]
+		barriers = [{"id": "b1", "feature_id": "b1", "edge_id": "E3", "structure_type": "natural"}]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawn_count": {"E3": 1, "E4": 1},
@@ -522,6 +522,7 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "b1",
 				"edge_id": "E3",
 				"upstream_edge_id": "E2",
 				"structure_type": "natural",
@@ -573,6 +574,7 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "b1",
 				"edge_id": "E3",
 				"upstream_edge_id": "E2",
 				"structure_type": "anthropogenic",
@@ -619,6 +621,7 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "b1",
 				"edge_id": "E3",
 				"upstream_edge_id": "E2",
 				"structure_type": "anthropogenic",
@@ -656,6 +659,7 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "b1",
 				"edge_id": "E3",
 				"upstream_edge_id": None,
 				"structure_type": "natural",

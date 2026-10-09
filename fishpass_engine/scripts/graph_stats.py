@@ -258,14 +258,14 @@ def is_impassable(species_passability_value, species, impassable_threshold, life
 
 
 def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold):
-	"""barriers: list of dicts {"edge_id", "species_passability_value", "structure_type", "id"}
+	"""barriers: list of dicts {"edge_id", "species_passability_value", "structure_type", "id", "feature_id"}
 	for barriers snapped onto edges in this component (structure_type is 'natural' or
 	'anthropogenic', per Load Structures step 7).
 
 	Returns {species: {"natural": {edge_id: 0/1}, "anthro": {edge_id: 0/1},
-	"natural_spawn_ids"/"natural_rear_ids"/"anthro_spawn_ids"/"anthro_rear_ids": {edge_id: [id,...]},
+	"natural_spawn_ids"/"natural_rear_ids"/"anthro_spawn_ids"/"anthro_rear_ids": {edge_id: [feature_id,...]},
 	"natural_spawn"/"natural_rear"/"anthro_spawn"/"anthro_rear": {edge_id: 0/1}}} -- "here" meaning
-	"at this edge's own start", per network_break.py's marker-attachment convention. A barrier's id
+	"at this edge's own start", per network_break.py's marker-attachment convention. A barrier's feature_id
 	lands in a lifestage's id list iff it's impassable for that lifestage specifically -- a barrier
 	blocking both lifestages appears in both lists (no combined "spawnrear" id list is produced).
 
@@ -292,7 +292,7 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 			for lc in LIFESTAGES:
 				if is_impassable(b["species_passability_value"], species, impassable_threshold, lifestage=lc):
 					lifestage_flags[f"{struct}_{lc}"][eid] = 1
-					lifestage_ids[f"{struct}_{lc}_ids"][eid].append(b["id"])
+					lifestage_ids[f"{struct}_{lc}_ids"][eid].append(b["feature_id"])
 
 		natural = {
 			eid: int(bool(lifestage_flags["natural_spawn"][eid] or lifestage_flags["natural_rear"][eid]))

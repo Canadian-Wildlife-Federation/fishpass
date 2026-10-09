@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # equality match.
 REHABILITATED_STATUS = "Rehabilitated barrier"
 
-# all_barriers table (in the output schema) that tracking barrier_ids are
+# all_barriers table (in the output schema) that tracking feature_ids are
 # validated against each run -- this is the FK replacement.
 ALL_BARRIERS_TABLE = "all_barriers"
 ALL_BARRIERS_KEY = "feature_id"
@@ -194,13 +194,16 @@ def sql_create_working_table(c):
 	return f"""
     DROP TABLE IF EXISTS {c.work} CASCADE;
     SELECT b.*
+        ,ab.id AS id
         -- Only ADDED column(s): passability surfaced as decimal for readability.
         ,b.{c.col_passability_spawn}::decimal AS {c.out_passability_spawn}
         ,b.{c.col_passability_rear}::decimal  AS {c.out_passability_rear}
         INTO {c.work}
     FROM {c.barriers_view} b
+    JOIN {c.all_barriers} ab
+        ON ab.feature_id = b.feature_id
     LEFT JOIN {c.tracking_table} tt
-        ON tt.barrier_id = b.feature_id
+        ON tt.feature_id = b.feature_id
     WHERE (
                 {passability_predicate}
              OR tt.{c.col_tracking_status} = '{REHABILITATED_STATUS}'
@@ -241,7 +244,7 @@ def sql_derive_stream_id_up(c):
     ALTER TABLE {c.work} ADD COLUMN IF NOT EXISTS stream_id_up uuid;
     UPDATE {c.work} SET stream_id_up = NULL;
     WITH ids AS (
-        SELECT a.id AS stream_id, b.id AS barrier_id
+        SELECT a.id AS stream_id, b.id AS work_id
         FROM {c.streams} a, {c.work} b
         WHERE st_dwithin(a.{STREAM_GEOM_COL}, b.{BARRIER_GEOM_COL}, 0.01)
           AND st_dwithin(st_endpoint(a.{STREAM_GEOM_COL}), b.{BARRIER_GEOM_COL}, 0.01)
@@ -249,7 +252,7 @@ def sql_derive_stream_id_up(c):
     UPDATE {c.work}
         SET stream_id_up = a.stream_id
         FROM ids a
-        WHERE a.barrier_id = {c.work}.id;
+        WHERE a.work_id = {c.work}.id;
     """
 
 
@@ -382,7 +385,7 @@ def sql_downstream_group_ids(c):
     downstr_group AS (
         SELECT db_.id, db_.group_id AS current_group, db_.downstr_id, rb.group_id
         FROM downstr_barriers AS db_
-        JOIN {c.work} rb ON rb.id = db_.downstr_id
+        JOIN {c.work} rb ON rb.feature_id = db_.downstr_id
         WHERE db_.group_id != rb.group_id
     ),
     dg_arrays AS (
@@ -484,7 +487,7 @@ def sql_assign_ranks(c):
 
 
 def sql_finalize_output_table(c):
-	"""Write the slim output table: barrier_id + ONLY the ranking fields generated
+	"""Write the slim output table: feature_id + ONLY the ranking fields generated
 	by this script, then drop the working table. Ownership/grants match the
 	tracking-table convention. The barriers, tracking, and ranked tables are
 	joined into a single export view downstream, so no source columns are copied.
@@ -498,7 +501,7 @@ def sql_finalize_output_table(c):
     DROP TABLE IF EXISTS {c.ranked} CASCADE;
     CREATE TABLE {c.ranked} AS
     SELECT
-        id AS barrier_id,
+        feature_id,
         group_id,
         num_barriers_group,
         {c.gain_total},
@@ -512,8 +515,8 @@ def sql_finalize_output_table(c):
         {c.out_passability_spawn},
         {c.out_passability_rear}
     FROM {c.work};
-    ALTER TABLE {c.ranked} ALTER COLUMN barrier_id SET NOT NULL;
-    ALTER TABLE {c.ranked} ADD PRIMARY KEY (barrier_id);
+    ALTER TABLE {c.ranked} ALTER COLUMN feature_id SET NOT NULL;
+    ALTER TABLE {c.ranked} ADD PRIMARY KEY (feature_id);
     ALTER TABLE {c.ranked} OWNER TO {owner};{grants}
     DROP TABLE IF EXISTS {c.work} CASCADE;
     """
@@ -536,23 +539,23 @@ STAGES = [
 # =================================================================================
 #  TRACKING-TABLE VALIDATION (FK replacement)
 # =================================================================================
-def validate_tracking_barrier_ids(cursor, c):
+def validate_tracking_feature_ids(cursor, c):
 	"""Per-run replacement for the dropped foreign key: flag any tracking
-	barrier_id that has no matching feature_id in the freshly-built all_barriers.
+    feature_id that has no matching feature_id in the freshly-built all_barriers.
 	Such rows silently fail to join during ranking, so surfacing them here is how
 	a mistyped id gets caught. Returns the list of offending ids (empty if OK)."""
 	cursor.execute(
 		f"""
-        SELECT tt.barrier_id
+        SELECT tt.feature_id
         FROM {c.tracking_table} tt
-        LEFT JOIN {c.all_barriers} ab ON ab.{ALL_BARRIERS_KEY} = tt.barrier_id
+        LEFT JOIN {c.all_barriers} ab ON ab.{ALL_BARRIERS_KEY} = tt.feature_id
         WHERE ab.{ALL_BARRIERS_KEY} IS NULL;
         """
 	)
 	bad_ids = [row[0] for row in cursor.fetchall()]
 	if bad_ids:
 		logger.warning(
-			"%s has %d barrier_id(s) with no match in %s: %s. These rows will "
+            "%s has %d feature_id(s) with no match in %s: %s. These rows will "
 			"not participate in ranking until the ids are corrected.",
 			c.tracking_table,
 			len(bad_ids),
@@ -560,7 +563,7 @@ def validate_tracking_barrier_ids(cursor, c):
 			", ".join(str(b) for b in bad_ids),
 		)
 	else:
-		logger.info("Tracking barrier_id validation passed for %s", c.tracking_table)
+		logger.info("Tracking feature_id validation passed for %s", c.tracking_table)
 	return bad_ids
 
 
@@ -572,7 +575,7 @@ def run_ranking(conn, cursor, plan):
 	committing per stage. Called from run_model.py after create_barrier_views,
 	reusing the run's conn/cursor.
 
-	Validates the tracking table's barrier_ids against all_barriers once (it is
+    Validates the tracking table's feature_ids against all_barriers once (it is
 	per-watershed, shared across all species/lifecycles), then ranks each pair
 	with rehabilitated structures folded in.
 	"""
@@ -586,7 +589,7 @@ def run_ranking(conn, cursor, plan):
 	# connection across phases, so the role change must not leak past ranking.
 	with as_role(conn, cursor, owner):
 		probe = RankingConfig(plan, *pairs[0])
-		validate_tracking_barrier_ids(cursor, probe)
+		validate_tracking_feature_ids(cursor, probe)
 
 		for species, lifecycle in pairs:
 			c = RankingConfig(plan, species, lifecycle)

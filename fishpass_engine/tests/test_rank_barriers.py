@@ -209,9 +209,12 @@ class SQLBuildersTests(unittest.TestCase):
 		sql = rb.sql_create_working_table(self.config)
 		self.assertIn("DROP TABLE IF EXISTS", sql)
 		self.assertIn("SELECT b.*", sql)
+		self.assertIn('JOIN "model_ns"."all_barriers" ab', sql)
+		self.assertIn("ON ab.feature_id = b.feature_id", sql)
+		self.assertIn("ab.id AS id", sql)
 		self.assertIn('LEFT JOIN "ns_wcrp"."tracking_table_ns" tt', sql)
-		self.assertIn("ON tt.barrier_id = b.feature_id", sql)
-		self.assertNotIn("ON tt.barrier_id = b.id", sql)
+		self.assertIn("ON tt.feature_id = b.feature_id", sql)
+		self.assertNotIn("ON tt.feature_id = b.id", sql)
 		self.assertIn("'Rehabilitated barrier'", sql)
 
 	def test_convert_lengths_covers_every_view_length_column(self):
@@ -245,11 +248,18 @@ class SQLBuildersTests(unittest.TestCase):
 		roles = db.get_db_roles()
 		sql = rb.sql_finalize_output_table(self.config)
 		table = self.config.ranked
+		self.assertIn("        feature_id,", sql)
+		self.assertNotIn("barrier_id", sql)
 		self.assertIn(f"ALTER TABLE {table} OWNER TO {db.quote_ident(roles['owner'])}", sql)
 		for role in roles["grant_all"]:
 			self.assertIn(f"GRANT ALL ON TABLE {table} TO {db.quote_ident(role)}", sql)
 		for role in roles["grant_select"]:
 			self.assertIn(f"GRANT SELECT ON TABLE {table} TO {db.quote_ident(role)}", sql)
+
+	def test_downstream_group_lookup_uses_feature_id_arrays(self):
+		sql = rb.sql_downstream_group_ids(self.config)
+		self.assertIn("JOIN \"ns_wcrp\".\"ranked_barriers_chn_rear_ns_work\" rb ON rb.feature_id = db_.downstr_id", sql)
+		self.assertNotIn("rb.id = db_.downstr_id", sql)
 
 	def test_not_runnable_standalone(self):
 		"""rank_barriers is only run via run_model.py."""

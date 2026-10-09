@@ -6,8 +6,7 @@ Table Structure:
 
 | Field | Type | Comment |
 | :---- | :---- | :---- |
-| id | uuid | system generated primary key, copied from `all_barriers.id` |
-| feature_id | uuid | id of the source row in the gradient barriers table |
+| feature_id | uuid | primary key; copied from `all_barriers.feature_id` and the source gradient row's `id`. This ID is not stable/durable across gradient-table recomputations, which generate new source IDs. |
 | species_passability_value | jsonb | populated from the `actual_species` value from the source table for each lifecycle |
 | geometry | point | original location of barrier |
 | snapped_geometry | point (4617) | point snapped to the chyf stream network |

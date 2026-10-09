@@ -253,7 +253,7 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 	barrier_here_by_species for that specific species, which is 1 only if this position is
 	actually impassable for that species -- not simply "this barrier's structure_type", since the
 	same position may be passable for one species and not another) -- upstream_anthro_spawn_ids/
-	upstream_anthro_rear_ids are filtered the same way, dropping this barrier's own id from each
+	upstream_anthro_rear_ids are filtered the same way, dropping this barrier's own feature_id from each
 	list rather than subtracting a count. "downstream of the barrier" is that edge's downstream
 	count/ids as-is (already excludes the barrier's own position -- see graph_stats.py). The length
 	fields have no analogous subtraction, but are read at a different edge entirely: the barrier's
@@ -263,7 +263,7 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 	edge. upstream_edge_id is None for a barrier snapped at a multi-edge confluence (see
 	network_break.py); the length fields are then also None.
 
-	Returns {barrier_id: {species: {upstream_natural_spawnrear_count, upstream_anthro_spawnrear_count,
+	Returns {internal_barrier_id: {species: {upstream_natural_spawnrear_count, upstream_anthro_spawnrear_count,
 	downstream_natural_spawnrear_count, downstream_anthro_spawnrear_count, downstream_natural_spawn_ids,
 	downstream_natural_rear_ids, downstream_anthro_spawn_ids, downstream_anthro_rear_ids,
 	upstream_anthro_spawn_ids, upstream_anthro_rear_ids, and the same upstream_/downstream_ counts
@@ -274,8 +274,8 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 	<lc>_functional_weighted_connected_upstream_length/<lc>_functional_weighted_disconnected_upstream_length}}.
 	barrier_stats is compute_barrier_stats' output, barrier_here_by_species is
 	compute_barrier_here's output, species_length_stats is compute_species_length_stats' output;
-	barriers is the same list passed to compute_barrier_here (needs "id", "edge_id",
-	"upstream_edge_id", and "species_passability_value").
+	barriers is the same list passed to compute_barrier_here (needs internal "id", stable
+	"feature_id", "edge_id", "upstream_edge_id", and "species_passability_value").
 
 	The four weighted upstream-length fields are this barrier's own raw passability for that
 	species/lifestage (b["species_passability_value"], not the downstream-chain passability used
@@ -296,7 +296,8 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 
 	result = {}
 	for b in barriers:
-		barrier_id, edge_id, upstream_edge_id = b["id"], b["edge_id"], b.get("upstream_edge_id")
+		barrier_row_id, feature_id = b["id"], b["feature_id"]
+		edge_id, upstream_edge_id = b["edge_id"], b.get("upstream_edge_id")
 		passability_value = b.get("species_passability_value") or {}
 		per_species = {}
 		for species, stats in barrier_stats.items():
@@ -307,10 +308,10 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 				"downstream_anthro_spawn_ids": stats["downstream_anthro_spawn_ids"].get(edge_id, []),
 				"downstream_anthro_rear_ids": stats["downstream_anthro_rear_ids"].get(edge_id, []),
 				"upstream_anthro_spawn_ids": [
-					bid for bid in stats.get("upstream_anthro_spawn_ids", {}).get(edge_id, []) if bid != barrier_id
+					bid for bid in stats.get("upstream_anthro_spawn_ids", {}).get(edge_id, []) if bid != feature_id
 				],
 				"upstream_anthro_rear_ids": [
-					bid for bid in stats.get("upstream_anthro_rear_ids", {}).get(edge_id, []) if bid != barrier_id
+					bid for bid in stats.get("upstream_anthro_rear_ids", {}).get(edge_id, []) if bid != feature_id
 				],
 			}
 			for data_key, count_key in count_keys:
@@ -368,5 +369,5 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 				)
 
 			per_species[species] = species_stats
-		result[barrier_id] = per_species
+		result[barrier_row_id] = per_species
 	return result

@@ -16,10 +16,10 @@ IMPORTANT -- schema choice: the tracking table lives in its own persistent
 output_schema from scratch on every run (init_output_schema does DROP SCHEMA
 ... CASCADE), which would wipe hand-entered tracking data and cascade-drop any
 constraints. The <code>_wcrp schema is never touched by a model run, so the
-data survives. barrier_id is a plain uuid (matching all_barriers.feature_id in
+data survives. feature_id is a plain uuid (matching all_barriers.feature_id in
 type) but carries NO foreign key -- a cross-schema FK into the ephemeral
 output_schema couldn't survive the rebuild. rank_barriers.py validates every
-tracking barrier_id against the freshly-built all_barriers on each run instead.
+tracking feature_id against the freshly-built all_barriers on each run instead.
 
 Database-wide prerequisites: the support.tt_* enum types are defined in
 config/fishpass.yaml (wcrp.tracking_table_enums) and synced into the database by
@@ -37,7 +37,7 @@ Guarantees:
   * The per-table blank2null trigger IS idempotent (drop-if-exists then create).
 
 Column layout follows the enum-canonical cheticamp definition: support.tt_*
-enum types, numeric money fields, text date fields, barrier_id (uuid) as the
+enum types, numeric money fields, text date fields, feature_id (uuid) as the
 primary key. Per-species enum columns are generated from plan['target_species'].
 
 Owner/grant roles come from config/fishpass.yaml (database_roles). Database
@@ -110,12 +110,12 @@ def sync_wcrp_tracking_enums(conn, cursor, config_path=None):
 # Non-species columns, in the canonical cheticamp order. Each entry is
 # (column_name, type_sql). Enum types are qualified to the support schema. The
 # per-species blocks are spliced in at the right positions in _build_columns().
-# barrier_id is a uuid (same type as all_barriers.feature_id) and is the primary
+# feature_id is a uuid (same type as all_barriers.feature_id) and is the primary
 # key -- see _build_create_table_sql(). There is intentionally no foreign key
 # (see the module docstring); rank_barriers.py validates ids per run instead.
 _LEADING_COLUMNS = [
 	("internal_name", "character varying"),
-	("barrier_id", "uuid NOT NULL"),
+	("feature_id", "uuid NOT NULL"),
 	("watercourse_name", "character varying"),
 	("road_name", "character varying"),
 	("structure_type", f"{SUPPORT}.tt_structure_type"),
@@ -194,14 +194,14 @@ def _build_create_table_sql(schema, table, species_list):
 	"""Render the CREATE TABLE statement (no IF NOT EXISTS -- creation is
 	guarded separately and must fail rather than silently skip).
 
-	barrier_id is the primary key. There is deliberately no foreign key onto
+	feature_id is the primary key. There is deliberately no foreign key onto
 	all_barriers: that table lives in the ephemeral output_schema and is
 	rebuilt every model run, so a cross-schema FK couldn't survive. Referential
 	integrity is enforced per run by rank_barriers.py instead.
 	"""
 	columns = _build_columns(species_list)
 	col_defs = [f"    {quote_ident(name)} {type_sql}" for name, type_sql in columns]
-	col_defs.append(f"    CONSTRAINT {quote_ident(table + '_pkey')} PRIMARY KEY ({quote_ident('barrier_id')})")
+	col_defs.append(f"    CONSTRAINT {quote_ident(table + '_pkey')} PRIMARY KEY ({quote_ident('feature_id')})")
 	qualified = f"{quote_ident(schema)}.{quote_ident(table)}"
 	return f"CREATE TABLE {qualified} (\n" + ",\n".join(col_defs) + "\n);"
 

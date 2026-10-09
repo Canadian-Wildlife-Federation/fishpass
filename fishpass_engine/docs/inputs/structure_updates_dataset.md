@@ -6,12 +6,14 @@ The structure updates dataset provides a mechanism for users to overwrite inform
 
 **Table:** support.structure_updates
 
+Existing test tables created with the former `barrier_id` column must be dropped and recreated from [fishpass_support_tables.sql](../../../init/database/fishpass_support_tables.sql); `CREATE TABLE IF NOT EXISTS` does not alter an existing table.
+
 | Column | Type | Description |
 | :---- | :---- | :---- |
 | id | uuid | Primary key for the table. |
-| barrier_id | uuid | Barrier identifier for the update. If the feature is from CABD, `barrier_id` = `cabd_id`; otherwise `barrier_id` = `new_structure_id`. There can be multiple entries for the same barrier. |
+| feature_id | uuid | Barrier identifier for the update. If the feature is from CABD, `feature_id` = `cabd_id`; otherwise `feature_id` = `new_structure_id`. There can be multiple entries for the same feature. |
 | feature_type | varchar | Feature type (either from CABD or the new structure feature type). For reference purposes only; not used for analysis. |
-| update_type | enum: authoritative, local_override | If there are multiple entries for a given barrier_id, the code should prioritize the local_override entry for reporting. |
+| update_type | enum: authoritative, local_override | If there are multiple entries for a given feature_id, the code should prioritize the local_override entry for reporting. |
 | update_scope | array[varchar] | Values: 'all', or any specific plan code (e.g.: cheticamp_wcrp). Determines how the structure update is applied — to all plan outputs, or just an individual plan output. The plan will take all updates with `update_scope` = 'all' OR `update_scope` contains the plan code. Conflict resolution is detailed under update_type. |
 | passability_status_rear | jsonb | Rearing passability status per species as a JSON string: `{"es": 0.25, "wl": 1}`. If this is null, or a species of interest doesn't exist in the JSON string, that species keeps the structure's existing default passability value (from CABD or `support.new_structures`) rather than being forced to a full barrier. |
 | passability_status_spawn | jsonb | Spawning passability status per species as a JSON string, same format and fallback rule as `passability_status_rear`. |

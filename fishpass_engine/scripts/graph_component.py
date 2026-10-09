@@ -101,7 +101,8 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(
 		f"""
-		SELECT e.graph_id, s.id, s.downstream_edge_id, s.upstream_edge_id, s.species_passability_value, s.structure_type
+		SELECT e.graph_id, s.id, s.feature_id, s.downstream_edge_id, s.upstream_edge_id,
+			s.species_passability_value, s.structure_type
 		FROM {schema_ident}.all_barriers s
 		JOIN {schema_ident}.streams e ON e.id = s.downstream_edge_id
 		WHERE e.graph_id = ANY(%s)
@@ -113,10 +114,11 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 		by_graph.setdefault(graph_id, []).append(
 			{
 				"id": row[0],
-				"edge_id": row[1],
-				"upstream_edge_id": row[2],
-				"species_passability_value": row[3],
-				"structure_type": row[4],
+				"feature_id": row[1],
+				"edge_id": row[2],
+				"upstream_edge_id": row[3],
+				"species_passability_value": row[4],
+				"structure_type": row[5],
 			}
 		)
 	return by_graph

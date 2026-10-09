@@ -6,7 +6,9 @@ Hand-entered, per-barrier tracking data for a WCRP (e.g. structure list status, 
 
 **Persistence:** the table lives in the persistent `<code>_wcrp` schema, NOT the plan's `output_schema`, because the output schema is dropped and rebuilt on every model run. Once created it is never dropped, replaced, or altered by any script. Model runs skip creation when it exists, and running `create_wcrp_tracking_table.py` directly against an existing table stops with an error without making changes.
 
-**No foreign key:** `barrier_id` matches `<output_schema>.all_barriers.feature_id` in type, but a foreign key into the ephemeral output schema couldn't survive the rebuild. Instead, every model run checks each `barrier_id` against the freshly built `all_barriers` and logs any that don't match (see [ranked_barriers.md](./ranked_barriers.md)).
+**No foreign key:** `feature_id` matches `<output_schema>.all_barriers.feature_id` in type, but a foreign key into the ephemeral output schema couldn't survive the rebuild. Instead, every model run checks each `feature_id` against the freshly built `all_barriers` and logs any that don't match (see [ranked_barriers.md](./ranked_barriers.md)).
+
+Existing tracking tables created with the former `barrier_id` column are not altered automatically. Drop and recreate test tables before running with this schema; the recreated table will use `feature_id`.
 
 **Support objects:** the `support.tt_*` enum types used below are defined in the `wcrp.tracking_table_enums` section of [config/fishpass.yaml](../../../config/fishpass.yaml), and every model run syncs them into the database before the tracking table is created or checked. The `support.blank2null()` trigger function comes from [init/database/wcrp_support.sql](../../../init/database/wcrp_support.sql), which is run by hand once per database.
 
@@ -21,7 +23,7 @@ Table Structure (in column order; `<sp>` = species code):
 | Field | Type | Comment |
 | :---- | :---- | :---- |
 | internal_name | varchar | |
-| barrier_id | uuid | primary key; `all_barriers.feature_id` of the barrier (cabd_id, gradient barrier id, or new structure id) |
+| feature_id | uuid | primary key; `all_barriers.feature_id` of the barrier (cabd_id, gradient barrier id, or new structure id) |
 | watercourse_name | varchar | |
 | road_name | varchar | shown as `tracking_road_name` in the combined view |
 | structure_type | support.tt_structure_type | Dam, Stream crossing - OBS, Stream crossing - CBS, Stream crossing - Ford, Other, None. Shown as `tracking_structure_type` in the combined view. |
