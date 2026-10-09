@@ -4,6 +4,7 @@ __pycache__/
 # Local scripts containing credentials -- never commit these
 run_local.ps1
 *.local.ps1
+local_env.ps1
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
