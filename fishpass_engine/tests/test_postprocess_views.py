@@ -46,8 +46,14 @@ class CreateNaturalAnthropogenicViewsTests(unittest.TestCase):
 		sql_anthro, _ = cursor.executed[1]
 		self.assertIn('CREATE VIEW "model_test".natural_barriers', sql_natural)
 		self.assertIn("WHERE structure_type = 'natural' AND species_stats IS NOT NULL", sql_natural)
+		self.assertIn('LEFT JOIN "model_test".cabd_waterfalls wf', sql_natural)
+		self.assertIn("wf.cabd_id = ab.feature_id", sql_natural)
+		self.assertIn("wf.fall_name_en, wf.fall_height_m", sql_natural)
 		self.assertIn('CREATE VIEW "model_test".anthropogenic_barriers', sql_anthro)
 		self.assertIn("WHERE structure_type = 'anthropogenic' AND species_stats IS NOT NULL", sql_anthro)
+		self.assertNotIn("cabd_waterfalls", sql_anthro)
+		self.assertNotIn("fall_name_en", sql_anthro)
+		self.assertNotIn("fall_height_m", sql_anthro)
 
 
 class CreateSpeciesBarrierViewsTests(unittest.TestCase):

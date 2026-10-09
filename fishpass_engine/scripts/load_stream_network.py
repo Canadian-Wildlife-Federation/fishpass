@@ -21,6 +21,7 @@ STREAMS_FIELDS = (
 	"ef_subtype",
 	"rank",
 	"length",
+	"rivernameid1",
 	"from_nexus_id",
 	"to_nexus_id",
 	"ecatchment_id",
@@ -134,6 +135,7 @@ def create_streams_table(cursor, output_schema, srid):
 			ef_subtype smallint,
 			rank int,
 			length double precision,
+			rivernameid1 uuid,
 			from_nexus_id uuid,
 			to_nexus_id uuid,
 			ecatchment_id uuid,
@@ -216,6 +218,18 @@ def copy_streams(cursor, output_schema, aoi_ids):
 		""",
 			(aoi_ids,),
 		)
+
+	cursor.execute(f"""
+		ALTER TABLE {schema_ident}.streams
+		ADD COLUMN stream_name_en text;
+
+		UPDATE {schema_ident}.streams s
+		SET stream_name_en = n.name_en
+		FROM chyf2_fdw.names n
+		JOIN chyf_raw.flowpath fp
+			on n.name_id = fp.rivernameid1
+		WHERE s.id = fp.id;
+	""")
 	return cursor.rowcount
 
 

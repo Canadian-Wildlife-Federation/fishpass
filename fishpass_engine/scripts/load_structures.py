@@ -63,6 +63,15 @@ def create_cabd_table(cursor, output_schema, feature_type, srid):
 		);
 	""")
 
+	if feature_type == 'waterfalls':
+		cursor.execute(f"""
+			ALTER TABLE {schema_ident}.{table_ident} 
+			ADD COLUMN fall_name_en text;
+
+			ALTER TABLE {schema_ident}.{table_ident} 
+			ADD COLUMN fall_height_m real;
+		""")
+
 
 def create_structures_table(cursor, output_schema, srid):
 	schema_ident = quote_ident(output_schema)
@@ -167,6 +176,13 @@ def populate_cabd_table(cursor, output_schema, feature_type, short_names, target
 		for feature in fetch_feature_type(feature_type, short_names):
 			count += 1
 			yield build_cabd_row(feature, target_species)
+
+	if feature_type == 'waterfalls':
+		columns = "(cabd_id, species_passability_value, passability_status_code, fall_name_en, fall_height_m, geometry)"
+		values = f"(%s, %s::jsonb, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
+	else:
+		columns = "(cabd_id, species_passability_value, passability_status_code, geometry)"
+		values = f"(%s, %s::jsonb, %s, ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
 
 	cursor.executemany(
 		f"""
