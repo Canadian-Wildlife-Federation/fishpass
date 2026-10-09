@@ -157,11 +157,11 @@ def fetch_bundle_habitat_updates(cursor, output_schema, graph_ids):
 	return by_graph
 
 
-def assemble_edge_json(
-	edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats
-):
-	"""Returns species_stats, {edge_id: {...}} ready for json.dumps, matching the
-	Outputs section fields for <output_schema>.streams. Upstream length fields (accessible
+def iter_edge_json(edge_ids, reporting_species_lifecycles, accessibility, barrier_stats, habitat, species_length_stats):
+	"""Yields (edge_id, {...}) for each of edge_ids, the dict ready for json.dumps and matching
+	the Outputs section fields for <output_schema>.streams. A generator rather than one
+	{edge_id: {...}} dict so a caller writing edges out in batches never holds every edge's entry
+	(or its serialised JSON) at once -- see iter_stats_write_rows. Upstream length fields (accessible
 	length, and per-lifecycle upstream/functional upstream/weighted upstream length aggregates)
 	live on barriers, but the per-edge, non-aggregate "<lc>_weighted_length"/
 	"<lc>_weighted_connected_length"/"<lc>_weighted_disconnected_length" (rear/spawn only) ARE
@@ -171,7 +171,6 @@ def assemble_edge_json(
 	for sp, lc in reporting_species_lifecycles:
 		species_lifecycles.setdefault(sp, set()).add(lc)
 
-	species_stats = {}
 	for eid in edge_ids:
 		entry = {}
 		for species, lifecycles in species_lifecycles.items():
@@ -208,21 +207,18 @@ def assemble_edge_json(
 						f"{lc}_weighted_disconnected_length"
 					][eid]
 			entry[species] = s
-		species_stats[eid] = entry
-
-	return species_stats
+		yield eid, entry
 
 
-def build_stats_write_rows(species_stats, route_measures):
-	"""(species_json, downstream_route_measure, upstream_route_measure, edge_id) tuples for
-	flush_stats_writes, one per edge in species_stats (as returned by assemble_edge_json).
-	route_measures is compute_route_measures' {edge_id: (downstream, upstream)} result -- an edge
-	missing from it (no mainstem_id) writes NULL for both measure columns."""
+def iter_stats_write_rows(edge_stats, route_measures):
+	"""Yields (species_json, downstream_route_measure, upstream_route_measure, edge_id) tuples
+	for flush_stats_writes, one per (edge_id, stats) pair in edge_stats (as yielded by
+	iter_edge_json), serialising each edge only as it is consumed. route_measures is
+	compute_route_measures' {edge_id: (downstream, upstream)} result -- an edge missing from it
+	(no mainstem_id) writes NULL for both measure columns."""
 
-	return [
-		(json.dumps(species_stats[eid], default=str), *route_measures.get(eid, (None, None)), eid)
-		for eid in species_stats
-	]
+	for eid, stats in edge_stats:
+		yield (json.dumps(stats, default=str), *route_measures.get(eid, (None, None)), eid)
 
 
 def flush_stats_writes(cursor, output_schema, rows):
@@ -253,10 +249,10 @@ def flush_stats_writes(cursor, output_schema, rows):
 def process_component(graph_id, edges, barriers, habitat_rows, plan, species_params_by_code):
 	"""Run compute statistics for one graph_id component's already-fetched data (edges,
 	barriers, habitat_rows -- see fetch_bundle_edges/fetch_bundle_barriers/
-	fetch_bundle_habitat_updates). Returns (species_stats, barrier_rows, route_measures):
-	species_stats and route_measures are both ready for build_stats_write_rows, and barrier_rows
-	is barriers annotated with "stats" including each barrier's upstream
-	length figures (for write_barrier_tables to use)."""
+	fetch_bundle_habitat_updates). Returns (edge_stats, barrier_rows, route_measures):
+	edge_stats (an iter_edge_json generator -- consume it once) and route_measures are both
+	ready for iter_stats_write_rows, and barrier_rows is barriers annotated with "stats"
+	including each barrier's upstream length figures (for write_barrier_stat_tables to use)."""
 
 	edges_by_id = {e["id"]: e for e in edges}
 	edge_ids = list(edges_by_id.keys())
@@ -304,7 +300,14 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 		reporting_species_lifecycles,
 		downstream_first_barrier_passability,
 	)
-	species_stats_json = assemble_edge_json(
+	barrier_stats_by_id = compute_barrier_upstream_downstream_stats(
+		barriers, barrier_stats, barrier_here, species_length_stats
+	)
+	barrier_rows = [{**b, "stats": barrier_stats_by_id[b["id"]]} for b in barriers]
+
+	# Built last and left unconsumed: it holds only the per-edge results it reads from, so the
+	# graph and the other intermediates above are released as soon as this returns.
+	edge_stats = iter_edge_json(
 		edge_ids,
 		reporting_species_lifecycles,
 		accessibility,
@@ -312,9 +315,4 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 		habitat,
 		species_length_stats,
 	)
-
-	barrier_stats_by_id = compute_barrier_upstream_downstream_stats(
-		barriers, barrier_stats, barrier_here, species_length_stats
-	)
-	barrier_rows = [{**b, "stats": barrier_stats_by_id[b["id"]]} for b in barriers]
-	return species_stats_json, barrier_rows, route_measures
+	return edge_stats, barrier_rows, route_measures
