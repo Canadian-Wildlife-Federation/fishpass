@@ -9,7 +9,7 @@ All structures used in the analysis, including those loaded from the CABD databa
 | Field Name | Values | Description |
 | :---- | :---- | :---- |
 | id | uuid | Internal system identifier, generated when `all_barriers` is rebuilt; not stable between model runs. |
-| feature\_id | uuid | Stable source identifier (CABD `cabd_id`, gradient barrier id, or persistent new structure id); this is the barrier key used in exports and tracking. |
+| feature\_id | uuid | Source identifier - CABD `cabd_id`, gradient barrier id, or persistent new structure id. This is the barrier key used in exports and tracking. This is stable across model runs for CABD and new structures. For gradient barriers it will change whenever the gradient table is recomputed. |
 | feature\_type | varchar | Barrier feature type. |
 | source | varchar | Source of barrier (cabd, gradient, new structure) |
 | structure\_type | varchar | Natural vs anthropogenic |
