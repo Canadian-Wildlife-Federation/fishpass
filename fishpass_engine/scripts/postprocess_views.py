@@ -48,7 +48,7 @@ def _species_by_lifecycle_map(reporting_species_lifecycles):
 	return species_lifecycles
 
 
-def create_natural_anthropogenic_views(cursor, output_schema):
+def create_natural_anthropogenic_views(cursor, output_schema, plan):
 	"""natural_barriers/anthropogenic_barriers as views over all_barriers, filtered to the
 	structure_type and to rows write_barrier_stat_tables actually populated (species_stats
 	IS NOT NULL) -- i.e. structures that snapped onto a processed edge, matching the row set the
@@ -56,25 +56,29 @@ def create_natural_anthropogenic_views(cursor, output_schema):
 	includes CABD waterfall name and height fields."""
 
 	schema_ident = quote_ident(output_schema)
+	has_waterfalls = "waterfalls" in plan["structure_types"]
 	for table, structure_type in (("natural_barriers", "natural"), ("anthropogenic_barriers", "anthropogenic")):
 		waterfall_columns = ""
 		waterfall_join = ""
 		if structure_type == "natural":
-			waterfall_columns = ", wf.fall_name_en, wf.fall_height_m"
-			waterfall_join = f"""
-			LEFT JOIN {schema_ident}.cabd_waterfalls wf
-				ON wf.cabd_id = ab.feature_id
-			"""
+			if has_waterfalls:
+				waterfall_columns = ", wf.fall_name_en, wf.fall_height_m"
+				waterfall_join = f"""
+				LEFT JOIN {schema_ident}.cabd_waterfalls wf
+					ON wf.cabd_id = ab.feature_id
+				"""
+			else:
+				waterfall_columns = ", NULL::Text AS fall_name_en, NULL::real AS fall_height_m"
 
 		cursor.execute(f"""
 			CREATE VIEW {schema_ident}.{table} AS
-			SELECT ab.id, ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,
+			SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,
 			ab.species_passability_value, ab.geometry, ab.snapped_geometry, ab.species_stats{waterfall_columns}
 			FROM {schema_ident}.all_barriers ab
-			JOIN {schema_ident}.streams s
+			LEFT JOIN {schema_ident}.streams s
 				ON s.id = ab.upstream_edge_id
 			{waterfall_join}
-			WHERE structure_type = '{structure_type}' AND species_stats IS NOT NULL
+			WHERE ab.structure_type = '{structure_type}' AND ab.species_stats IS NOT NULL
 		""")
 
 
@@ -132,7 +136,7 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			view_ident = quote_ident(f"{table_prefix}_{species}")
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
-				SELECT ab.id, ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id
+				SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,
 				(ab.species_passability_value->>'{species}_spawn')::double precision AS passability_status_spawn,
 				(ab.species_passability_value->>'{species}_rear')::double precision AS passability_status_rear,
 				ab.geometry, ab.snapped_geometry,
@@ -303,7 +307,7 @@ def create_barrier_views(conn, cursor, plan):
 
 	output_schema = plan["output_schema"]
 
-	create_natural_anthropogenic_views(cursor, output_schema)
+	create_natural_anthropogenic_views(cursor, output_schema, plan)
 	create_species_barrier_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	create_unsnapped_barriers_view(cursor, output_schema)
 	conn.commit()

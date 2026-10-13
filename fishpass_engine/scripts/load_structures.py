@@ -187,8 +187,8 @@ def populate_cabd_table(cursor, output_schema, feature_type, short_names, target
 	cursor.executemany(
 		f"""
 		INSERT INTO {schema_ident}.{table_ident}
-			(cabd_id, species_passability_value, passability_status_code, geometry)
-		VALUES (%s, %s::jsonb, %s, ST_SetSRID(ST_MakePoint(%s, %s), {srid}))
+			{columns}
+		VALUES {values}
 		""",
 		rows(),
 	)

@@ -219,19 +219,18 @@ def copy_streams(cursor, output_schema, aoi_ids):
 			(aoi_ids,),
 		)
 
+	rowcount = cursor.rowcount
+
 	cursor.execute(f"""
 		ALTER TABLE {schema_ident}.streams
 		ADD COLUMN stream_name_en text;
 
 		UPDATE {schema_ident}.streams s
 		SET stream_name_en = n.name_en
-		FROM chyf2_fdw.names n
-		JOIN chyf_raw.flowpath fp
-			on n.name_id = fp.rivernameid1
-		WHERE s.id = fp.id;
+		FROM chyf_raw.names n
+		WHERE n.name_id = s.rivernameid1;
 	""")
-	return cursor.rowcount
-
+	return rowcount
 
 def compute_upstream_of_keep_ids(cursor, output_schema, edge_ids):
 	"""Return the set of <output_schema>.streams ids to keep for an aoi.upstream_of plan: each
