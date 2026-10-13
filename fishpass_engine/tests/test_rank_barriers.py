@@ -258,7 +258,7 @@ class SQLBuildersTests(unittest.TestCase):
 
 	def test_downstream_group_lookup_uses_feature_id_arrays(self):
 		sql = rb.sql_downstream_group_ids(self.config)
-		self.assertIn("JOIN \"ns_wcrp\".\"ranked_barriers_chn_rear_ns_work\" rb ON rb.feature_id = db_.downstr_id", sql)
+		self.assertIn('JOIN "ns_wcrp"."ranked_barriers_chn_rear_ns_work" rb ON rb.feature_id = db_.downstr_id', sql)
 		self.assertNotIn("rb.id = db_.downstr_id", sql)
 
 	def test_not_runnable_standalone(self):

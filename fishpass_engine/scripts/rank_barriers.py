@@ -541,9 +541,9 @@ STAGES = [
 # =================================================================================
 def validate_tracking_feature_ids(cursor, c):
 	"""Per-run replacement for the dropped foreign key: flag any tracking
-    feature_id that has no matching feature_id in the freshly-built all_barriers.
-	Such rows silently fail to join during ranking, so surfacing them here is how
-	a mistyped id gets caught. Returns the list of offending ids (empty if OK)."""
+	feature_id that has no matching feature_id in the freshly-built all_barriers.
+	    Such rows silently fail to join during ranking, so surfacing them here is how
+	    a mistyped id gets caught. Returns the list of offending ids (empty if OK)."""
 	cursor.execute(
 		f"""
         SELECT tt.feature_id
@@ -555,7 +555,7 @@ def validate_tracking_feature_ids(cursor, c):
 	bad_ids = [row[0] for row in cursor.fetchall()]
 	if bad_ids:
 		logger.warning(
-            "%s has %d feature_id(s) with no match in %s: %s. These rows will "
+			"%s has %d feature_id(s) with no match in %s: %s. These rows will "
 			"not participate in ranking until the ids are corrected.",
 			c.tracking_table,
 			len(bad_ids),
@@ -572,12 +572,12 @@ def validate_tracking_feature_ids(cursor, c):
 # =================================================================================
 def run_ranking(conn, cursor, plan):
 	"""Rank every (species, lifecycle) pair in the plan's reporting_values,
-	committing per stage. Called from run_model.py after create_barrier_views,
-	reusing the run's conn/cursor.
+	    committing per stage. Called from run_model.py after create_barrier_views,
+	    reusing the run's conn/cursor.
 
-    Validates the tracking table's feature_ids against all_barriers once (it is
-	per-watershed, shared across all species/lifecycles), then ranks each pair
-	with rehabilitated structures folded in.
+	Validates the tracking table's feature_ids against all_barriers once (it is
+	    per-watershed, shared across all species/lifecycles), then ranks each pair
+	    with rehabilitated structures folded in.
 	"""
 	pairs = resolve_ranking_pairs(plan)
 	owner = get_db_roles()["owner"]

@@ -465,7 +465,9 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		self.assertEqual(result["b1"]["es"]["downstream_anthro_spawnrear_count"], 0)
 
 	def test_upstream_anthro_ids_excludes_own_id_but_keeps_others(self):
-		barriers = [{"id": "internal-b1", "feature_id": "feature-b1", "edge_id": "E3", "structure_type": "anthropogenic"}]
+		barriers = [
+			{"id": "internal-b1", "feature_id": "feature-b1", "edge_id": "E3", "structure_type": "anthropogenic"}
+		]
 		barrier_stats = {
 			"es": {
 				"upstream_natural_spawnrear_count": {"E3": 0},

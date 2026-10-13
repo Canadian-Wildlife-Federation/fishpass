@@ -148,7 +148,7 @@ class LoadNewStructuresTests(unittest.TestCase):
 		select_sql, _ = cursor.executed[0]
 		insert_sql, params = cursor.executemany_calls[0]
 		self.assertIn("SELECT new_structure_id", select_sql)
-		self.assertIn('(feature_id, feature_type, species_passability_value, source, geometry)', insert_sql)
+		self.assertIn("(feature_id, feature_type, species_passability_value, source, geometry)", insert_sql)
 		self.assertEqual(params[0][0], "persistent-structure-id")
 
 
