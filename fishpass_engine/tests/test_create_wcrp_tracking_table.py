@@ -100,12 +100,12 @@ class BuildColumnsTests(unittest.TestCase):
 		cols = ctt._build_columns(["chn"])
 		col_names = [name for name, _ in cols]
 
-		# barrier_id should be early
-		barrier_id_idx = col_names.index("barrier_id")
-		self.assertLess(barrier_id_idx, 10)
-		# internal_name should come before barrier_id (in leading)
+		# feature_id should be early
+		feature_id_idx = col_names.index("feature_id")
+		self.assertLess(feature_id_idx, 10)
+		# internal_name should come before feature_id (in leading)
 		internal_name_idx = col_names.index("internal_name")
-		self.assertLess(internal_name_idx, barrier_id_idx)
+		self.assertLess(internal_name_idx, feature_id_idx)
 
 	def test_species_columns_inserted_in_order(self):
 		"""_build_columns includes per-species columns in correct positions."""
@@ -180,17 +180,17 @@ class BuildCreateTableSqlTests(unittest.TestCase):
 		self.assertIn('"ns_wcrp"."tracking_table_ns"', sql)
 		self.assertIn("CREATE TABLE", sql)
 
-	def test_barrier_id_is_primary_key(self):
-		"""_build_create_table_sql makes barrier_id the primary key."""
+	def test_feature_id_is_primary_key(self):
+		"""_build_create_table_sql makes feature_id the primary key."""
 		sql = ctt._build_create_table_sql("ns_wcrp", "tracking_table_ns", ["chn"])
 
 		self.assertIn("PRIMARY KEY", sql)
-		self.assertIn("barrier_id", sql)
+		self.assertIn("feature_id", sql)
 		# Should be in the CONSTRAINT
 		self.assertIn("tracking_table_ns_pkey", sql)
 
-	def test_barrier_id_is_uuid_not_null(self):
-		"""_build_create_table_sql defines barrier_id as NOT NULL uuid."""
+	def test_feature_id_is_uuid_not_null(self):
+		"""_build_create_table_sql defines feature_id as NOT NULL uuid."""
 		sql = ctt._build_create_table_sql("ns_wcrp", "tracking_table_ns", ["chn"])
 
 		# Should have uuid NOT NULL

@@ -282,7 +282,7 @@ def apply_structure_updates(cursor, output_schema, plan):
 	table_ident = quote_qualified_ident(plan["structure_update_table"])
 	cursor.execute(
 		f"""
-		SELECT barrier_id, passability_status_rear, passability_status_spawn
+		SELECT feature_id, passability_status_rear, passability_status_spawn
 		FROM {table_ident}
 		WHERE ('all' = ANY(update_scope) OR %s = ANY(update_scope))
 		ORDER BY (update_type = 'local_override'), update_date ASC
@@ -294,11 +294,11 @@ def apply_structure_updates(cursor, output_schema, plan):
 		return 0
 
 	updates_by_feature = {}
-	for barrier_id, passability_status_rear, passability_status_spawn in rows:
+	for feature_id, passability_status_rear, passability_status_spawn in rows:
 		exploded = explode_structure_update(
-			passability_status_rear, passability_status_spawn, plan["target_species"], row_id=barrier_id
+			passability_status_rear, passability_status_spawn, plan["target_species"], row_id=feature_id
 		)
-		updates_by_feature.setdefault(barrier_id, {}).update(exploded)
+		updates_by_feature.setdefault(feature_id, {}).update(exploded)
 
 	schema_ident = quote_ident(output_schema)
 	updated = 0

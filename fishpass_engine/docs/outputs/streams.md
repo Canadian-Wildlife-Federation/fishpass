@@ -27,6 +27,8 @@
 ### **species_statistics
 This column contains the following fields for each species identifies in the model parameters.
 
+The `*_ids` fields below contain barrier `feature_id` values, not the per-run `all_barriers.id`.
+
 
 | Field Name | Type | Description |
 | :---- | :---- | :---- |

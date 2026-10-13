@@ -58,7 +58,7 @@ def create_natural_anthropogenic_views(cursor, output_schema):
 	for table, structure_type in (("natural_barriers", "natural"), ("anthropogenic_barriers", "anthropogenic")):
 		cursor.execute(f"""
 			CREATE VIEW {schema_ident}.{table} AS
-			SELECT id, feature_id, feature_type, species_passability_value, geometry, snapped_geometry, species_stats
+			SELECT feature_id, feature_type, species_passability_value, geometry, snapped_geometry, species_stats
 			FROM {schema_ident}.all_barriers
 			WHERE structure_type = '{structure_type}' AND species_stats IS NOT NULL
 		""")
@@ -118,7 +118,7 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			view_ident = quote_ident(f"{table_prefix}_{species}")
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
-				SELECT id, feature_id, feature_type,
+				SELECT feature_id, feature_type,
 				(species_passability_value->>'{species}_spawn')::double precision AS passability_status_spawn,
 				(species_passability_value->>'{species}_rear')::double precision AS passability_status_rear,
 				geometry, snapped_geometry,
@@ -135,7 +135,7 @@ def create_unsnapped_barriers_view(cursor, output_schema):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"""
 		CREATE VIEW {schema_ident}.unsnapped_barriers AS
-		SELECT id, feature_id, feature_type, species_passability_value, source, structure_type, geometry
+		SELECT feature_id, feature_type, species_passability_value, source, structure_type, geometry
 		FROM {schema_ident}.all_barriers
 		WHERE snapped_geometry IS NULL
 	""")
