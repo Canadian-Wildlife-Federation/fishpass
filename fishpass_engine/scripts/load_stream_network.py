@@ -136,6 +136,7 @@ def create_streams_table(cursor, output_schema, srid):
 			rank int,
 			length double precision,
 			rivernameid1 uuid,
+			stream_name_en text,
 			from_nexus_id uuid,
 			to_nexus_id uuid,
 			ecatchment_id uuid,
@@ -203,34 +204,23 @@ def copy_aois(cursor, output_schema, aoi_ids):
 
 
 def copy_streams(cursor, output_schema, aoi_ids):
+	"""Copy chyf_raw.flowpath edges into <output_schema>.streams, resolving each edge's
+	rivernameid1 to its English name via chyf_raw.names (loaded by chyf_loader)."""
+
 	schema_ident = quote_ident(output_schema)
 	fields = ", ".join(STREAMS_FIELDS)
+	source_fields = ", ".join(f"f.{field}" for field in STREAMS_FIELDS)
+	insert_sql = f"""
+		INSERT INTO {schema_ident}.streams ({fields}, stream_name_en)
+		SELECT {source_fields}, n.name_en
+		FROM chyf_raw.flowpath f
+		LEFT JOIN chyf_raw.names n ON n.name_id = f.rivernameid1
+	"""
 	if aoi_ids is None:
-		cursor.execute(f"""
-			INSERT INTO {schema_ident}.streams ({fields})
-			SELECT {fields} FROM chyf_raw.flowpath;
-		""")
+		cursor.execute(insert_sql)
 	else:
-		cursor.execute(
-			f"""
-			INSERT INTO {schema_ident}.streams ({fields})
-			SELECT {fields} FROM chyf_raw.flowpath WHERE aoi_id = ANY (%s);
-		""",
-			(aoi_ids,),
-		)
-
-	rowcount = cursor.rowcount
-
-	cursor.execute(f"""
-		ALTER TABLE {schema_ident}.streams
-		ADD COLUMN stream_name_en text;
-
-		UPDATE {schema_ident}.streams s
-		SET stream_name_en = n.name_en
-		FROM chyf_raw.names n
-		WHERE n.name_id = s.rivernameid1;
-	""")
-	return rowcount
+		cursor.execute(insert_sql + " WHERE f.aoi_id = ANY (%s)", (aoi_ids,))
+	return cursor.rowcount
 
 
 def compute_upstream_of_keep_ids(cursor, output_schema, edge_ids):

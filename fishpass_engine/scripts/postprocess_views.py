@@ -142,9 +142,9 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 				ab.geometry, ab.snapped_geometry,
 				{column_sql}
 				FROM {schema_ident}.all_barriers ab
-				JOIN {schema_ident}.streams s
+				LEFT JOIN {schema_ident}.streams s
 					ON s.id = ab.upstream_edge_id
-				WHERE structure_type = '{structure_type}' AND species_stats IS NOT NULL
+				WHERE ab.structure_type = '{structure_type}' AND ab.species_stats IS NOT NULL
 			""")
 
 

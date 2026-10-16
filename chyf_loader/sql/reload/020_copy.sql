@@ -28,3 +28,13 @@ JOIN :source_flowpath_properties_table p ON p.id = ef.id
 WHERE ef."rank" = 1
 	AND ef.ef_type != 2
 	AND ef.aoi_id = ANY(:'workunit_ids'::uuid[]);
+
+-- Copy only the names referenced by the loaded flowpaths.
+INSERT INTO :target_names_table (name_id, name_en, name_fr, geodbname, geodb_id)
+SELECT n.name_id, n.name_en, n.name_fr, n.geodbname, n.geodb_id
+FROM :source_names_table n
+WHERE n.name_id IN (
+	SELECT rivernameid1 FROM :target_flowpath_table
+	UNION
+	SELECT rivernameid2 FROM :target_flowpath_table
+);

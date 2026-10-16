@@ -57,6 +57,15 @@ class BuildCabdRowTests(unittest.TestCase):
 			{"chn_rear": 1, "chn_spawn": 1, "sth_rear": 1, "sth_spawn": 1},
 		)
 
+	def test_extra_fields_inserted_before_coordinates(self):
+		feature = {
+			"properties": {"cabd_id": "w1", "passability_status_code": 2, "fall_name_en": "Le Sault"},
+			"geometry": {"coordinates": [-63.5, 45.1]},
+		}
+		row = ls.build_cabd_row(feature, ["chn"], ls.WATERFALL_FIELDS)
+		self.assertEqual(row[0], "w1")
+		self.assertEqual(row[3:], ("Le Sault", None, -63.5, 45.1))
+
 
 class ExplodeNewStructurePassabilityTests(unittest.TestCase):
 	def test_rear_only_key_leaves_spawn_defaulted(self):
@@ -288,6 +297,26 @@ class PopulateCabdTableTests(unittest.TestCase):
 		self.assertEqual(len(params), 1)
 		self.assertEqual(params[0][0], "f1")
 		self.assertEqual(params[0][2], 3)  # passability_status_code
+
+	def test_waterfalls_insert_includes_name_and_height(self):
+		feature = {
+			"properties": {
+				"cabd_id": "w1",
+				"passability_status_code": 2,
+				"fall_name_en": "Le Sault",
+				"fall_height_m": 4.5,
+			},
+			"geometry": {"coordinates": [-63.5, 45.1]},
+		}
+		ls.fetch_feature_type = lambda feature_type, short_names: iter([feature])
+
+		cursor = FakeCursor()
+		ls.populate_cabd_table(cursor, "model_test", "waterfalls", ["02YK000"], ["es"], 4617)
+
+		sql, params = cursor.executemany_calls[0]
+		self.assertIn("passability_status_code, fall_name_en, fall_height_m, geometry", sql)
+		self.assertEqual(sql.count("%s"), len(params[0]))
+		self.assertEqual(params[0][3:5], ("Le Sault", 4.5))
 
 	def test_no_short_names_skips_fetch_and_insert(self):
 		ls.fetch_feature_type = lambda feature_type, short_names: (_ for _ in ()).throw(

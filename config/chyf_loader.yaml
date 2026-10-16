@@ -228,6 +228,7 @@ target:
   flowpath_table: chyf_raw.flowpath
   aoi_table: chyf_raw.aoi
   shoreline_table: chyf_raw.shoreline
+  names_table: chyf_raw.names
 
 source:
   # Schema-qualified CHyF2 tables, as seen through the FDW-imported local schema.
@@ -235,6 +236,7 @@ source:
   flowpath_properties_table: chyf2_fdw.eflowpath_properties
   aoi_table: chyf2_fdw.aoi
   shoreline_table: chyf2_fdw.shoreline
+  names_table: chyf2_fdw.names
 
 behavior:
   # If true, print the psql commands that would run without executing them.

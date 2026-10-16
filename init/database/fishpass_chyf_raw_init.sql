@@ -107,22 +107,20 @@ CREATE INDEX IF NOT EXISTS flowpath_aoi_id_idx ON chyf_raw.flowpath (aoi_id);
 CREATE INDEX IF NOT EXISTS flowpath_graph_id_idx ON chyf_raw.flowpath (graph_id);
 CREATE INDEX IF NOT EXISTS aoi_short_name_idx ON chyf_raw.aoi (short_name);
 
-CREATE TABLE chyf_raw.shoreline (
+CREATE TABLE IF NOT EXISTS chyf_raw.shoreline (
 	id uuid NOT NULL,
 	aoi_id uuid NOT NULL,
 	geometry public.geometry(linestring, 4617) NOT NULL,
 	CONSTRAINT shoreline_pkey PRIMARY KEY (id),
 	CONSTRAINT shoreline_aoi_id_fkey FOREIGN KEY (aoi_id) REFERENCES chyf_raw.aoi(id)
 );
-CREATE INDEX shoreline_aoi_id_idx ON chyf_raw.shoreline USING btree (aoi_id);
-CREATE INDEX shoreline_geometry_idx ON chyf_raw.shoreline USING gist (geometry);
+CREATE INDEX IF NOT EXISTS shoreline_aoi_id_idx ON chyf_raw.shoreline USING btree (aoi_id);
+CREATE INDEX IF NOT EXISTS shoreline_geometry_idx ON chyf_raw.shoreline USING gist (geometry);
 
-CREATE TABLE chyf_raw.names (
-	name_id uuid NOT NULL,
+CREATE TABLE IF NOT EXISTS chyf_raw.names (
+	name_id uuid PRIMARY KEY,
 	name_en varchar,
 	name_fr varchar,
 	geodbname varchar,
-	geodb_id VARCHAR,
-	CONSTRAINT name_id_pkey PRIMARY KEY (name_id),
+	geodb_id varchar
 );
-CREATE INDEX IF NOT EXISTS names_name_id_idx ON chyf_raw.names (name_id);

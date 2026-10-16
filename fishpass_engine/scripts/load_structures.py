@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 STRUCTURE_LIFESTAGES = ("rear", "spawn")
 
+# Extra CABD properties stored on cabd_waterfalls (and surfaced in the natural_barriers view).
+WATERFALL_FIELDS = ("fall_name_en", "fall_height_m")
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CLASSIFICATION_CONFIG = REPO_ROOT / "config" / "fishpass.yaml"
 
@@ -54,23 +57,16 @@ def create_cabd_table(cursor, output_schema, feature_type, srid):
 		sys.exit(f"Invalid structure_types entry (must be a safe table-name identifier): {feature_type!r}")
 	schema_ident = quote_ident(output_schema)
 	table_ident = quote_ident(f"cabd_{feature_type}")
+	waterfall_columns = "fall_name_en text, fall_height_m real," if feature_type == "waterfalls" else ""
 	cursor.execute(f"""
 		CREATE TABLE {schema_ident}.{table_ident} (
 			cabd_id uuid NOT NULL primary key,
 			species_passability_value jsonb NOT NULL,
 			passability_status_code integer,
+			{waterfall_columns}
 			geometry geometry(point, {srid}) NOT NULL
 		);
 	""")
-
-	if feature_type == "waterfalls":
-		cursor.execute(f"""
-			ALTER TABLE {schema_ident}.{table_ident} 
-			ADD COLUMN fall_name_en text;
-
-			ALTER TABLE {schema_ident}.{table_ident} 
-			ADD COLUMN fall_height_m real;
-		""")
 
 
 def create_structures_table(cursor, output_schema, srid):
@@ -145,9 +141,10 @@ def get_aoi_short_names(cursor, output_schema):
 	return [row[0] for row in cursor.fetchall()]
 
 
-def build_cabd_row(feature, target_species):
-	"""Return (cabd_id, species_passability_value_json, passability_status_code, lon, lat) for one
-	CABD GeoJSON feature, per Load Structures step 2's field mapping."""
+def build_cabd_row(feature, target_species, extra_fields=()):
+	"""Return (cabd_id, species_passability_value_json, passability_status_code, *extra_fields, lon,
+	lat) for one CABD GeoJSON feature, per Load Structures step 2's field mapping. extra_fields
+	names additional CABD properties (e.g. waterfall name/height) to include, in order."""
 
 	props = feature["properties"]
 	cabd_id = props["cabd_id"]
@@ -155,7 +152,8 @@ def build_cabd_row(feature, target_species):
 	lon, lat = feature["geometry"]["coordinates"][:2]
 	value = map_passability(passability_status_code)
 	species_passability_value = {f"{sp}_{lc}": value for sp in target_species for lc in STRUCTURE_LIFESTAGES}
-	return (cabd_id, json.dumps(species_passability_value), passability_status_code, lon, lat)
+	extras = tuple(props.get(field) for field in extra_fields)
+	return (cabd_id, json.dumps(species_passability_value), passability_status_code, *extras, lon, lat)
 
 
 def populate_cabd_table(cursor, output_schema, feature_type, short_names, target_species, srid):
@@ -169,20 +167,19 @@ def populate_cabd_table(cursor, output_schema, feature_type, short_names, target
 	schema_ident = quote_ident(output_schema)
 	table_ident = quote_ident(f"cabd_{feature_type}")
 
+	extra_fields = WATERFALL_FIELDS if feature_type == "waterfalls" else ()
+	extra_columns = "".join(f"{field}, " for field in extra_fields)
+	extra_values = "%s, " * len(extra_fields)
+	columns = f"(cabd_id, species_passability_value, passability_status_code, {extra_columns}geometry)"
+	values = f"(%s, %s::jsonb, %s, {extra_values}ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
+
 	count = 0
 
 	def rows():
 		nonlocal count
 		for feature in fetch_feature_type(feature_type, short_names):
 			count += 1
-			yield build_cabd_row(feature, target_species)
-
-	if feature_type == "waterfalls":
-		columns = "(cabd_id, species_passability_value, passability_status_code, fall_name_en, fall_height_m, geometry)"
-		values = f"(%s, %s::jsonb, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
-	else:
-		columns = "(cabd_id, species_passability_value, passability_status_code, geometry)"
-		values = f"(%s, %s::jsonb, %s, ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
+			yield build_cabd_row(feature, target_species, extra_fields)
 
 	cursor.executemany(
 		f"""
