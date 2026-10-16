@@ -18,13 +18,13 @@ CREATE SCHEMA IF NOT EXISTS support;
 -- support.structure_updates
 --
 -- Overrides/updates to barrier information sourced from CABD (or from
--- support.new_structures). barrier_id = cabd_id for CABD features, or
+-- support.new_structures). feature_id = cabd_id for CABD features, or
 -- new_structure_id for support.new_structures features. There can be
--- multiple entries for the same barrier_id.
+-- multiple entries for the same feature_id.
 
 CREATE TABLE IF NOT EXISTS support.structure_updates (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-	barrier_id uuid NOT NULL,
+	feature_id uuid NOT NULL,
 	feature_type varchar,
 	update_type varchar NOT NULL CHECK (update_type IN ('authoritative', 'local_override')),
 	update_scope varchar[] NOT NULL DEFAULT ARRAY['all']::varchar[],
@@ -35,13 +35,13 @@ CREATE TABLE IF NOT EXISTS support.structure_updates (
 	notes varchar
 );
 
-CREATE INDEX IF NOT EXISTS structure_updates_barrier_id_idx ON support.structure_updates (barrier_id);
+CREATE INDEX IF NOT EXISTS structure_updates_feature_id_idx ON support.structure_updates (feature_id);
 
 -- support.new_structures
 --
 -- Structures not tracked in CABD (e.g. barrier beaches, beaver dams).
 -- Generally only used for WCRP reporting. Updates to these structures are
--- recorded in support.structure_updates (barrier_id = new_structure_id).
+-- recorded in support.structure_updates (feature_id = new_structure_id).
 
 CREATE TABLE IF NOT EXISTS support.new_structures (
 	new_structure_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

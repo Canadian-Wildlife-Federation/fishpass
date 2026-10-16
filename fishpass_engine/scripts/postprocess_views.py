@@ -155,7 +155,7 @@ def create_unsnapped_barriers_view(cursor, output_schema):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"""
 		CREATE VIEW {schema_ident}.unsnapped_barriers AS
-		SELECT id, feature_id, feature_type, species_passability_value, source, structure_type, geometry
+		SELECT feature_id, feature_type, species_passability_value, source, structure_type, geometry
 		FROM {schema_ident}.all_barriers
 		WHERE snapped_geometry IS NULL
 	""")

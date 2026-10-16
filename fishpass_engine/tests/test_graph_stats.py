@@ -260,22 +260,24 @@ class ComputeBarrierHereTests(unittest.TestCase):
 				"edge_id": "E3",
 				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
 				"structure_type": "natural",
-				"id": "b1",
+				"id": "internal-b1",
+				"feature_id": "feature-b1",
 			},
 			{
 				"edge_id": "E1",
 				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
 				"structure_type": "anthropogenic",
-				"id": "b2",
+				"id": "internal-b2",
+				"feature_id": "feature-b2",
 			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
 		self.assertEqual(result["es"]["natural"]["E3"], 1)
 		self.assertEqual(result["es"]["anthro"]["E1"], 1)
-		self.assertEqual(result["es"]["natural_spawn_ids"]["E3"], ["b1"])
-		self.assertEqual(result["es"]["natural_rear_ids"]["E3"], ["b1"])
-		self.assertEqual(result["es"]["anthro_spawn_ids"]["E1"], ["b2"])
-		self.assertEqual(result["es"]["anthro_rear_ids"]["E1"], ["b2"])
+		self.assertEqual(result["es"]["natural_spawn_ids"]["E3"], ["feature-b1"])
+		self.assertEqual(result["es"]["natural_rear_ids"]["E3"], ["feature-b1"])
+		self.assertEqual(result["es"]["anthro_spawn_ids"]["E1"], ["feature-b2"])
+		self.assertEqual(result["es"]["anthro_rear_ids"]["E1"], ["feature-b2"])
 		self.assertEqual(result["es"]["natural"]["E1"], 0)
 
 	def test_passable_barrier_not_counted(self):
@@ -285,6 +287,7 @@ class ComputeBarrierHereTests(unittest.TestCase):
 				"species_passability_value": {"es_rear": 1, "es_spawn": 1},
 				"structure_type": "natural",
 				"id": "b1",
+				"feature_id": "feature-b1",
 			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
@@ -297,6 +300,7 @@ class ComputeBarrierHereTests(unittest.TestCase):
 				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
 				"structure_type": "natural",
 				"id": "b1",
+				"feature_id": "feature-b1",
 			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
@@ -309,6 +313,7 @@ class ComputeBarrierHereTests(unittest.TestCase):
 				"species_passability_value": {"es_rear": 0, "es_spawn": 1},
 				"structure_type": "natural",
 				"id": "b1",
+				"feature_id": "feature-b1",
 			},
 		]
 		result = gs.compute_barrier_here(["E1", "E2", "E3", "E4"], barriers, ["es"], 1.0)
@@ -316,7 +321,7 @@ class ComputeBarrierHereTests(unittest.TestCase):
 		self.assertEqual(result["es"]["natural_spawn"]["E3"], 0)
 		# combined "natural" is still the OR of both lifestages, unchanged from before
 		self.assertEqual(result["es"]["natural"]["E3"], 1)
-		self.assertEqual(result["es"]["natural_rear_ids"]["E3"], ["b1"])
+		self.assertEqual(result["es"]["natural_rear_ids"]["E3"], ["feature-b1"])
 		self.assertEqual(result["es"]["natural_spawn_ids"]["E3"], [])
 
 
@@ -495,6 +500,7 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
 				"structure_type": "anthropogenic",
 				"id": "b1",
+				"feature_id": "feature-b1",
 			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)
@@ -508,8 +514,8 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		self.assertEqual(stats["es"]["upstream_anthro_spawnrear_count"]["E4"], 1)
 		self.assertEqual(stats["es"]["downstream_anthro_spawn_count"]["E1"], 1)
 		self.assertEqual(stats["es"]["downstream_anthro_rear_count"]["E1"], 1)
-		self.assertEqual(stats["es"]["downstream_anthro_spawn_ids"]["E1"], ["b1"])
-		self.assertEqual(stats["es"]["downstream_anthro_rear_ids"]["E1"], ["b1"])
+		self.assertEqual(stats["es"]["downstream_anthro_spawn_ids"]["E1"], ["feature-b1"])
+		self.assertEqual(stats["es"]["downstream_anthro_rear_ids"]["E1"], ["feature-b1"])
 
 		# an anthropogenic-only barrier no longer affects accessibility at all under the new rules
 		accessibility = gs.compute_accessibility(self.edge_ids, stats)
@@ -529,12 +535,14 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 				"species_passability_value": {"es_rear": 0, "es_spawn": 0, "wl_rear": 1, "wl_spawn": 1},
 				"structure_type": "anthropogenic",
 				"id": "b_es",
+				"feature_id": "feature-es",
 			},
 			{
 				"edge_id": "E1",
 				"species_passability_value": {"es_rear": 1, "es_spawn": 1, "wl_rear": 0, "wl_spawn": 0},
 				"structure_type": "natural",
 				"id": "b_wl",
+				"feature_id": "feature-wl",
 			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es", "wl"], 1.0)
@@ -543,8 +551,8 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 		)
 
 		self.assertEqual(stats["es"]["downstream_anthro_spawnrear_count"]["E1"], 1)
-		self.assertEqual(stats["es"]["downstream_anthro_spawn_ids"]["E1"], ["b_es"])
-		self.assertEqual(stats["es"]["downstream_anthro_rear_ids"]["E1"], ["b_es"])
+		self.assertEqual(stats["es"]["downstream_anthro_spawn_ids"]["E1"], ["feature-es"])
+		self.assertEqual(stats["es"]["downstream_anthro_rear_ids"]["E1"], ["feature-es"])
 		self.assertEqual(stats["es"]["downstream_natural_spawnrear_count"]["E1"], 0)
 		self.assertEqual(stats["es"]["upstream_anthro_spawnrear_count"]["E1"], 0)  # es not blocked at E1
 
@@ -562,6 +570,7 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 				"species_passability_value": {"es_rear": 1, "es_spawn": 0},
 				"structure_type": "natural",
 				"id": "b1",
+				"feature_id": "feature-b1",
 			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)
@@ -581,6 +590,7 @@ class ComputeBarrierStatsAndAccessibilityTests(unittest.TestCase):
 				"species_passability_value": {"es_rear": 0, "es_spawn": 1},
 				"structure_type": "natural",
 				"id": "b1",
+				"feature_id": "feature-b1",
 			},
 		]
 		barrier_here = gs.compute_barrier_here(self.edge_ids, barriers, ["es"], 1.0)

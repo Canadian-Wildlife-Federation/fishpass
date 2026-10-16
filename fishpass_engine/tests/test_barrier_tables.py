@@ -90,7 +90,12 @@ class CreateAndPopulateGradientBarriersCacheTests(unittest.TestCase):
 	def test_filters_by_source(self):
 		cursor = FakeCursor()
 		bt.create_and_populate_gradient_barriers_cache(cursor, "model_test", 4617)
+		create_sql = cursor.executed[0][0]
 		insert_sql, _ = [e for e in cursor.executed if e[0].startswith("INSERT INTO")][0]
+		self.assertIn("feature_id uuid PRIMARY KEY", create_sql)
+		self.assertNotIn(" id uuid", create_sql)
+		self.assertIn('INSERT INTO "model_test".gradient_barriers (feature_id,', insert_sql)
+		self.assertIn("SELECT feature_id,", insert_sql)
 		self.assertIn("WHERE source = 'gradient_barriers'", insert_sql)
 
 

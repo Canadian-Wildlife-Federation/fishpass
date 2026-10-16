@@ -119,14 +119,15 @@ class FetchBundleEdgesTests(unittest.TestCase):
 
 class FetchBundleBarriersTests(unittest.TestCase):
 	def test_groups_by_graph_id(self):
-		cursor = FakeCursor(fetch_results=[[(5, "b1", "e1", "e0", {"es_rear": 0}, "natural")]])
+		cursor = FakeCursor(fetch_results=[[(5, "internal-b1", "feature-b1", "e1", "e0", {"es_rear": 0}, "natural")]])
 		result = gc.fetch_bundle_barriers(cursor, "model_test", [5, 6])
 		self.assertEqual(
 			result,
 			{
 				5: [
 					{
-						"id": "b1",
+						"id": "internal-b1",
+						"feature_id": "feature-b1",
 						"edge_id": "e1",
 						"upstream_edge_id": "e0",
 						"species_passability_value": {"es_rear": 0},
@@ -137,6 +138,7 @@ class FetchBundleBarriersTests(unittest.TestCase):
 		)
 		sql, params = cursor.executed[0]
 		self.assertIn("s.upstream_edge_id", sql)
+		self.assertIn("s.feature_id", sql)
 		self.assertIn("WHERE e.graph_id = ANY(%s)", sql)
 		self.assertEqual(params, ([5, 6],))
 
@@ -180,11 +182,11 @@ class FetchBundleHabitatUpdatesTests(unittest.TestCase):
 		self.assertEqual([u["id"] for u in result[5]], ["h-first", "h-second"])
 
 
-class BuildStatsWriteRowsTests(unittest.TestCase):
+class IterStatsWriteRowsTests(unittest.TestCase):
 	def test_builds_json_measure_id_tuples(self):
-		species_stats = {"e1": {"es": {"accessibility": "connected"}}}
+		edge_stats = [("e1", {"es": {"accessibility": "connected"}})]
 		route_measures = {"e1": (3.0, 8.0)}
-		rows = gc.build_stats_write_rows(species_stats, route_measures)
+		rows = list(gc.iter_stats_write_rows(edge_stats, route_measures))
 		self.assertEqual(len(rows), 1)
 		species_json, downstream_measure, upstream_measure, edge_id = rows[0]
 		self.assertIn('"accessibility": "connected"', species_json)
@@ -193,11 +195,26 @@ class BuildStatsWriteRowsTests(unittest.TestCase):
 		self.assertEqual(edge_id, "e1")
 
 	def test_missing_route_measure_writes_none(self):
-		species_stats = {"e1": {"es": {"accessibility": "connected"}}}
-		rows = gc.build_stats_write_rows(species_stats, {})
+		edge_stats = [("e1", {"es": {"accessibility": "connected"}})]
+		rows = list(gc.iter_stats_write_rows(edge_stats, {}))
 		_species_json, downstream_measure, upstream_measure, _edge_id = rows[0]
 		self.assertIsNone(downstream_measure)
 		self.assertIsNone(upstream_measure)
+
+	def test_serialises_lazily(self):
+		# Rows come out one at a time as edge_stats is consumed, so a caller flushing in batches
+		# never holds a whole component's JSON at once.
+		consumed = []
+
+		def edge_stats():
+			for eid in ("e1", "e2"):
+				consumed.append(eid)
+				yield eid, {}
+
+		rows = gc.iter_stats_write_rows(edge_stats(), {})
+		self.assertEqual(consumed, [])
+		self.assertEqual(next(rows)[3], "e1")
+		self.assertEqual(consumed, ["e1"])
 
 
 class FlushStatsWritesTests(unittest.TestCase):
@@ -241,7 +258,7 @@ class FlushStatsWritesTests(unittest.TestCase):
 		self.assertEqual(cursor.executemany_calls, [])
 
 
-class AssembleEdgeJsonTests(unittest.TestCase):
+class IterEdgeJsonTests(unittest.TestCase):
 	def test_species_stats_shape(self):
 		edge_ids = ["E1"]
 		reporting = [("es", "rear"), ("es", "spawnrear")]
@@ -275,8 +292,8 @@ class AssembleEdgeJsonTests(unittest.TestCase):
 			}
 		}
 
-		species_stats = gc.assemble_edge_json(
-			edge_ids, reporting, accessibility, barrier_stats, habitat, species_length_stats
+		species_stats = dict(
+			gc.iter_edge_json(edge_ids, reporting, accessibility, barrier_stats, habitat, species_length_stats)
 		)
 		self.assertEqual(species_stats["E1"]["es"]["spawn_accessibility"], "naturally_accessible")
 		self.assertEqual(species_stats["E1"]["es"]["rear_accessibility"], "naturally_inaccessible")
@@ -332,7 +349,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 
 	def test_runs_without_error_and_returns_stats(self):
 		plan, species_params = self._plan_and_species_params()
-		species_stats, barrier_rows, route_measures = gc.process_component(
+		edge_stats, barrier_rows, route_measures = gc.process_component(
 			1,
 			self._edges(),
 			[],
@@ -340,6 +357,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 			plan,
 			species_params,
 		)
+		species_stats = dict(edge_stats)
 
 		self.assertEqual(barrier_rows, [])
 		self.assertEqual(set(species_stats.keys()), {"E1", "E2", "E3", "E4"})
@@ -355,6 +373,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "feature-b1",
 				"edge_id": "E3",
 				"upstream_edge_id": None,
 				"species_passability_value": {"es_rear": 1, "es_spawn": 0},
@@ -362,7 +381,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 			}
 		]
 
-		species_stats, barrier_rows, _route_measures = gc.process_component(
+		edge_stats, barrier_rows, _route_measures = gc.process_component(
 			1,
 			self._edges(),
 			barriers,
@@ -370,6 +389,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 			plan,
 			species_params,
 		)
+		species_stats = dict(edge_stats)
 
 		self.assertEqual(len(barrier_rows), 1)
 		self.assertEqual(barrier_rows[0]["id"], "b1")
@@ -387,13 +407,14 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		barriers = [
 			{
 				"id": "b1",
+				"feature_id": "feature-b1",
 				"edge_id": "E3",
 				"species_passability_value": {"es_rear": 0, "es_spawn": 1},
 				"structure_type": "natural",
 			}
 		]
 
-		species_stats, _barrier_rows, _route_measures = gc.process_component(
+		edge_stats, _barrier_rows, _route_measures = gc.process_component(
 			1,
 			self._edges(),
 			barriers,
@@ -401,6 +422,7 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 			plan,
 			species_params,
 		)
+		species_stats = dict(edge_stats)
 
 		# rear-impassable natural barrier flips rear_accessibility upstream of it...
 		self.assertEqual(species_stats["E1"]["es"]["rear_accessibility"], "naturally_inaccessible")
@@ -444,6 +466,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		return [
 			{
 				"id": "b1",
+				"feature_id": "feature-b1",
 				"edge_id": "E8",
 				"upstream_edge_id": "E7",
 				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0},
@@ -451,6 +474,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 			},
 			{
 				"id": "b2",
+				"feature_id": "feature-b2",
 				"edge_id": "E9",
 				"upstream_edge_id": "E8",
 				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0.25},
@@ -483,7 +507,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 
 	def setUp(self):
 		plan, species_params = self._plan_and_species_params()
-		self.species_stats, barrier_rows, _route_measures = gc.process_component(
+		edge_stats, barrier_rows, _route_measures = gc.process_component(
 			1,
 			self._edges(),
 			self._barriers(),
@@ -491,6 +515,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 			plan,
 			species_params,
 		)
+		self.species_stats = dict(edge_stats)
 		self.barrier_rows_by_id = {b["id"]: b for b in barrier_rows}
 
 	def test_no_natural_barriers_so_every_edge_is_naturally_accessible(self):
@@ -586,8 +611,8 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		self.assertEqual(stats["downstream_natural_spawn_count"], 0)
 		self.assertEqual(stats["downstream_natural_rear_count"], 0)
 		self.assertEqual(stats["downstream_natural_spawnrear_count"], 0)
-		self.assertEqual(stats["downstream_anthro_spawn_ids"], ["b2"])
-		self.assertEqual(stats["downstream_anthro_rear_ids"], ["b2"])
+		self.assertEqual(stats["downstream_anthro_spawn_ids"], ["feature-b2"])
+		self.assertEqual(stats["downstream_anthro_rear_ids"], ["feature-b2"])
 		self.assertEqual(stats["downstream_natural_spawn_ids"], [])
 		self.assertEqual(stats["downstream_natural_rear_ids"], [])
 

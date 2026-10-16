@@ -156,6 +156,15 @@ class BuildViewSqlTests(unittest.TestCase):
 		sql = self._sql()
 		self.assertNotIn('AS "chn_spawn_upstream_length"', sql)
 
+	def test_ranked_tables_join_on_feature_id(self):
+		"""Ranked and tracking feature_id values both match all_barriers.feature_id."""
+		sql = self._sql()
+		self.assertIn('ON rk_chn_rear."feature_id" = ab."feature_id"', sql)
+		self.assertNotIn('ON rk_chn_rear."feature_id" = ab."id"', sql)
+		self.assertIn('ON tt."feature_id" = ab."feature_id"', sql)
+		self.assertIn('ON bp_chn."feature_id" = ab."feature_id"', sql)
+		self.assertNotIn('ON bp_chn."id" = ab."id"', sql)
+
 	def test_only_reported_lifecycles_surfaced(self):
 		"""A plan reporting only chn_spawn surfaces spawn lengths (+ accessible) only."""
 		sql = self._sql(reporting="chn_spawn")
