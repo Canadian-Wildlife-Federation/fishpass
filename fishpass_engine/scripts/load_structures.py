@@ -18,16 +18,13 @@ from pathlib import Path
 
 import yaml
 
-from cabd_client import fetch_feature_type, map_passability
+from cabd_client import CUSTOM_FEATURE_TYPE_FIELDS, fetch_feature_type, map_passability
 from db import quote_ident, quote_qualified_ident
 from model_plan import IDENTIFIER_RE
 
 logger = logging.getLogger(__name__)
 
 STRUCTURE_LIFESTAGES = ("rear", "spawn")
-
-# Extra CABD properties stored on cabd_waterfalls (and surfaced in the natural_barriers view).
-WATERFALL_FIELDS = ("fall_name_en", "fall_height_m")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CLASSIFICATION_CONFIG = REPO_ROOT / "config" / "fishpass.yaml"
@@ -57,13 +54,15 @@ def create_cabd_table(cursor, output_schema, feature_type, srid):
 		sys.exit(f"Invalid structure_types entry (must be a safe table-name identifier): {feature_type!r}")
 	schema_ident = quote_ident(output_schema)
 	table_ident = quote_ident(f"cabd_{feature_type}")
-	waterfall_columns = "fall_name_en text, fall_height_m real," if feature_type == "waterfalls" else ""
+	custom_columns = "".join(
+		f"{field['name']} {field['type']}, " for field in CUSTOM_FEATURE_TYPE_FIELDS.get(feature_type, [])
+	)
 	cursor.execute(f"""
 		CREATE TABLE {schema_ident}.{table_ident} (
 			cabd_id uuid NOT NULL primary key,
 			species_passability_value jsonb NOT NULL,
 			passability_status_code integer,
-			{waterfall_columns}
+			{custom_columns}
 			geometry geometry(point, {srid}) NOT NULL
 		);
 	""")
@@ -141,10 +140,10 @@ def get_aoi_short_names(cursor, output_schema):
 	return [row[0] for row in cursor.fetchall()]
 
 
-def build_cabd_row(feature, target_species, extra_fields=()):
-	"""Return (cabd_id, species_passability_value_json, passability_status_code, *extra_fields, lon,
-	lat) for one CABD GeoJSON feature, per Load Structures step 2's field mapping. extra_fields
-	names additional CABD properties (e.g. waterfall name/height) to include, in order."""
+def build_cabd_row(feature, target_species, custom_fields=()):
+	"""Return (cabd_id, species_passability_value_json, passability_status_code, *custom_fields, lon,
+	lat) for one CABD GeoJSON feature, per Load Structures step 2's field mapping. custom_fields
+	are the feature type's CUSTOM_FEATURE_TYPE_FIELDS entries, whose values are included in order."""
 
 	props = feature["properties"]
 	cabd_id = props["cabd_id"]
@@ -152,8 +151,8 @@ def build_cabd_row(feature, target_species, extra_fields=()):
 	lon, lat = feature["geometry"]["coordinates"][:2]
 	value = map_passability(passability_status_code)
 	species_passability_value = {f"{sp}_{lc}": value for sp in target_species for lc in STRUCTURE_LIFESTAGES}
-	extras = tuple(props.get(field) for field in extra_fields)
-	return (cabd_id, json.dumps(species_passability_value), passability_status_code, *extras, lon, lat)
+	custom_values = tuple(props.get(field["name"]) for field in custom_fields)
+	return (cabd_id, json.dumps(species_passability_value), passability_status_code, *custom_values, lon, lat)
 
 
 def populate_cabd_table(cursor, output_schema, feature_type, short_names, target_species, srid):
@@ -167,11 +166,11 @@ def populate_cabd_table(cursor, output_schema, feature_type, short_names, target
 	schema_ident = quote_ident(output_schema)
 	table_ident = quote_ident(f"cabd_{feature_type}")
 
-	extra_fields = WATERFALL_FIELDS if feature_type == "waterfalls" else ()
-	extra_columns = "".join(f"{field}, " for field in extra_fields)
-	extra_values = "%s, " * len(extra_fields)
-	columns = f"(cabd_id, species_passability_value, passability_status_code, {extra_columns}geometry)"
-	values = f"(%s, %s::jsonb, %s, {extra_values}ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
+	custom_fields = CUSTOM_FEATURE_TYPE_FIELDS.get(feature_type, [])
+	custom_columns = "".join(f"{field['name']}, " for field in custom_fields)
+	custom_values = "%s, " * len(custom_fields)
+	columns = f"(cabd_id, species_passability_value, passability_status_code, {custom_columns}geometry)"
+	values = f"(%s, %s::jsonb, %s, {custom_values}ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
 
 	count = 0
 
@@ -179,7 +178,7 @@ def populate_cabd_table(cursor, output_schema, feature_type, short_names, target
 		nonlocal count
 		for feature in fetch_feature_type(feature_type, short_names):
 			count += 1
-			yield build_cabd_row(feature, target_species, extra_fields)
+			yield build_cabd_row(feature, target_species, custom_fields)
 
 	cursor.executemany(
 		f"""

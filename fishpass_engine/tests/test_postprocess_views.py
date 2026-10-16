@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-for _module_name in ("psycopg",):
+for _module_name in ("psycopg", "requests"):
 	if _module_name not in sys.modules:
 		try:
 			__import__(_module_name)
@@ -65,7 +65,7 @@ class CreateNaturalAnthropogenicViewsTests(unittest.TestCase):
 		pv.create_natural_anthropogenic_views(cursor, "model_test", {"structure_types": ["dams"]})
 		sql_natural, _ = cursor.executed[0]
 		self.assertNotIn("cabd_waterfalls", sql_natural)
-		self.assertIn("NULL::Text AS fall_name_en, NULL::real AS fall_height_m", sql_natural)
+		self.assertIn("NULL::varchar AS fall_name_en, NULL::real AS fall_height_m", sql_natural)
 
 
 class CreateSpeciesBarrierViewsTests(unittest.TestCase):

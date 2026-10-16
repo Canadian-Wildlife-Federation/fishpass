@@ -57,12 +57,12 @@ class BuildCabdRowTests(unittest.TestCase):
 			{"chn_rear": 1, "chn_spawn": 1, "sth_rear": 1, "sth_spawn": 1},
 		)
 
-	def test_extra_fields_inserted_before_coordinates(self):
+	def test_custom_fields_inserted_before_coordinates(self):
 		feature = {
 			"properties": {"cabd_id": "w1", "passability_status_code": 2, "fall_name_en": "Le Sault"},
 			"geometry": {"coordinates": [-63.5, 45.1]},
 		}
-		row = ls.build_cabd_row(feature, ["chn"], ls.WATERFALL_FIELDS)
+		row = ls.build_cabd_row(feature, ["chn"], ls.CUSTOM_FEATURE_TYPE_FIELDS["waterfalls"])
 		self.assertEqual(row[0], "w1")
 		self.assertEqual(row[3:], ("Le Sault", None, -63.5, 45.1))
 
@@ -420,6 +420,13 @@ class CreateCabdTableTests(unittest.TestCase):
 		self.assertNotIn("source", sql)
 		self.assertIn("passability_status_code integer", sql)
 		self.assertNotIn("all_barriers", sql)
+		self.assertNotIn("fall_name_en", sql)
+
+	def test_waterfalls_table_has_custom_columns(self):
+		cursor = FakeCursor()
+		ls.create_cabd_table(cursor, "model_test", "waterfalls", 4617)
+		sql, _ = cursor.executed[0]
+		self.assertIn("passability_status_code integer, fall_name_en varchar, fall_height_m real, geometry", sql)
 
 	def test_rejects_unsafe_feature_type_name(self):
 		cursor = FakeCursor()

@@ -9,6 +9,7 @@ and streams_<species> (view over streams, with species_stats exploded to columns
 import logging
 import sys
 
+from cabd_client import CUSTOM_FEATURE_TYPE_FIELDS
 from db import quote_ident
 from model_plan import IDENTIFIER_RE
 
@@ -53,22 +54,23 @@ def create_natural_anthropogenic_views(cursor, output_schema, plan):
 	structure_type and to rows write_barrier_stat_tables actually populated (species_stats
 	IS NOT NULL) -- i.e. structures that snapped onto a processed edge, matching the row set the
 	old natural_barriers/anthropogenic_barriers tables held. The natural_barriers view also
-	includes CABD waterfall name and height fields."""
+	includes the CABD waterfall CUSTOM_FEATURE_TYPE_FIELDS (NULL when the plan loads no waterfalls)."""
 
 	schema_ident = quote_ident(output_schema)
+	waterfall_fields = CUSTOM_FEATURE_TYPE_FIELDS["waterfalls"]
 	has_waterfalls = "waterfalls" in plan["structure_types"]
 	for table, structure_type in (("natural_barriers", "natural"), ("anthropogenic_barriers", "anthropogenic")):
 		waterfall_columns = ""
 		waterfall_join = ""
 		if structure_type == "natural":
 			if has_waterfalls:
-				waterfall_columns = ", wf.fall_name_en, wf.fall_height_m"
+				waterfall_columns = "".join(f", wf.{field['name']}" for field in waterfall_fields)
 				waterfall_join = f"""
 				LEFT JOIN {schema_ident}.cabd_waterfalls wf
 					ON wf.cabd_id = ab.feature_id
 				"""
 			else:
-				waterfall_columns = ", NULL::Text AS fall_name_en, NULL::real AS fall_height_m"
+				waterfall_columns = "".join(f", NULL::{field['type']} AS {field['name']}" for field in waterfall_fields)
 
 		cursor.execute(f"""
 			CREATE VIEW {schema_ident}.{table} AS
