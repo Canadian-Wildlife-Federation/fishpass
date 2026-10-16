@@ -66,9 +66,32 @@ This column contains the following fields for each species identifies in the mod
 
 
 
+### Views: `<output_schema>.natural_barriers` and `<output_schema>.anthropogenic_barriers`
+
+The `all_barriers` rows for each structure type that snapped onto a processed stream edge (`species_stats` is populated).
+
+| Field Name | Values | Description |
+| :---- | :---- | :---- |
+| feature\_id | uuid | `all_barriers.feature_id`. |
+| feature\_type | varchar | Barrier feature type. |
+| stream\_name\_en | text | English name of the stream edge immediately upstream of the barrier (`upstream_edge_id`), from `streams.stream_name_en`. NULL when that edge has no CHyF name, or when `upstream_edge_id` is NULL (for example, a barrier snapped at a confluence). |
+| upstream\_edge\_id | uuid | The upstream edge id from the streams table. |
+| downstream\_edge\_id | uuid | The downstream edge id from the streams table. |
+| species\_passability\_value | jsonb | Passability values for each species, lifestage. |
+| geometry | Point | Raw geometry |
+| snapped\_geometry | Point | Geometry snapped to stream network |
+| species\_stats | jsonb | Species statistics (see the species_statistics table above). |
+| fall\_name\_en | varchar | `natural_barriers` only. Waterfall English name from `cabd_waterfalls`; NULL for other natural barriers, or when the plan does not load waterfalls. |
+| fall\_height\_m | real | `natural_barriers` only. Waterfall height (m) from `cabd_waterfalls`; NULL for other natural barriers, or when the plan does not load waterfalls. |
+
+The waterfall columns come from the `waterfalls` entry in `CUSTOM_FEATURE_TYPE_FIELDS` (`fishpass_engine/scripts/cabd_client.py`).
+
+
 ### Views: `<output_schema>.anthropogenic_barriers_<species>` and `<output_schema>.natural_barriers_<species>`
 
 Each reporting species has anthropogenic and natural views with the computed statistics available as columns. Both expose one identifier, `feature_id`, whose value is `all_barriers.feature_id`. They omit the per-run `all_barriers.id`, which is used internally by the ranking work table.
+
+Besides the statistics columns, each view has `feature_type`, `stream_name_en`, `upstream_edge_id`, `downstream_edge_id`, `geometry` and `snapped_geometry` (as described for `natural_barriers` / `anthropogenic_barriers` above), and that species' `passability_status_spawn` and `passability_status_rear` (double) from `species_passability_value`.
 
 
 ### Views: `<output_schema>.unsnapped_barriers`

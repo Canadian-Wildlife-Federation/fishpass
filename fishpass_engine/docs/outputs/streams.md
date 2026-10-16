@@ -11,6 +11,8 @@
 | ef\_subtype | int | Flowpath subtype |
 | rank | int | Rank (primary/secondary) |
 | length | double | Raw 2d length of flowpath |
+| rivernameid1 | uuid | CHyF primary river name identifier (`chyf_raw.flowpath.rivernameid1`). |
+| stream\_name\_en | text | English name for `rivernameid1`, from `chyf_raw.names`. NULL when the edge has no name. Segments created by network breaking keep the name of the edge they were split from. |
 | from\_nexus\_id | uuid |  |
 | to\_nexus\_id | uuid |  |
 | ecatchment\_id | uuid | waterbody/catchment edge is contained within |
@@ -64,4 +66,4 @@ The `*_ids` fields below contain barrier `feature_id` values, not the per-run `a
 
 ### Views: `<output_schema>.streams_<species>`
 
-Each output species will have a separate view with each of the statistics fields computed available as a column in the view.
+Each output species will have a separate view with each of the statistics fields computed available as a column in the view, alongside `id`, `geometry`, `length`, `strahler_order`, `effective_length`, `segment_gradient` and `stream_name_en` from `streams`.

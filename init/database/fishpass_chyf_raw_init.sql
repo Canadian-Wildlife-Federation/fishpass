@@ -42,25 +42,25 @@ $$;
 
 CREATE SCHEMA IF NOT EXISTS chyf2_fdw;
 
+-- Import whichever of the required CHyF2 tables are not yet foreign tables, so re-running this
+-- script on an existing database picks up tables added to the list later.
 DO $$
+DECLARE
+	missing_tables text;
 BEGIN
-	IF NOT EXISTS (
+	SELECT string_agg(quote_ident(t), ', ') INTO missing_tables
+	FROM unnest(ARRAY['eflowpath', 'eflowpath_properties', 'aoi', 'shoreline', 'names']) AS t
+	WHERE NOT EXISTS (
 		SELECT 1 FROM information_schema.foreign_tables
-		WHERE foreign_table_schema = 'chyf2_fdw' AND foreign_table_name = 'eflowpath'
-	) THEN
-		EXECUTE 'IMPORT FOREIGN SCHEMA chyf2 LIMIT TO (eflowpath, eflowpath_properties, aoi, shoreline) FROM SERVER chyf2_fdw_server INTO chyf2_fdw';
-	END IF;
-END
-$$;
+		WHERE foreign_table_schema = 'chyf2_fdw' AND foreign_table_name = t
+	);
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.foreign_tables
-        WHERE foreign_table_schema = 'chyf2_fdw' AND foreign_table_name = 'names'
-    ) THEN
-        EXECUTE 'IMPORT FOREIGN SCHEMA chyf2 LIMIT TO (names) FROM SERVER chyf2_fdw_server INTO chyf2_fdw';
-    END IF;
+	IF missing_tables IS NOT NULL THEN
+		EXECUTE format(
+			'IMPORT FOREIGN SCHEMA chyf2 LIMIT TO (%s) FROM SERVER chyf2_fdw_server INTO chyf2_fdw',
+			missing_tables
+		);
+	END IF;
 END
 $$;
 
