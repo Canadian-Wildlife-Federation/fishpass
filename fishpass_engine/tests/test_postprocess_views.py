@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-for _module_name in ("psycopg",):
+for _module_name in ("psycopg", "requests"):
 	if _module_name not in sys.modules:
 		try:
 			__import__(_module_name)
@@ -40,18 +40,32 @@ class FakeConn:
 class CreateNaturalAnthropogenicViewsTests(unittest.TestCase):
 	def test_creates_natural_and_anthropogenic_views(self):
 		cursor = FakeCursor()
-		pv.create_natural_anthropogenic_views(cursor, "model_test")
+		pv.create_natural_anthropogenic_views(cursor, "model_test", {"structure_types": ["dams", "waterfalls"]})
 		self.assertEqual(len(cursor.executed), 2)
 		sql_natural, _ = cursor.executed[0]
 		sql_anthro, _ = cursor.executed[1]
 		self.assertIn('CREATE VIEW "model_test".natural_barriers', sql_natural)
-		self.assertIn("SELECT feature_id, feature_type", sql_natural)
+		self.assertIn("SELECT ab.feature_id, ab.feature_type, s.stream_name_en", sql_natural)
+		self.assertIn('LEFT JOIN "model_test".streams s ON s.id = ab.upstream_edge_id', sql_natural)
 		self.assertNotIn("SELECT id, feature_id", sql_natural)
-		self.assertIn("WHERE structure_type = 'natural' AND species_stats IS NOT NULL", sql_natural)
+		self.assertIn("WHERE ab.structure_type = 'natural' AND ab.species_stats IS NOT NULL", sql_natural)
+		self.assertIn('LEFT JOIN "model_test".cabd_waterfalls wf', sql_natural)
+		self.assertIn("wf.cabd_id = ab.feature_id", sql_natural)
+		self.assertIn("wf.fall_name_en, wf.fall_height_m", sql_natural)
 		self.assertIn('CREATE VIEW "model_test".anthropogenic_barriers', sql_anthro)
-		self.assertIn("SELECT feature_id, feature_type", sql_anthro)
+		self.assertIn("SELECT ab.feature_id, ab.feature_type", sql_anthro)
 		self.assertNotIn("SELECT id, feature_id", sql_anthro)
-		self.assertIn("WHERE structure_type = 'anthropogenic' AND species_stats IS NOT NULL", sql_anthro)
+		self.assertIn("WHERE ab.structure_type = 'anthropogenic' AND ab.species_stats IS NOT NULL", sql_anthro)
+		self.assertNotIn("cabd_waterfalls", sql_anthro)
+		self.assertNotIn("fall_name_en", sql_anthro)
+		self.assertNotIn("fall_height_m", sql_anthro)
+
+	def test_natural_view_has_null_waterfall_columns_without_waterfalls(self):
+		cursor = FakeCursor()
+		pv.create_natural_anthropogenic_views(cursor, "model_test", {"structure_types": ["dams"]})
+		sql_natural, _ = cursor.executed[0]
+		self.assertNotIn("cabd_waterfalls", sql_natural)
+		self.assertIn("NULL::varchar AS fall_name_en, NULL::real AS fall_height_m", sql_natural)
 
 
 class CreateSpeciesBarrierViewsTests(unittest.TestCase):
@@ -69,115 +83,120 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		self.assertIn('CREATE VIEW "model_test"."anthropogenic_barriers_ae"', executed_sql)
 
 		sql_natural_as = next(sql for sql, _ in cursor.executed if 'natural_barriers_as"' in sql)
-		self.assertIn("WHERE structure_type = 'natural' AND species_stats IS NOT NULL", sql_natural_as)
-		self.assertIn("SELECT feature_id, feature_type,", sql_natural_as)
+		self.assertIn("WHERE ab.structure_type = 'natural' AND ab.species_stats IS NOT NULL", sql_natural_as)
+		self.assertIn(
+			"SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,",
+			sql_natural_as,
+		)
+		self.assertIn('LEFT JOIN "model_test".streams s ON s.id = ab.upstream_edge_id', sql_natural_as)
 		self.assertNotIn("SELECT id, feature_id", sql_natural_as)
 		sql_anthro_as = next(sql for sql, _ in cursor.executed if 'anthropogenic_barriers_as"' in sql)
-		self.assertIn("SELECT feature_id, feature_type,", sql_anthro_as)
+		self.assertIn("SELECT ab.feature_id, ab.feature_type,", sql_anthro_as)
 		self.assertNotIn("SELECT id, feature_id", sql_anthro_as)
 		self.assertIn(
-			"(species_passability_value->>'as_spawn')::double precision AS passability_status_spawn",
+			"(ab.species_passability_value->>'as_spawn')::double precision AS passability_status_spawn",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_passability_value->>'as_rear')::double precision AS passability_status_rear",
+			"(ab.species_passability_value->>'as_rear')::double precision AS passability_status_rear",
 			sql_natural_as,
 		)
-		self.assertIn("geometry, snapped_geometry", sql_natural_as)
+		self.assertIn("ab.geometry, ab.snapped_geometry", sql_natural_as)
 		self.assertIn(
-			"(species_stats->'as'->>'upstream_natural_spawnrear_count')::int AS upstream_natural_spawnrear_count",
-			sql_natural_as,
-		)
-		self.assertIn(
-			"(species_stats->'as'->>'upstream_anthro_spawnrear_count')::int AS upstream_anthro_spawnrear_count",
+			"(ab.species_stats->'as'->>'upstream_natural_spawnrear_count')::int AS upstream_natural_spawnrear_count",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'downstream_natural_spawnrear_count')::int AS downstream_natural_spawnrear_count",
+			"(ab.species_stats->'as'->>'upstream_anthro_spawnrear_count')::int AS upstream_anthro_spawnrear_count",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'downstream_anthro_spawnrear_count')::int AS downstream_anthro_spawnrear_count",
+			"(ab.species_stats->'as'->>'downstream_natural_spawnrear_count')::int AS downstream_natural_spawnrear_count",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'upstream_natural_spawn_count')::int AS upstream_natural_spawn_count",
+			"(ab.species_stats->'as'->>'downstream_anthro_spawnrear_count')::int AS downstream_anthro_spawnrear_count",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'downstream_natural_rear_count')::int AS downstream_natural_rear_count",
+			"(ab.species_stats->'as'->>'upstream_natural_spawn_count')::int AS upstream_natural_spawn_count",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_natural_spawn_ids'))::uuid[] "
+			"(ab.species_stats->'as'->>'downstream_natural_rear_count')::int AS downstream_natural_rear_count",
+			sql_natural_as,
+		)
+		self.assertIn(
+			"ARRAY(SELECT jsonb_array_elements_text(ab.species_stats->'as'->'downstream_natural_spawn_ids'))::uuid[] "
 			"AS downstream_natural_spawn_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_natural_rear_ids'))::uuid[] "
+			"ARRAY(SELECT jsonb_array_elements_text(ab.species_stats->'as'->'downstream_natural_rear_ids'))::uuid[] "
 			"AS downstream_natural_rear_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_anthro_spawn_ids'))::uuid[] "
+			"ARRAY(SELECT jsonb_array_elements_text(ab.species_stats->'as'->'downstream_anthro_spawn_ids'))::uuid[] "
 			"AS downstream_anthro_spawn_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'downstream_anthro_rear_ids'))::uuid[] "
+			"ARRAY(SELECT jsonb_array_elements_text(ab.species_stats->'as'->'downstream_anthro_rear_ids'))::uuid[] "
 			"AS downstream_anthro_rear_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'upstream_anthro_spawn_ids'))::uuid[] "
+			"ARRAY(SELECT jsonb_array_elements_text(ab.species_stats->'as'->'upstream_anthro_spawn_ids'))::uuid[] "
 			"AS upstream_anthro_spawn_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"ARRAY(SELECT jsonb_array_elements_text(species_stats->'as'->'upstream_anthro_rear_ids'))::uuid[] "
+			"ARRAY(SELECT jsonb_array_elements_text(ab.species_stats->'as'->'upstream_anthro_rear_ids'))::uuid[] "
 			"AS upstream_anthro_rear_ids",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawn_upstream_accessible_length')::double precision AS spawn_upstream_accessible_length",
+			"(ab.species_stats->'as'->>'spawn_upstream_accessible_length')::double precision AS spawn_upstream_accessible_length",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'rear_upstream_accessible_length')::double precision AS rear_upstream_accessible_length",
+			"(ab.species_stats->'as'->>'rear_upstream_accessible_length')::double precision AS rear_upstream_accessible_length",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'rear_upstream_length')::double precision AS rear_upstream_length", sql_natural_as
+			"(ab.species_stats->'as'->>'rear_upstream_length')::double precision AS rear_upstream_length",
+			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawn_weighted_connected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawn_weighted_connected_upstream_length')::double precision "
 			"AS spawn_weighted_connected_upstream_length",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawn_weighted_disconnected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawn_weighted_disconnected_upstream_length')::double precision "
 			"AS spawn_weighted_disconnected_upstream_length",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawn_functional_weighted_connected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawn_functional_weighted_connected_upstream_length')::double precision "
 			"AS spawn_functional_weighted_connected_upstream_length",
 			sql_natural_as,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawn_functional_weighted_disconnected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawn_functional_weighted_disconnected_upstream_length')::double precision "
 			"AS spawn_functional_weighted_disconnected_upstream_length",
 			sql_natural_as,
 		)
 
 		sql_anthro_ae = next(sql for sql, _ in cursor.executed if 'anthropogenic_barriers_ae"' in sql)
-		self.assertIn("WHERE structure_type = 'anthropogenic' AND species_stats IS NOT NULL", sql_anthro_ae)
+		self.assertIn("WHERE ab.structure_type = 'anthropogenic' AND ab.species_stats IS NOT NULL", sql_anthro_ae)
 		self.assertIn(
-			"(species_stats->'ae'->>'upstream_natural_spawnrear_count')::int AS upstream_natural_spawnrear_count",
+			"(ab.species_stats->'ae'->>'upstream_natural_spawnrear_count')::int AS upstream_natural_spawnrear_count",
 			sql_anthro_ae,
 		)
 		self.assertIn(
-			"(species_stats->'ae'->>'rear_upstream_length')::double precision AS rear_upstream_length", sql_anthro_ae
+			"(ab.species_stats->'ae'->>'rear_upstream_length')::double precision AS rear_upstream_length", sql_anthro_ae
 		)
 		self.assertNotIn("spawn_upstream_length", sql_anthro_ae)
 
@@ -193,25 +212,25 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		pv.create_species_barrier_views(cursor, "model_test", [("as", "spawnrear")])
 		sql, _ = cursor.executed[0]
 		self.assertIn(
-			"(species_stats->'as'->>'spawnrear_upstream_length')::double precision AS spawnrear_upstream_length", sql
+			"(ab.species_stats->'as'->>'spawnrear_upstream_length')::double precision AS spawnrear_upstream_length", sql
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawnrear_weighted_connected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawnrear_weighted_connected_upstream_length')::double precision "
 			"AS spawnrear_weighted_connected_upstream_length",
 			sql,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawnrear_weighted_disconnected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawnrear_weighted_disconnected_upstream_length')::double precision "
 			"AS spawnrear_weighted_disconnected_upstream_length",
 			sql,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawnrear_functional_weighted_connected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawnrear_functional_weighted_connected_upstream_length')::double precision "
 			"AS spawnrear_functional_weighted_connected_upstream_length",
 			sql,
 		)
 		self.assertIn(
-			"(species_stats->'as'->>'spawnrear_functional_weighted_disconnected_upstream_length')::double precision "
+			"(ab.species_stats->'as'->>'spawnrear_functional_weighted_disconnected_upstream_length')::double precision "
 			"AS spawnrear_functional_weighted_disconnected_upstream_length",
 			sql,
 		)
@@ -354,6 +373,7 @@ class CreateBarrierViewsOrchestratorTests(unittest.TestCase):
 		conn = FakeConn()
 		plan = {
 			"output_schema": "model_test",
+			"structure_types": ["dams", "waterfalls"],
 			"reporting_species_lifecycles": [("as", "rear"), ("ae", "rear")],
 		}
 		pv.create_barrier_views(conn, cursor, plan)

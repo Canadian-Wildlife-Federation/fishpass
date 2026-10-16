@@ -52,6 +52,8 @@ STREAM_FIELDS = (
 	"graph_id",
 	"is_isolated",
 	"strahler_order",
+	"rivernameid1",
+	"stream_name_en",
 )
 
 

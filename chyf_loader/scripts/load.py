@@ -58,10 +58,12 @@ def load_config(config_path):
 		"target_flowpath_table": target["flowpath_table"],
 		"target_aoi_table": target["aoi_table"],
 		"target_shoreline_table": target["shoreline_table"],
+		"target_names_table": target["names_table"],
 		"source_flowpath_table": source["flowpath_table"],
 		"source_flowpath_properties_table": source["flowpath_properties_table"],
 		"source_aoi_table": source["aoi_table"],
 		"source_shoreline_table": source["shoreline_table"],
+		"source_names_table": source["names_table"],
 	}
 
 	return short_names, dry_run, verbosity, schema_vars

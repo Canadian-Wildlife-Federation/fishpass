@@ -12,4 +12,11 @@ Table Structure:
 | passability_status_code | integer | raw passability_status_code as returned by CABD, unmapped |
 | geometry | point | original location of barrier, as returned by CABD |
 
+Some feature types store extra CABD properties, configured in `CUSTOM_FEATURE_TYPE_FIELDS` (`fishpass_engine/scripts/cabd_client.py`). Each field becomes a column with the same name as the CABD property:
+
+| Feature type | Field | Type | Comment |
+| :---- | :---- | :---- | :---- |
+| waterfalls | fall_name_en | varchar | English waterfall name |
+| waterfalls | fall_height_m | real | Waterfall height in metres |
+
 No `source` column here -- every row in this table came from CABD by construction. The table is  scoped to a single feature type via its `<feature_type>`-suffixed name.

@@ -42,13 +42,24 @@ $$;
 
 CREATE SCHEMA IF NOT EXISTS chyf2_fdw;
 
+-- Import whichever of the required CHyF2 tables are not yet foreign tables, so re-running this
+-- script on an existing database picks up tables added to the list later.
 DO $$
+DECLARE
+	missing_tables text;
 BEGIN
-	IF NOT EXISTS (
+	SELECT string_agg(quote_ident(t), ', ') INTO missing_tables
+	FROM unnest(ARRAY['eflowpath', 'eflowpath_properties', 'aoi', 'shoreline', 'names']) AS t
+	WHERE NOT EXISTS (
 		SELECT 1 FROM information_schema.foreign_tables
-		WHERE foreign_table_schema = 'chyf2_fdw' AND foreign_table_name = 'eflowpath'
-	) THEN
-		EXECUTE 'IMPORT FOREIGN SCHEMA chyf2 LIMIT TO (eflowpath, eflowpath_properties, aoi, shoreline) FROM SERVER chyf2_fdw_server INTO chyf2_fdw';
+		WHERE foreign_table_schema = 'chyf2_fdw' AND foreign_table_name = t
+	);
+
+	IF missing_tables IS NOT NULL THEN
+		EXECUTE format(
+			'IMPORT FOREIGN SCHEMA chyf2 LIMIT TO (%s) FROM SERVER chyf2_fdw_server INTO chyf2_fdw',
+			missing_tables
+		);
 	END IF;
 END
 $$;
@@ -96,12 +107,20 @@ CREATE INDEX IF NOT EXISTS flowpath_aoi_id_idx ON chyf_raw.flowpath (aoi_id);
 CREATE INDEX IF NOT EXISTS flowpath_graph_id_idx ON chyf_raw.flowpath (graph_id);
 CREATE INDEX IF NOT EXISTS aoi_short_name_idx ON chyf_raw.aoi (short_name);
 
-CREATE TABLE chyf_raw.shoreline (
+CREATE TABLE IF NOT EXISTS chyf_raw.shoreline (
 	id uuid NOT NULL,
 	aoi_id uuid NOT NULL,
 	geometry public.geometry(linestring, 4617) NOT NULL,
 	CONSTRAINT shoreline_pkey PRIMARY KEY (id),
 	CONSTRAINT shoreline_aoi_id_fkey FOREIGN KEY (aoi_id) REFERENCES chyf_raw.aoi(id)
 );
-CREATE INDEX shoreline_aoi_id_idx ON chyf_raw.shoreline USING btree (aoi_id);
-CREATE INDEX shoreline_geometry_idx ON chyf_raw.shoreline USING gist (geometry);
+CREATE INDEX IF NOT EXISTS shoreline_aoi_id_idx ON chyf_raw.shoreline USING btree (aoi_id);
+CREATE INDEX IF NOT EXISTS shoreline_geometry_idx ON chyf_raw.shoreline USING gist (geometry);
+
+CREATE TABLE IF NOT EXISTS chyf_raw.names (
+	name_id uuid PRIMARY KEY,
+	name_en varchar,
+	name_fr varchar,
+	geodbname varchar,
+	geodb_id varchar
+);
