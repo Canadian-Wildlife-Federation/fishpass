@@ -53,7 +53,7 @@ STREAM_FIELDS = (
 	"is_isolated",
 	"strahler_order",
 	"rivernameid1",
-	"stream_name_en"
+	"stream_name_en",
 )
 
 

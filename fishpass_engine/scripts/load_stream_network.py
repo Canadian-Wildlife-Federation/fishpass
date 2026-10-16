@@ -232,6 +232,7 @@ def copy_streams(cursor, output_schema, aoi_ids):
 	""")
 	return rowcount
 
+
 def compute_upstream_of_keep_ids(cursor, output_schema, edge_ids):
 	"""Return the set of <output_schema>.streams ids to keep for an aoi.upstream_of plan: each
 	given edge plus everything upstream of it, computed per graph_id component (edges on separate

@@ -63,7 +63,7 @@ def create_cabd_table(cursor, output_schema, feature_type, srid):
 		);
 	""")
 
-	if feature_type == 'waterfalls':
+	if feature_type == "waterfalls":
 		cursor.execute(f"""
 			ALTER TABLE {schema_ident}.{table_ident} 
 			ADD COLUMN fall_name_en text;
@@ -177,7 +177,7 @@ def populate_cabd_table(cursor, output_schema, feature_type, short_names, target
 			count += 1
 			yield build_cabd_row(feature, target_species)
 
-	if feature_type == 'waterfalls':
+	if feature_type == "waterfalls":
 		columns = "(cabd_id, species_passability_value, passability_status_code, fall_name_en, fall_height_m, geometry)"
 		values = f"(%s, %s::jsonb, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), {srid}))"
 	else:
