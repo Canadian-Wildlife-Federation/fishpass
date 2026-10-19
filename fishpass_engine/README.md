@@ -17,7 +17,7 @@ at the top of each script for the `psql` command and the variables it needs.
 | Script | Sets up |
 | --- | --- |
 | [fishpass_user.sql](../init/database/fishpass_user.sql) | The `fishpass` role, its read access to the CHyF database, and its ownership of the FishPass database. A template: fill in the role, password, and database names before running. |
-| [fishpass_chyf_raw_init.sql](../init/database/fishpass_chyf_raw_init.sql) | The `chyf_raw` schema and tables (`aoi`, `flowpath`, `shoreline`) that chyf_loader fills, and the `chyf2_fdw` foreign tables it reads from. |
+| [fishpass_chyf_raw_init.sql](../init/database/fishpass_chyf_raw_init.sql) | The `chyf_raw` schema and tables (`aoi`, `flowpath`, `shoreline`, `names`) that chyf_loader fills, and the `chyf2_fdw` foreign tables it reads from. |
 | [fishpass_cabd_raw_init.sql](../init/database/fishpass_cabd_raw_init.sql) | The `cabd_fdw` foreign tables the combined view reads CABD attributes from. Must be run as a superuser. |
 | [fishpass_support_tables.sql](../init/database/fishpass_support_tables.sql) | The `support` schema and its `structure_updates`, `new_structures`, and `habitat_updates` tables. |
 | [wcrp_support.sql](../init/database/wcrp_support.sql) | The `support.blank2null()` trigger function that every WCRP tracking table uses. |

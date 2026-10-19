@@ -21,6 +21,15 @@ PASSABILITY_CODE_MAP = {
 	6: 1,  # NA - Decommissioned / Removed
 }
 
+# Extra CABD properties stored on cabd_<feature_type> (and surfaced in the barrier views), per feature type: each field's name is both the
+# CABD GeoJSON property and the column name, and its type is the column's SQL type.
+CUSTOM_FEATURE_TYPE_FIELDS = {
+	"waterfalls": [
+		{"name": "fall_name_en", "type": "varchar"},
+		{"name": "fall_height_m", "type": "real"},
+	],
+}
+
 
 def map_passability(status_code):
 	"""Map a CABD passability_status_code to a 0/1 passability value. A missing/unrecognized

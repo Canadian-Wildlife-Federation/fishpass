@@ -59,7 +59,8 @@ It runs `chyf_loader/scripts/load.py`, which:
 2. Resolves those `short_name`s to `chyf2.aoi.id` UUIDs.
 3. Deletes all existing cached `chyf_raw` data (for all AOI).
 4. Copies the corresponding `aoi`, `shoreline` and (merged) `eflowpath` + `eflowpath_properties` rows from
-   CHyF2 via FDW, filtered to `rank = 1` and `ef_type != 2`.
+   CHyF2 via FDW, filtered to `rank = 1` and `ef_type != 2`, plus the `names` rows referenced by those
+   flowpaths' `rivernameid1`.
 5. Computes `length_km` for the newly loaded rows.
 6. Computes `is_isolated` for the newly loaded rows.
     * This is used to identify isolated groups which are flagged and excluded from used in fish pass modelling
