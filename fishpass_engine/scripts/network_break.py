@@ -189,6 +189,8 @@ def build_segment_writes(edge_row, srid, segments):
 					edge_row["graph_id"],
 					edge_row["is_isolated"],
 					edge_row["strahler_order"],
+					edge_row["rivernameid1"],
+					edge_row["stream_name_en"],
 					wkb,
 					srid,
 					wkb,
