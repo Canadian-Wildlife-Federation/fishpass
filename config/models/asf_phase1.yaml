@@ -238,7 +238,7 @@ structure_types:
   # include "gradients" here to also include computed gradient barriers -- they are
   # excluded by default, see gradient_barriers_doc.md's Load Structures step 6.
 
-structure_snap_edge_distance_m: 100
-structure_snap_vertex_distance_m: 50
+structure_snap_edge_distance_m: 10
+structure_snap_vertex_distance_m: 1
 habitat_point_snap_edge_distance_m: 100
 habitat_point_snap_vertex_distance_m: 50
