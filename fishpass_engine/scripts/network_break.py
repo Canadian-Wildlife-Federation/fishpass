@@ -232,7 +232,7 @@ def flush_segment_inserts(cursor, output_schema, rows):
 		f"""
 		INSERT INTO {schema_ident}.streams
 			({cols}, geometry, length)
-		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
 				ST_SetSRID(ST_GeomFromWKB(%s), %s), ST_Length(ST_SetSRID(ST_GeomFromWKB(%s), %s)::geography))
 		""",
 		rows,
