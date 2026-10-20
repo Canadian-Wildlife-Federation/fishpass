@@ -1,0 +1,29 @@
+# Example model plan file, per fishpass/requirements/inputs/model_plan_file.md.
+# Copy this file to <plan_code>.yaml (code must match the file name) to define a new plan.
+
+code: asf_p1_qc
+name: ASF Phase 1 - Quebec
+output_schema: asf_p1_qc
+
+aoi:
+  province:
+    - qc
+
+target_species:
+  - as
+
+reporting_values:
+  - as_all
+
+structure_types:
+  - dams
+  - waterfalls
+  - stream_crossings
+  - gradients
+  # include "gradients" here to also include computed gradient barriers -- they are
+  # excluded by default, see gradient_barriers_doc.md's Load Structures step 6.
+
+structure_snap_edge_distance_m: 10
+structure_snap_vertex_distance_m: 1
+habitat_point_snap_edge_distance_m: 100
+habitat_point_snap_vertex_distance_m: 50
