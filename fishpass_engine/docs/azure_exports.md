@@ -2,8 +2,6 @@
 
 This document outlines the requirements for exporting FishPass engine results from the database to Azure Blob Storage.
 
-**Status:** proposed -- not yet implemented. See the open questions [to confirm with CWF](#open-questions---to-confirm-with-cwf) and [for implementation](#open-questions---for-implementation) for the items still to be decided.
-
 ## Overview
 
 At the end of a model run, the results can optionally be exported to an Azure Blob Storage container. The export:
@@ -45,6 +43,10 @@ The action stops with an error if the plan's output schema has no `azure_exports
 
 ## Azure Storage Location
 
+### Storage Account
+
+A new "fishpass" Storage account will be created in the CWF Azure subscription to hold all this data. In order to enable public access to results, this account will be configured to allow anaoymous access.
+
 ### Azure Container
 
 One container is used per model plan. It is created if it doesn't already exist, and is named from the plan `code` in the [model plan file](./inputs/model_plan_file.md), converted as follows:
@@ -65,6 +67,12 @@ Azure container names only allow lowercase letters, numbers and `-`, and must be
 | `ASF_Phase_1` | `fishpass-asf-phase-1` |
 | `ns__2026_` | `fishpass-ns-2026` |
 
+
+
+**Public Access Permission**
+
+The containers will be configured to allow "Blob anonymous access" to allow the exports to be publicily available via a download link. 
+
 ### Azure Blob Names 
 
 Within the container, each run gets its own folder and every file is prefixed with the folder name:
@@ -84,10 +92,11 @@ runs/<type>/<model>_<version>_<yyyymmddhhmmss>/<model>_<version>_<yyyymmddhhmmss
 Examples for plan code `ns`, run on 2026-10-07 at 14:30:00 UTC:
 
 ```text
-runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_streams.gpkg
+runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_streams_as.gpkg
 runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_metadata.yaml
-runs/unversioned/ns_20261007143000/ns_20261007143000_streams.gpkg
+runs/unversioned/ns_20261007143000/ns_20261007143000_streams_as.gpkg
 ```
+
 
 ## Database Control Tables
 
@@ -118,7 +127,7 @@ GeoPackage has no uuid or enum type. The `sql` for a `geopackage` export must ca
 
 | Column type | Example column | Example `sql` |
 | :---- | :---- | :---- |
-| uuid | `barrier_id`, `feature_id` | `barrier_id::text AS barrier_id` |
+| uuid | `feature_id` | `feature_id::text AS feature_id` |
 | enum | the tracking table columns such as `priority` and `constructability` | `priority::text AS priority` |
 
 No cast is needed for a `csv` export, where every value is written as text.
@@ -203,7 +212,7 @@ These are exported by default, and each comes from a row in the export table:
 | Export | Source | One file per | Format |
 | :---- | :---- | :---- | :---- |
 | [Natural barriers](#natural-barriers) | The `<output_schema>.natural_barriers_<species>` views, which are created as a part of the model processing. Each view holds the natural barriers with the columns specific to that species. See [barriers.md](./outputs/barriers.md). | species | geopackage |
-| [Streams](#streams) | `<output_schema>.streams`. See [streams.md](./outputs/streams.md). | run | geopackage |
+| [Streams](#streams) | The `<output_schema>.streams_<species>` views, which are created as a part of the model processing. Each view holds the stream edges with the columns specific to that species. See [streams.md](./outputs/streams.md). | species | geopackage |
 | [Ranked barriers](#ranked-barriers) | `<code>_wcrp.ranked_barriers_<species>_<lifestage>_<code>`. See [ranked_barriers.md](./outputs/ranked_barriers.md). | species/lifestage | csv |
 | [Final structures](#final-structures) | `<code>_wcrp.combined_output_table_vw`. See [combined_output_view.md](./outputs/combined_output_view.md). | run | geopackage |
 | [Connectivity summary](#connectivity-summary) | `<output_schema>.watershed_summary_stats`. See [watershed_summary.md](./outputs/watershed_summary.md). | run | csv |
@@ -218,8 +227,7 @@ Example `sql` for species `as`, reporting the `spawn` and `rear` lifestages. It 
 
 ```sql
 SELECT
-    id::text AS id,
-    feature_id::text AS barrier_id,
+    feature_id::text AS feature_id,
     feature_type,
     passability_status_spawn,
     passability_status_rear,
@@ -238,9 +246,7 @@ SELECT
     downstream_anthro_rear_count,
     downstream_anthro_spawnrear_count,
 
-    -- barrier id lists, as pipe-separated text
-    array_to_string(downstream_natural_spawn_ids, '|') AS downstream_natural_spawn_ids,
-    array_to_string(downstream_natural_rear_ids, '|') AS downstream_natural_rear_ids,
+    -- anthropogenic barrier id lists, as pipe-separated text
     array_to_string(downstream_anthro_spawn_ids, '|') AS downstream_anthro_spawn_ids,
     array_to_string(downstream_anthro_rear_ids, '|') AS downstream_anthro_rear_ids,
     array_to_string(upstream_anthro_spawn_ids, '|') AS upstream_anthro_spawn_ids,
@@ -276,48 +282,74 @@ Notes on the example:
 - The columns are listed, not selected with `*`, because the view has two geometry columns (`geometry` and `snapped_geometry`) and a GeoPackage export must return exactly one.
 - GeoPackage has no uuid or list type, so the uuid columns are cast to text and the barrier id lists are written as text with the values separated by `|` (e.g. `id1|id2|id3`).
 - The length columns in the view depend on the lifestages reported for the species. When `spawnrear` is reported, the view has a third block of six columns with the `spawnrear_` prefix, which is added to the query.
-- The view's `feature_id` is written as `barrier_id`, the same name and meaning as `barrier_id` in the final structures export and the tracking table. It is the stable identifier of the barrier (CABD id, gradient barrier id or new structure id). `id` is also written, but it is regenerated on every model run, so it only identifies a barrier within one run.
+- `feature_id` is the barrier identifier (CABD id, gradient barrier id or new structure id), the same as `feature_id` in the ranked barriers and final structures exports and the tracking table. It is stable across model runs for CABD barriers and new structures; gradient barrier ids change whenever the gradient barriers table is recomputed. The per-run `all_barriers.id` is not in the view and is not exported.
+- Only the four anthropogenic barrier id lists are exported. The view's natural barrier id lists (`downstream_natural_spawn_ids`, `downstream_natural_rear_ids`) are left out; the natural barrier counts are still exported.
+- The anthropogenic id lists hold `feature_id` values, which can be looked up in the final structures export.
 - The view only holds natural barriers that snapped to the stream network.
 - The view does not have the `source`, `upstream_edge_id` or `downstream_edge_id` columns from `all_barriers`.
 
 #### Streams
 
-One row is added to the export table for the run. The single file holds every stream edge with the stream network columns only; the per-species `species_stats` column is left out:
+One row is added to the export table for each reporting species (all lifestages are included for the species):
 
-Example filename: `runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_streams.gpkg`
+Example filename: `runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_streams_as.gpkg`
 
-Example `sql`. It reads from `<output_schema>.streams` (see [streams.md](./outputs/streams.md)):
+Example `sql` for species `as`, reporting the `spawn` and `rear` lifestages. It reads from the existing `<output_schema>.streams_<species>` view (see [streams.md](./outputs/streams.md)), which has already converted the JSON fields to columns:
 
 ```sql
 SELECT
     id::text AS id,
-    aoi_id::text AS aoi_id,
-    ef_type,
-    ef_subtype,
-    rank,
     length,
-    from_nexus_id::text AS from_nexus_id,
-    to_nexus_id::text AS to_nexus_id,
-    ecatchment_id::text AS ecatchment_id,
-    mainstem_id::text AS mainstem_id,
-    graph_id,
-    is_isolated,
     strahler_order,
     effective_length,
     segment_gradient,
-    downstream_route_measure,
-    upstream_route_measure,
+
+    -- accessibility and habitat
+    spawn_accessibility,
+    rear_accessibility,
+    spawn_habitat,
+    rear_habitat,
+    spawnrear_habitat,
+
+    -- barrier counts
+    upstream_anthro_spawn_count,
+    upstream_anthro_rear_count,
+    upstream_anthro_spawnrear_count,
+    downstream_anthro_spawn_count,
+    downstream_anthro_rear_count,
+    downstream_anthro_spawnrear_count,
+    upstream_natural_spawn_count,
+    upstream_natural_rear_count,
+    upstream_natural_spawnrear_count,
+    downstream_natural_spawn_count,
+    downstream_natural_rear_count,
+    downstream_natural_spawnrear_count,
+
+    -- anthropogenic barrier id lists, as pipe-separated text
+    array_to_string(upstream_anthro_spawn_ids, '|') AS upstream_anthro_spawn_ids,
+    array_to_string(upstream_anthro_rear_ids, '|') AS upstream_anthro_rear_ids,
+    array_to_string(downstream_anthro_spawn_ids, '|') AS downstream_anthro_spawn_ids,
+    array_to_string(downstream_anthro_rear_ids, '|') AS downstream_anthro_rear_ids,
+
+    -- weighted lengths (in the view only when the lifestage is reported for this species)
+    spawn_weighted_length,
+    spawn_weighted_connected_length,
+    spawn_weighted_disconnected_length,
+    rear_weighted_length,
+    rear_weighted_connected_length,
+    rear_weighted_disconnected_length,
 
     -- the one geometry column, used as the geometry in the GeoPackage
     geometry
-FROM <output_schema>.streams
+FROM <output_schema>.streams_as
 ```
 
 Notes on the example:
 
-- The JSON column (`species_stats`) is left out entirely, so the file has no species-specific values (accessibility, habitat, barrier counts or weighted lengths). The same file applies to every species.
-- GeoPackage has no uuid type, so the uuid columns are cast to text.
-- Every stream edge is written.
+- GeoPackage has no uuid or list type, so `id` is cast to text and the barrier id lists are written as text with the values separated by `|`. The lists hold barrier `feature_id` values, which can be looked up in the final structures export.
+- The weighted length columns in the view depend on the lifestages reported for the species: the `spawn_` block is only there when `spawn` is reported, and the `rear_` block only when `rear` is reported. There is no `spawnrear_` weighted length block.
+- The view only holds the stream edges that have statistics for the species, so the files for different species can have different edges.
+- The view only has some of the `streams` columns (`id`, `length`, `strahler_order`, `effective_length`, `segment_gradient` and `geometry`). The other network columns (e.g. `aoi_id`, `ef_type`, `rank`, `mainstem_id`, `graph_id`) are not in the view and so are not exported.
 
 #### Ranked Barriers
 
@@ -329,7 +361,7 @@ Example `sql` for plan code `ns`, species `as` and lifestage `spawn`. It reads f
 
 ```sql
 SELECT
-    barrier_id,
+    feature_id,
     group_id,
     num_barriers_group,
     total_spawn_hab_gain_group_km,
@@ -352,7 +384,7 @@ Notes on the example:
 
 - The file name leaves off the plan code that ends the table name, because every file name already starts with it.
 - CSV has no list type, so `downstr_group_ids` is written as text with the values separated by `|` (e.g. `12|15|31`). A comma is not used because it is the CSV column separator.
-- `barrier_id` here is `all_barriers.id`. It matches `id` in the natural barriers export, not `barrier_id` in the final structures export (which is `all_barriers.feature_id`).
+- `feature_id` is `all_barriers.feature_id`, so the file joins to the final structures export and the tracking table on `feature_id`.
 - The table has no geometry. All lengths and gains are in km.
 
 #### Final Structures
@@ -365,7 +397,7 @@ Example `sql` for plan code `ns`, with one reporting species, `as`, reporting th
 
 ```sql
 SELECT
-    barrier_id::text AS barrier_id,
+    feature_id::text AS feature_id,
     feature_type,
 
     -- CABD dam and stream crossing attributes
@@ -408,7 +440,7 @@ FROM ns_wcrp.combined_output_table_vw
 Notes on the example:
 
 - The columns are listed, not selected with `*`, because some need converting. The script that adds this row builds the list from the columns of the view.
-- GeoPackage has no uuid, list or enum type, so `barrier_id` is cast to text, each `downstr_group_ids_<sp>_<lc>` list is written as text with the values separated by `|`, and any enum columns from the tracking table are cast to text.
+- GeoPackage has no uuid, list or enum type, so `feature_id` is cast to text, each `downstr_group_ids_<sp>_<lc>` list is written as text with the values separated by `|`, and any enum columns from the tracking table are cast to text.
 - Three tracking table columns have a `$` in their name, which some GIS tools reject or rename when reading a GeoPackage. `combined_output_table_vw` will be updated to rename them, so the view and the export use the same names:
 
     | Tracking table column | Name in the view and the export |
@@ -461,12 +493,6 @@ The export is a separate step that only needs the database: the list of files co
 
 **!! Results can change after the run  !!**
 Some exports read from data that can be edited after the model run. The final structures view reads the [tracking table](./outputs/tracking_table.md), which is edited by hand, so an export run later can include edits made since the model ran. The export date/time in `metadata.yaml` shows when this may apply.
-
-## Open Questions - To Confirm with CWF
-
-- **Streams without species values (to confirm).** The JSON column (`species_stats`) is left out entirely, so the file has no species-specific values (accessibility, habitat, barrier counts or weighted lengths). The same file applies to every species.
-- **Ranked barriers `barrier_id`.** `barrier_id` in the ranked barriers export is `all_barriers.id`. It matches `id` in the natural barriers export, not `barrier_id` in the final structures export (which is `all_barriers.feature_id`). See [issue #29](https://github.com/Canadian-Wildlife-Federation/fishpass/issues/29).
-- **Barrier id lists in the natural barriers export.** Are the six upstream/downstream barrier id lists (e.g. `upstream_anthro_spawn_ids`, `downstream_natural_rear_ids`) needed in the export? The ids in these lists are the per-run `all_barriers.id`. The four anthropogenic lists cannot be looked up in any exported file: anthropogenic barriers are only exported in the final structures file, which identifies them by `barrier_id` (`all_barriers.feature_id`) and does not include `id`. The two natural lists can be looked up using the `id` column of the natural barriers export. If the lists are not needed they can be left out; the barrier counts are exported either way.
 
 ## Open Questions - For Implementation
 
