@@ -38,6 +38,7 @@ graph_stats.is_impassable's combined "impassable if either lifestage fails" rule
 
 from graph_stats import ACCESSIBILITY_ACCESSIBLE, propagate_upstream_multi, propagate_upstream_with_reset_multi
 from species_params import stream_order_weight
+from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
 
 
 def masked_local_value(edge_ids, effective_length, flag):
@@ -135,13 +136,11 @@ def compute_species_length_stats(
 	disconnected_by_species_lc = {}
 
 	for species in species_list:
-		spawn_accessible_bool = {
-			eid: accessibility[species]["spawn"][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids
+		accessible_by_lc = {
+			lc: {eid: accessibility[species][lc][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids}
+			for lc in LIFESTAGES
 		}
-		rear_accessible_bool = {
-			eid: accessibility[species]["rear"][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids
-		}
-		for lc_key, accessible_bool in (("spawn", spawn_accessible_bool), ("rear", rear_accessible_bool)):
+		for lc_key, accessible_bool in accessible_by_lc.items():
 			accessible_local = {eid: effective_length[eid] if accessible_bool[eid] else 0.0 for eid in edge_ids}
 			accessible_field = f"{species}:{lc_key}_upstream_accessible_length"
 			plain_zeros[accessible_field] = 0.0
@@ -154,9 +153,8 @@ def compute_species_length_stats(
 		params = species_params_by_code[species]
 
 		rear_spawn_base_weighted = {}
-		if lifecycles & {"rear", "spawn", "spawnrear"}:
-			per_lc_accessible = {"rear": rear_accessible_bool, "spawn": spawn_accessible_bool}
-			for base_lc in ("rear", "spawn"):
+		if lifecycles & set(LIFESTAGES_ALL):
+			for base_lc in LIFESTAGES:
 				rear_spawn_base_weighted[base_lc] = base_weighted_length(
 					edge_ids,
 					effective_length,
@@ -164,13 +162,13 @@ def compute_species_length_stats(
 					params,
 					base_lc,
 					habitat[species][base_lc],
-					per_lc_accessible[base_lc],
+					accessible_by_lc[base_lc],
 				)
 
 		for lc in lifecycles:
 			habitat_flag = habitat[species][lc]
 			local = masked_local_value(edge_ids, effective_length, habitat_flag)
-			if lc in ("rear", "spawn"):
+			if lc in LIFESTAGES:
 				weighted_length = rear_spawn_base_weighted[lc]
 				weighted_length_by_species_lc[(species, lc)] = weighted_length
 				connected, disconnected = connected_disconnected_weighted_length(
@@ -181,7 +179,7 @@ def compute_species_length_stats(
 				disconnected_by_species_lc[(species, lc)] = disconnected
 			else:
 				weighted_length = {
-					eid: max(rear_spawn_base_weighted["rear"][eid], rear_spawn_base_weighted["spawn"][eid])
+					eid: max(rear_spawn_base_weighted[REAR][eid], rear_spawn_base_weighted[SPAWN][eid])
 					for eid in edge_ids
 				}
 			weighted_local = weighted_length
@@ -214,12 +212,10 @@ def compute_species_length_stats(
 	result = {}
 	for species in species_list:
 		species_result = {
-			"spawn_upstream_accessible_length": {
-				eid: v[f"{species}:spawn_upstream_accessible_length"] for eid, v in plain_acc.items()
-			},
-			"rear_upstream_accessible_length": {
-				eid: v[f"{species}:rear_upstream_accessible_length"] for eid, v in plain_acc.items()
-			},
+			f"{lc}_upstream_accessible_length": {
+				eid: v[f"{species}:{lc}_upstream_accessible_length"] for eid, v in plain_acc.items()
+			}
+			for lc in LIFESTAGES
 		}
 		for lc in lifecycles_by_species[species]:
 			species_result[f"{lc}_upstream_length"] = {
@@ -234,7 +230,7 @@ def compute_species_length_stats(
 			species_result[f"{lc}_functional_weighted_upstream_length_base"] = {
 				eid: v[f"{species}:{lc}_functional_weighted_upstream_length_base"] for eid, v in reset_acc.items()
 			}
-			if lc != "spawnrear":
+			if lc != SPAWNREAR:
 				species_result[f"{lc}_weighted_length"] = weighted_length_by_species_lc[(species, lc)]
 				species_result[f"{lc}_weighted_connected_length"] = connected_by_species_lc[(species, lc)]
 				species_result[f"{lc}_weighted_disconnected_length"] = disconnected_by_species_lc[(species, lc)]
@@ -289,9 +285,9 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 	"""
 
 	count_keys = [
-		(struct if lc == "spawnrear" else f"{struct}_{lc}", f"{struct}_{lc}")
+		(struct if lc == SPAWNREAR else f"{struct}_{lc}", f"{struct}_{lc}")
 		for struct in ("natural", "anthro")
-		for lc in ("spawn", "rear", "spawnrear")
+		for lc in LIFESTAGES_ALL
 	]
 
 	result = {}
@@ -302,18 +298,13 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 		per_species = {}
 		for species, stats in barrier_stats.items():
 			here = barrier_here_by_species[species]
-			species_stats = {
-				"downstream_natural_spawn_ids": stats["downstream_natural_spawn_ids"].get(edge_id, []),
-				"downstream_natural_rear_ids": stats["downstream_natural_rear_ids"].get(edge_id, []),
-				"downstream_anthro_spawn_ids": stats["downstream_anthro_spawn_ids"].get(edge_id, []),
-				"downstream_anthro_rear_ids": stats["downstream_anthro_rear_ids"].get(edge_id, []),
-				"upstream_anthro_spawn_ids": [
-					bid for bid in stats.get("upstream_anthro_spawn_ids", {}).get(edge_id, []) if bid != feature_id
-				],
-				"upstream_anthro_rear_ids": [
-					bid for bid in stats.get("upstream_anthro_rear_ids", {}).get(edge_id, []) if bid != feature_id
-				],
-			}
+			species_stats = {}
+			for lc in LIFESTAGES:
+				for key in (f"downstream_natural_{lc}_ids", f"downstream_anthro_{lc}_ids"):
+					species_stats[key] = stats[key].get(edge_id, [])
+				# This barrier's own feature_id is dropped from its upstream id list.
+				key = f"upstream_anthro_{lc}_ids"
+				species_stats[key] = [bid for bid in stats.get(key, {}).get(edge_id, []) if bid != feature_id]
 			for data_key, count_key in count_keys:
 				species_stats[f"upstream_{count_key}_count"] = stats.get(f"upstream_{count_key}_count", {}).get(
 					edge_id, 0
@@ -338,11 +329,8 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 				species_stats[field] = values.get(upstream_edge_id) if upstream_edge_id is not None else None
 
 			for lc in lifecycles:
-				if lc == "spawnrear":
-					passability = min(
-						passability_value.get(f"{species}_spawn", 0),
-						passability_value.get(f"{species}_rear", 0),
-					)
+				if lc == SPAWNREAR:
+					passability = min(passability_value.get(f"{species}_{stage}", 0) for stage in LIFESTAGES)
 				else:
 					passability = passability_value.get(f"{species}_{lc}", 0)
 

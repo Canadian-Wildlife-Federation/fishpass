@@ -27,6 +27,7 @@ from length_stats import (
 	compute_barrier_upstream_downstream_stats,
 	compute_species_length_stats,
 )
+from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
 
 STREAM_STAT_FIELDS = (
 	"id",
@@ -174,38 +175,26 @@ def iter_edge_json(edge_ids, reporting_species_lifecycles, accessibility, barrie
 	for eid in edge_ids:
 		entry = {}
 		for species, lifecycles in species_lifecycles.items():
-			s = {
-				"spawn_accessibility": accessibility[species]["spawn"][eid],
-				"rear_accessibility": accessibility[species]["rear"][eid],
-				"upstream_anthro_spawnrear_count": barrier_stats[species]["upstream_anthro_spawnrear_count"][eid],
-				"upstream_anthro_spawn_count": barrier_stats[species]["upstream_anthro_spawn_count"][eid],
-				"upstream_anthro_rear_count": barrier_stats[species]["upstream_anthro_rear_count"][eid],
-				"downstream_anthro_spawnrear_count": barrier_stats[species]["downstream_anthro_spawnrear_count"][eid],
-				"downstream_anthro_spawn_count": barrier_stats[species]["downstream_anthro_spawn_count"][eid],
-				"downstream_anthro_rear_count": barrier_stats[species]["downstream_anthro_rear_count"][eid],
-				"upstream_natural_spawnrear_count": barrier_stats[species]["upstream_natural_spawnrear_count"][eid],
-				"upstream_natural_spawn_count": barrier_stats[species]["upstream_natural_spawn_count"][eid],
-				"upstream_natural_rear_count": barrier_stats[species]["upstream_natural_rear_count"][eid],
-				"downstream_natural_spawnrear_count": barrier_stats[species]["downstream_natural_spawnrear_count"][eid],
-				"downstream_natural_spawn_count": barrier_stats[species]["downstream_natural_spawn_count"][eid],
-				"downstream_natural_rear_count": barrier_stats[species]["downstream_natural_rear_count"][eid],
-				"upstream_anthro_spawn_ids": barrier_stats[species]["upstream_anthro_spawn_ids"][eid],
-				"upstream_anthro_rear_ids": barrier_stats[species]["upstream_anthro_rear_ids"][eid],
-				"downstream_anthro_spawn_ids": barrier_stats[species]["downstream_anthro_spawn_ids"][eid],
-				"downstream_anthro_rear_ids": barrier_stats[species]["downstream_anthro_rear_ids"][eid],
-				"rear_habitat": habitat[species]["rear"][eid],
-				"spawn_habitat": habitat[species]["spawn"][eid],
-				"spawnrear_habitat": habitat[species]["spawnrear"][eid],
-			}
-			for lc in ("rear", "spawn"):
+			s = {f"{lc}_accessibility": accessibility[species][lc][eid] for lc in (SPAWN, REAR)}
+			for direction, struct in (
+				("upstream", "anthro"),
+				("downstream", "anthro"),
+				("upstream", "natural"),
+				("downstream", "natural"),
+			):
+				for lc in (SPAWNREAR, SPAWN, REAR):
+					key = f"{direction}_{struct}_{lc}_count"
+					s[key] = barrier_stats[species][key][eid]
+			for direction in ("upstream", "downstream"):
+				for lc in (SPAWN, REAR):
+					key = f"{direction}_anthro_{lc}_ids"
+					s[key] = barrier_stats[species][key][eid]
+			for lc in LIFESTAGES_ALL:
+				s[f"{lc}_habitat"] = habitat[species][lc][eid]
+			for lc in LIFESTAGES:
 				if lc in lifecycles:
-					s[f"{lc}_weighted_length"] = species_length_stats[species][f"{lc}_weighted_length"][eid]
-					s[f"{lc}_weighted_connected_length"] = species_length_stats[species][
-						f"{lc}_weighted_connected_length"
-					][eid]
-					s[f"{lc}_weighted_disconnected_length"] = species_length_stats[species][
-						f"{lc}_weighted_disconnected_length"
-					][eid]
+					for field in ("weighted_length", "weighted_connected_length", "weighted_disconnected_length"):
+						s[f"{lc}_{field}"] = species_length_stats[species][f"{lc}_{field}"][eid]
 			entry[species] = s
 		yield eid, entry
 

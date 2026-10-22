@@ -6,10 +6,37 @@ on:
       plan_code:
         description: "Plan code (loads config/models/<plan_code>.yaml)"
         required: true
+      export_to_azure:
+        description: "Export the results to Azure (when off, the next two inputs are ignored)"
+        type: boolean
+        default: false
+      export_type:
+        description: "Export type"
+        type: choice
+        options:
+          - unversioned
+          - versioned
+        default: unversioned
+      version:
+        description: "Version label (required when versioned; max 16 characters: a-z A-Z 0-9 _ .)"
+        required: false
+        default: ""
+
+# OIDC sign-in to Azure (see fishpass_engine/README.md -- Azure Export).
+permissions:
+  id-token: write
+  contents: read
+
+# A model run and an export-only run of the same plan must not overlap.
+concurrency:
+  group: fishpass-${{ inputs.plan_code }}
+  cancel-in-progress: false
 
 jobs:
   run_fishpass_analysis:
     runs-on: ubuntu-latest
+    # The Azure federated credential trusts this environment.
+    environment: azure-export
     env:
       PYTHONUNBUFFERED: "1"
       FISHPASS_HOST: ${{ secrets.FISHPASS_HOST }}
@@ -17,6 +44,11 @@ jobs:
       FISHPASS_DBNAME: ${{ secrets.FISHPASS_DBNAME }}
       FISHPASS_USER: ${{ secrets.FISHPASS_USER }}
       FISHPASS_PASSWORD: ${{ secrets.FISHPASS_PASSWORD }}
+      AZURE_STORAGE_ACCOUNT_URL: ${{ secrets.AZURE_STORAGE_ACCOUNT_URL }}
+      # Inputs are passed as environment variables, never pasted into the shell commands.
+      PLAN_CODE: ${{ inputs.plan_code }}
+      EXPORT_TYPE: ${{ inputs.export_type }}
+      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,5 +59,29 @@ jobs:
       - name: Install dependencies
         run: pip install -r fishpass_engine/scripts/requirements.txt
 
+      - name: Install GDAL (ogr2ogr)
+        if: inputs.export_to_azure
+        run: sudo apt-get update && sudo apt-get install -y gdal-bin
+
+      # Fails before the model starts if the version is missing/invalid or a tool is missing.
+      - name: Check export settings
+        if: inputs.export_to_azure
+        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-type "$EXPORT_TYPE" --version "$VERSION" --check-only
+
       - name: Run model
-        run: python fishpass_engine/scripts/run_model.py "${{ inputs.plan_code }}"
+        run: python fishpass_engine/scripts/run_model.py "$PLAN_CODE"
+
+      # Signed in after the model, right before the export: the Azure login only lasts about an
+      # hour, and a model run can take longer.
+      - name: Azure login (OIDC)
+        if: inputs.export_to_azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
+
+      - name: Export to Azure
+        if: inputs.export_to_azure
+        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-type "$EXPORT_TYPE" --version "$VERSION"

@@ -9,9 +9,10 @@ and streams_<species> (view over streams, with species_stats exploded to columns
 import logging
 import sys
 
+import azure_export
 from cabd_client import CUSTOM_FEATURE_TYPE_FIELDS
 from db import quote_ident
-from model_plan import IDENTIFIER_RE
+from utils import IDENTIFIER_RE, LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ SPECIES_LIFECYCLE_WEIGHTED_FIELDS = (
 )
 # Accessible-length fields, written for both spawn and rear for every target species
 # (independent of the plan's reporting_values).
-SPECIES_LENGTH_FIELDS = ("spawn_upstream_accessible_length", "rear_upstream_accessible_length")
+SPECIES_LENGTH_FIELDS = tuple(f"{lc}_upstream_accessible_length" for lc in (SPAWN, REAR))
 
 
 def barrier_length_fields(lifecycles):
@@ -84,27 +85,18 @@ def create_natural_anthropogenic_views(cursor, output_schema, plan):
 		""")
 
 
-BARRIER_STAT_FIELDS = (
-	"upstream_natural_spawnrear_count",
-	"upstream_natural_spawn_count",
-	"upstream_natural_rear_count",
-	"upstream_anthro_spawnrear_count",
-	"upstream_anthro_spawn_count",
-	"upstream_anthro_rear_count",
-	"downstream_natural_spawnrear_count",
-	"downstream_natural_spawn_count",
-	"downstream_natural_rear_count",
-	"downstream_anthro_spawnrear_count",
-	"downstream_anthro_spawn_count",
-	"downstream_anthro_rear_count",
+# The field lists in this module set the column order of the views and export files, so each
+# one spells out its lifecycle order instead of using LIFESTAGES / LIFESTAGES_ALL.
+BARRIER_STAT_FIELDS = tuple(
+	f"{direction}_{struct}_{lc}_count"
+	for direction in ("upstream", "downstream")
+	for struct in ("natural", "anthro")
+	for lc in (SPAWNREAR, SPAWN, REAR)
 )
-BARRIER_STAT_ID_FIELDS = (
-	"downstream_natural_spawn_ids",
-	"downstream_natural_rear_ids",
-	"downstream_anthro_spawn_ids",
-	"downstream_anthro_rear_ids",
-	"upstream_anthro_spawn_ids",
-	"upstream_anthro_rear_ids",
+BARRIER_STAT_ID_FIELDS = tuple(
+	f"{prefix}_{lc}_ids"
+	for prefix in ("downstream_natural", "downstream_anthro", "upstream_anthro")
+	for lc in (SPAWN, REAR)
 )
 
 
@@ -139,8 +131,8 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
 				SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,
-				(ab.species_passability_value->>'{species}_spawn')::double precision AS passability_status_spawn,
-				(ab.species_passability_value->>'{species}_rear')::double precision AS passability_status_rear,
+				(ab.species_passability_value->>'{species}_{SPAWN}')::double precision AS passability_status_{SPAWN},
+				(ab.species_passability_value->>'{species}_{REAR}')::double precision AS passability_status_{REAR},
 				ab.geometry, ab.snapped_geometry,
 				{column_sql}
 				FROM {schema_ident}.all_barriers ab
@@ -163,6 +155,26 @@ def create_unsnapped_barriers_view(cursor, output_schema):
 	""")
 
 
+# streams.species_stats fields, in streams_<species> view column order.
+STREAM_ACCESSIBILITY_FIELDS = tuple(f"{lc}_accessibility" for lc in (SPAWN, REAR))
+STREAM_STAT_COUNT_FIELDS = tuple(
+	f"{direction}_{struct}_{lc}_count"
+	for direction, struct in (
+		("upstream", "anthro"),
+		("downstream", "anthro"),
+		("upstream", "natural"),
+		("downstream", "natural"),
+	)
+	for lc in (SPAWNREAR, SPAWN, REAR)
+)
+STREAM_STAT_ID_FIELDS = tuple(
+	f"{direction}_anthro_{lc}_ids" for direction in ("upstream", "downstream") for lc in (SPAWN, REAR)
+)
+STREAM_HABITAT_FIELDS = tuple(f"{lc}_habitat" for lc in LIFESTAGES_ALL)
+# Per-edge weighted lengths -- rear/spawn only (there is no stream-order weight for spawnrear).
+STREAM_WEIGHTED_FIELDS = ("weighted_length", "weighted_connected_length", "weighted_disconnected_length")
+
+
 def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 	"""One <output_schema>.streams_<species> view per reporting species -- stream attributes
 	plus that species' species_stats fields exploded to columns."""
@@ -175,32 +187,16 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 			sys.exit(f"Invalid species code (must be a safe identifier): {species!r}")
 
 		stats = f"species_stats->'{species}'"
-		columns = [
-			f"({stats}->>'spawn_accessibility') AS spawn_accessibility",
-			f"({stats}->>'rear_accessibility') AS rear_accessibility",
-			f"({stats}->>'upstream_anthro_spawnrear_count')::int AS upstream_anthro_spawnrear_count",
-			f"({stats}->>'upstream_anthro_spawn_count')::int AS upstream_anthro_spawn_count",
-			f"({stats}->>'upstream_anthro_rear_count')::int AS upstream_anthro_rear_count",
-			f"({stats}->>'downstream_anthro_spawnrear_count')::int AS downstream_anthro_spawnrear_count",
-			f"({stats}->>'downstream_anthro_spawn_count')::int AS downstream_anthro_spawn_count",
-			f"({stats}->>'downstream_anthro_rear_count')::int AS downstream_anthro_rear_count",
-			f"({stats}->>'upstream_natural_spawnrear_count')::int AS upstream_natural_spawnrear_count",
-			f"({stats}->>'upstream_natural_spawn_count')::int AS upstream_natural_spawn_count",
-			f"({stats}->>'upstream_natural_rear_count')::int AS upstream_natural_rear_count",
-			f"({stats}->>'downstream_natural_spawnrear_count')::int AS downstream_natural_spawnrear_count",
-			f"({stats}->>'downstream_natural_spawn_count')::int AS downstream_natural_spawn_count",
-			f"({stats}->>'downstream_natural_rear_count')::int AS downstream_natural_rear_count",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_spawn_ids'))::uuid[] AS upstream_anthro_spawn_ids",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'upstream_anthro_rear_ids'))::uuid[] AS upstream_anthro_rear_ids",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_spawn_ids'))::uuid[] AS downstream_anthro_spawn_ids",
-			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'downstream_anthro_rear_ids'))::uuid[] AS downstream_anthro_rear_ids",
-			f"({stats}->>'rear_habitat')::boolean AS rear_habitat",
-			f"({stats}->>'spawn_habitat')::boolean AS spawn_habitat",
-			f"({stats}->>'spawnrear_habitat')::boolean AS spawnrear_habitat",
+		columns = [f"({stats}->>'{field}') AS {field}" for field in STREAM_ACCESSIBILITY_FIELDS]
+		columns += [f"({stats}->>'{field}')::int AS {field}" for field in STREAM_STAT_COUNT_FIELDS]
+		columns += [
+			f"ARRAY(SELECT jsonb_array_elements_text({stats}->'{field}'))::uuid[] AS {field}"
+			for field in STREAM_STAT_ID_FIELDS
 		]
-		for lc in ("rear", "spawn"):
+		columns += [f"({stats}->>'{field}')::boolean AS {field}" for field in STREAM_HABITAT_FIELDS]
+		for lc in LIFESTAGES:
 			if lc in lifecycles:
-				for field in ("weighted_length", "weighted_connected_length", "weighted_disconnected_length"):
+				for field in STREAM_WEIGHTED_FIELDS:
 					column_name = f"{lc}_{field}"
 					columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
 
@@ -225,7 +221,7 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
 
 	if not valid_species:
 		logger.warning("No reporting species configured; skipping watershed_summary_stats.")
-		return
+		return False
 
 	for species in valid_species:
 		if not IDENTIFIER_RE.match(species):
@@ -249,78 +245,182 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
 		SELECT
 			species,
 			COALESCE(SUM(effective_length), 0) / 1000.0 AS total_km,
-			COALESCE(SUM((stats->>'spawn_weighted_length')::double precision), 0) / 1000.0 AS total_spawn_km,
-			COALESCE(SUM((stats->>'rear_weighted_length')::double precision), 0) / 1000.0 AS total_rear_km,
+			COALESCE(SUM((stats->>'{SPAWN}_weighted_length')::double precision), 0) / 1000.0 AS total_{SPAWN}_km,
+			COALESCE(SUM((stats->>'{REAR}_weighted_length')::double precision), 0) / 1000.0 AS total_{REAR}_km,
 			COALESCE(SUM(
 				LEAST(
-					COALESCE((stats->>'spawn_weighted_length')::double precision, 0),
-					COALESCE((stats->>'rear_weighted_length')::double precision, 0)
+					COALESCE((stats->>'{SPAWN}_weighted_length')::double precision, 0),
+					COALESCE((stats->>'{REAR}_weighted_length')::double precision, 0)
 				)
-			), 0) / 1000.0 AS total_spawnrear_km,
+			), 0) / 1000.0 AS total_{SPAWNREAR}_km,
 
-			COALESCE(SUM((stats->>'spawn_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_spawn_km,
-			COALESCE(SUM((stats->>'spawn_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_spawn_km,
+			COALESCE(SUM((stats->>'{SPAWN}_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_{SPAWN}_km,
+			COALESCE(SUM((stats->>'{SPAWN}_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_{SPAWN}_km,
 
-			COALESCE(SUM((stats->>'rear_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_rear_km,
-			COALESCE(SUM((stats->>'rear_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_rear_km,
+			COALESCE(SUM((stats->>'{REAR}_weighted_connected_length')::double precision), 0) / 1000.0 AS connected_{REAR}_km,
+			COALESCE(SUM((stats->>'{REAR}_weighted_disconnected_length')::double precision), 0) / 1000.0 AS disconnected_{REAR}_km,
 
 			-- Spawnrear is habitat suitable for both spawn and rear life stages. 
 			-- It is taken as the least length between the spawn and rear lengths
 			COALESCE(SUM(
 				LEAST(
-					COALESCE((stats->>'spawn_weighted_connected_length')::double precision, 0),
-					COALESCE((stats->>'rear_weighted_connected_length')::double precision, 0)
+					COALESCE((stats->>'{SPAWN}_weighted_connected_length')::double precision, 0),
+					COALESCE((stats->>'{REAR}_weighted_connected_length')::double precision, 0)
 				)
-			), 0) / 1000.0 AS connected_spawnrear_km,
+			), 0) / 1000.0 AS connected_{SPAWNREAR}_km,
 
 			COALESCE(SUM(
 				LEAST(
-					COALESCE((stats->>'spawn_weighted_disconnected_length')::double precision, 0),
-					COALESCE((stats->>'rear_weighted_disconnected_length')::double precision, 0)
+					COALESCE((stats->>'{SPAWN}_weighted_disconnected_length')::double precision, 0),
+					COALESCE((stats->>'{REAR}_weighted_disconnected_length')::double precision, 0)
 				)
-			), 0) / 1000.0 AS disconnected_spawnrear_km
+			), 0) / 1000.0 AS disconnected_{SPAWNREAR}_km
 		FROM expanded
 		GROUP BY species
 	)
 	SELECT
 		species,
 		total_km,
-		total_spawn_km,
-		total_rear_km,
-		total_spawnrear_km,
-		connected_spawn_km,
-		disconnected_spawn_km,
-		connected_rear_km,
-		disconnected_rear_km,
-		connected_spawnrear_km,
-		disconnected_spawnrear_km,
-		ROUND((disconnected_spawn_km / NULLIF(total_spawn_km, 0))::numeric, 2) AS pct_disconnected_spawn,
-		ROUND((disconnected_rear_km / NULLIF(total_rear_km, 0))::numeric, 2) AS pct_disconnected_rear,
-		ROUND((disconnected_spawnrear_km / NULLIF(total_spawnrear_km, 0))::numeric, 2) AS pct_disconnected_spawnrear
+		total_{SPAWN}_km,
+		total_{REAR}_km,
+		total_{SPAWNREAR}_km,
+		connected_{SPAWN}_km,
+		disconnected_{SPAWN}_km,
+		connected_{REAR}_km,
+		disconnected_{REAR}_km,
+		connected_{SPAWNREAR}_km,
+		disconnected_{SPAWNREAR}_km,
+		ROUND((disconnected_{SPAWN}_km / NULLIF(total_{SPAWN}_km, 0))::numeric, 2) AS pct_disconnected_{SPAWN},
+		ROUND((disconnected_{REAR}_km / NULLIF(total_{REAR}_km, 0))::numeric, 2) AS pct_disconnected_{REAR},
+		ROUND((disconnected_{SPAWNREAR}_km / NULLIF(total_{SPAWNREAR}_km, 0))::numeric, 2) AS pct_disconnected_{SPAWNREAR}
 	FROM aggregated;	
     """
 
 	cursor.execute(query)
+	return True
+
+
+# =================================================================================
+#  AZURE EXPORTS (fishpass_engine/docs/azure_exports.md -- Data Exports)
+# =================================================================================
+# Column lists are hard-coded to match azure_exports.md. upstream_edge_id/downstream_edge_id
+# are never exported: edge ids are internal to a run and change every model run.
+
+# Lifecycle order of the columns in the export files.
+EXPORT_LIFECYCLE_ORDER = (SPAWN, REAR, SPAWNREAR)
+
+EXPORT_BARRIER_COUNT_FIELDS = tuple(
+	f"{direction}_{struct}_{lc}_count"
+	for direction in ("upstream", "downstream")
+	for struct in ("natural", "anthro")
+	for lc in EXPORT_LIFECYCLE_ORDER
+)
+# Only the anthropogenic id lists are exported (not downstream_natural_*_ids).
+EXPORT_BARRIER_ID_FIELDS = tuple(
+	f"{direction}_anthro_{lc}_ids" for direction in ("downstream", "upstream") for lc in (SPAWN, REAR)
+)
+EXPORT_STREAM_FIELDS = ("length", "strahler_order", "effective_length", "segment_gradient", "stream_name_en")
+EXPORT_STREAM_HABITAT_FIELDS = (
+	*(f"{lc}_accessibility" for lc in (SPAWN, REAR)),
+	*(f"{lc}_habitat" for lc in EXPORT_LIFECYCLE_ORDER),
+)
+EXPORT_STREAM_COUNT_FIELDS = tuple(
+	f"{direction}_{struct}_{lc}_count"
+	for direction, struct in (
+		("upstream", "anthro"),
+		("downstream", "anthro"),
+		("upstream", "natural"),
+		("downstream", "natural"),
+	)
+	for lc in EXPORT_LIFECYCLE_ORDER
+)
+EXPORT_STREAM_ID_FIELDS = STREAM_STAT_ID_FIELDS
+EXPORT_STREAM_WEIGHTED_FIELDS = STREAM_WEIGHTED_FIELDS
+EXPORT_SUMMARY_FIELDS = (
+	"species",
+	"total_km",
+	*(f"total_{lc}_km" for lc in EXPORT_LIFECYCLE_ORDER),
+	*(f"{kind}_{lc}_km" for lc in EXPORT_LIFECYCLE_ORDER for kind in ("connected", "disconnected")),
+	*(f"pct_disconnected_{lc}" for lc in EXPORT_LIFECYCLE_ORDER),
+)
+
+
+def natural_barriers_export_sql(output_schema, species, lifecycles):
+	"""SQL for the natural_barriers_<species> GeoPackage export."""
+	columns = [
+		azure_export.as_text("feature_id"),
+		azure_export.column("feature_type"),
+		azure_export.column("stream_name_en"),
+		azure_export.column(f"passability_status_{SPAWN}"),
+		azure_export.column(f"passability_status_{REAR}"),
+	]
+	columns += [azure_export.column(f) for f in EXPORT_BARRIER_COUNT_FIELDS]
+	columns += [azure_export.pipe_list(f) for f in EXPORT_BARRIER_ID_FIELDS]
+	columns += [azure_export.column(f) for f in barrier_length_fields(lifecycles)]
+	columns.append(azure_export.column("snapped_geometry", "geometry"))
+	relation = f"{quote_ident(output_schema)}.{quote_ident(f'natural_barriers_{species}')}"
+	return azure_export.select_sql(columns, relation)
+
+
+def streams_export_sql(output_schema, species, lifecycles):
+	"""SQL for the streams_<species> GeoPackage export."""
+	columns = [azure_export.as_text("id")]
+	columns += [azure_export.column(f) for f in EXPORT_STREAM_FIELDS + EXPORT_STREAM_HABITAT_FIELDS]
+	columns += [azure_export.column(f) for f in EXPORT_STREAM_COUNT_FIELDS]
+	columns += [azure_export.pipe_list(f) for f in EXPORT_STREAM_ID_FIELDS]
+	for lc in (SPAWN, REAR):  # spawn first in the export (the view has rear first)
+		if lc in lifecycles:
+			columns += [azure_export.column(f"{lc}_{f}") for f in EXPORT_STREAM_WEIGHTED_FIELDS]
+	columns.append(azure_export.column("geometry"))
+	relation = f"{quote_ident(output_schema)}.{quote_ident(f'streams_{species}')}"
+	return azure_export.select_sql(columns, relation)
+
+
+def connectivity_summary_export_sql(output_schema):
+	"""SQL for the connectivity_summary CSV export."""
+	columns = [azure_export.column(f) for f in EXPORT_SUMMARY_FIELDS]
+	return azure_export.select_sql(columns, f"{quote_ident(output_schema)}.watershed_summary_stats")
 
 
 def create_barrier_views(conn, cursor, plan):
 	"""Postprocess phase entry point: create the reporting views over all_barriers/streams
-	(the Outputs section) once Compute Statistics has populated species_stats."""
+	(the Outputs section) once Compute Statistics has populated species_stats, and add their
+	rows to the azure_exports table."""
 
 	output_schema = plan["output_schema"]
+	species_lifecycles = _species_by_lifecycle_map(plan["reporting_species_lifecycles"])
 
 	create_natural_anthropogenic_views(cursor, output_schema, plan)
 	create_species_barrier_views(cursor, output_schema, plan["reporting_species_lifecycles"])
 	create_unsnapped_barriers_view(cursor, output_schema)
+	for species, lifecycles in species_lifecycles.items():
+		azure_export.add_export(
+			cursor,
+			output_schema,
+			f"natural_barriers_{species}",
+			natural_barriers_export_sql(output_schema, species, lifecycles),
+			"geopackage",
+		)
 	conn.commit()
 	logger.info(
 		"natural_barriers/anthropogenic_barriers/natural_barriers_<species>/anthropogenic_barriers_<species>/unsnapped_barriers: done."
 	)
 
 	create_species_views(cursor, output_schema, plan["reporting_species_lifecycles"])
+	for species, lifecycles in species_lifecycles.items():
+		azure_export.add_export(
+			cursor,
+			output_schema,
+			f"streams_{species}",
+			streams_export_sql(output_schema, species, lifecycles),
+			"geopackage",
+		)
 	conn.commit()
 	logger.info("streams_<species>: done.")
 
-	create_watershed_summary_statistics(cursor, output_schema, plan["reporting_species_lifecycles"])
+	if create_watershed_summary_statistics(cursor, output_schema, plan["reporting_species_lifecycles"]):
+		azure_export.add_export(
+			cursor, output_schema, "connectivity_summary", connectivity_summary_export_sql(output_schema), "csv"
+		)
 	conn.commit()
 	logger.info("watershed_summary_stats: done.")

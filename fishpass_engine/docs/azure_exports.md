@@ -14,7 +14,21 @@ At the end of a model run, the results can optionally be exported to an Azure Bl
 
 ## Azure Connection
 
-The Azure connection details are stored as GitHub secrets and passed to the run as environment variables, the same way the `FISHPASS_*` database secrets are handled in [fishpass_engine.yml](../../.github/workflows/fishpass_engine.yml).
+The export signs in to Azure with OIDC (workload identity federation), so no Azure password or key is stored:
+
+- **GitHub actions** run in the `azure-export` GitHub environment, which the Azure app registration trusts. An `azure/login` step signs in just before the export. The run action signs in after the model has finished, because the sign-in lasts about an hour and a model run can take longer.
+- **Local runs** use the developer's own `az login`.
+
+The app registration (and each developer who exports locally) needs the **Storage Blob Data Contributor** role on the storage account. The storage account and app registration IDs are stored as secrets on the `azure-export` environment:
+
+| Secret | Value |
+| :---- | :---- |
+| `AZURE_CLIENT_ID` | Application (client) ID of the app registration |
+| `AZURE_TENANT_ID` | Directory (tenant) ID |
+| `AZURE_SUBSCRIPTION_ID` | Subscription ID |
+| `AZURE_STORAGE_ACCOUNT_URL` | `https://<account>.blob.core.windows.net` |
+
+The `FISHPASS_*` database secrets are passed to the run as before. See the [README](../README.md#azure-export) for the setup steps.
 
 ## GitHub Actions
 
@@ -40,6 +54,8 @@ Existing azure files with the same name from previous runs will be overwritten. 
 The model plan file, species parameter file and run details in `metadata.yaml` come from the run metadata table, so they are the versions used for the model run even if GitHub has changed since.
 
 The action stops with an error if the plan's output schema has no `azure_exports` or `run_metadata` table.
+
+**The output schema comes from the current plan file.** The action finds the output schema from `config/models/<plan_code>.yaml` on the branch it is run from, not from `run_metadata`; only the plan file contents written to the export come from `run_metadata`. If the plan's `output_schema` has changed since the model ran, the export looks in the new schema. It stops with an error, either because the tables are missing or because that schema's `run_metadata` is for a different plan, and it cannot find the old run. To re-export that run, run the export-only action from a branch or commit where `output_schema` still has its old value, or re-run the model.
 
 ## Azure Storage Location
 
@@ -229,6 +245,7 @@ Example `sql` for species `as`, reporting the `spawn` and `rear` lifestages. It 
 SELECT
     feature_id::text AS feature_id,
     feature_type,
+    stream_name_en,
     passability_status_spawn,
     passability_status_rear,
 
@@ -286,7 +303,7 @@ Notes on the example:
 - Only the four anthropogenic barrier id lists are exported. The view's natural barrier id lists (`downstream_natural_spawn_ids`, `downstream_natural_rear_ids`) are left out; the natural barrier counts are still exported.
 - The anthropogenic id lists hold `feature_id` values, which can be looked up in the final structures export.
 - The view only holds natural barriers that snapped to the stream network.
-- The view does not have the `source`, `upstream_edge_id` or `downstream_edge_id` columns from `all_barriers`.
+- `stream_name_en` is the name of the stream edge immediately upstream of the barrier (see [barriers.md](./outputs/barriers.md)).
 
 #### Streams
 
@@ -303,6 +320,7 @@ SELECT
     strahler_order,
     effective_length,
     segment_gradient,
+    stream_name_en,
 
     -- accessibility and habitat
     spawn_accessibility,
@@ -349,7 +367,7 @@ Notes on the example:
 - GeoPackage has no uuid or list type, so `id` is cast to text and the barrier id lists are written as text with the values separated by `|`. The lists hold barrier `feature_id` values, which can be looked up in the final structures export.
 - The weighted length columns in the view depend on the lifestages reported for the species: the `spawn_` block is only there when `spawn` is reported, and the `rear_` block only when `rear` is reported. There is no `spawnrear_` weighted length block.
 - The view only holds the stream edges that have statistics for the species, so the files for different species can have different edges.
-- The view only has some of the `streams` columns (`id`, `length`, `strahler_order`, `effective_length`, `segment_gradient` and `geometry`). The other network columns (e.g. `aoi_id`, `ef_type`, `rank`, `mainstem_id`, `graph_id`) are not in the view and so are not exported.
+- The view only has some of the `streams` columns (`id`, `length`, `strahler_order`, `effective_length`, `segment_gradient`, `stream_name_en` and `geometry`). The other network columns (e.g. `aoi_id`, `ef_type`, `rank`, `mainstem_id`, `graph_id`) are not in the view and so are not exported.
 
 #### Ranked Barriers
 
@@ -489,11 +507,13 @@ Notes on the example:
 
 The export is a separate step that only needs the database: the list of files comes from `<output_schema>.azure_exports` and the run details from `<output_schema>.run_metadata`. Both stay in the database until the next model run of that plan.
 
+The output schema itself is found from the current plan file. If the plan's `output_schema` has changed since the model ran, see the note in [New: Export-Only Action](#new-export-only-action).
+
 **When an export fails.** The export is the last step of the model run, after all the model results are committed. If it fails, the run is marked as failed so that it is noticed, but the model results are kept. Once the cause is fixed, the export can be re-run without re-running the model, using the export-only action (see [New: Export-Only Action](#new-export-only-action)).
 
 **!! Results can change after the run  !!**
 Some exports read from data that can be edited after the model run. The final structures view reads the [tracking table](./outputs/tracking_table.md), which is edited by hand, so an export run later can include edits made since the model ran. The export date/time in `metadata.yaml` shows when this may apply.
 
-## Open Questions - For Implementation
+## Open Questions
 
-- **GitHub secret names**, and which kind of credential is used (connection string, SAS token, or service principal).
+- **Container public access under OIDC.** The export creates a missing container with anonymous blob access while signed in with the Storage Blob Data Contributor role. This has not been tested yet and may need more than that role. If it fails, either create each plan's container in the portal (public access level: Blob) or give the app registration a role that can change container settings.

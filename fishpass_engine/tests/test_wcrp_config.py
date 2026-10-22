@@ -1,4 +1,4 @@
-"""Tests for the shared WCRP config/role helpers in fishpass_engine/scripts/db.py and the
+"""Tests for the shared WCRP config/role helpers in fishpass_engine/scripts/utils.py and the
 related model_plan.py validation (reporting_values, per-plan WCRP overrides) -- no
 database access.
 
@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import db  # noqa: E402
+import utils  # noqa: E402
 import model_plan as mp  # noqa: E402
 
 
@@ -88,40 +89,40 @@ class ConfigTests(unittest.TestCase):
 		"""The shipped config/fishpass.yaml loads and every value passes validation
 		(get_db_roles / wcrp_setting exit on a missing section, bad role name, or
 		out-of-range value)."""
-		roles = db.get_db_roles()
+		roles = utils.get_db_roles()
 		self.assertTrue(roles["owner"])
-		for key in db.WCRP_SETTINGS:
-			db.wcrp_setting({}, key)
+		for key in utils.WCRP_SETTINGS:
+			utils.wcrp_setting({}, key)
 
 	def test_plan_value_overrides_config(self):
 		plan = {"label_in_wcrp_rank_threshold": 10, "min_avg_gain_km": None}
-		self.assertEqual(db.wcrp_setting(plan, "label_in_wcrp_rank_threshold"), 10)
+		self.assertEqual(utils.wcrp_setting(plan, "label_in_wcrp_rank_threshold"), 10)
 		self.assertEqual(
-			db.wcrp_setting(plan, "min_avg_gain_km"),
-			db.config_section("wcrp")["min_avg_gain_km"],
+			utils.wcrp_setting(plan, "min_avg_gain_km"),
+			utils.config_section("wcrp")["min_avg_gain_km"],
 		)
 
 	def test_unknown_setting_raises(self):
 		with self.assertRaises(KeyError):
-			db.wcrp_setting({}, "not_a_setting")
+			utils.wcrp_setting({}, "not_a_setting")
 
 	def test_invalid_config_value_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			cfg = write_config(tmp, "wcrp:\n  label_in_wcrp_rank_threshold: 0\n")
 			with self.assertRaises(SystemExit):
-				db.wcrp_setting({}, "label_in_wcrp_rank_threshold", config_path=cfg)
+				utils.wcrp_setting({}, "label_in_wcrp_rank_threshold", config_path=cfg)
 
 	def test_missing_section_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			cfg = write_config(tmp, "structure_classification: {}\n")
 			with self.assertRaises(SystemExit):
-				db.get_db_roles(config_path=cfg)
+				utils.get_db_roles(config_path=cfg)
 
 	def test_unsafe_role_name_exits(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			cfg = write_config(tmp, 'database_roles:\n  owner: "fishpass; drop table x"\n')
 			with self.assertRaises(SystemExit):
-				db.get_db_roles(config_path=cfg)
+				utils.get_db_roles(config_path=cfg)
 
 
 class ModelPlanWcrpTests(unittest.TestCase):

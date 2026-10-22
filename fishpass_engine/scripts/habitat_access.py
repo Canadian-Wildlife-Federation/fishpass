@@ -13,7 +13,7 @@ flag simply overwrites an earlier one's for any segment/species/lifecycle they b
 
 import sys
 
-LIFECYCLES = ("rear", "spawn")
+from utils import LIFESTAGES, REAR, SPAWN, SPAWNREAR
 
 
 def parse_species_lifestage(entry):
@@ -28,12 +28,12 @@ def parse_species_lifestage(entry):
 		flag = False
 		rest = rest[len("not_") :]
 
-	for lifecycle in LIFECYCLES:
+	for lifecycle in LIFESTAGES:
 		suffix = f"_{lifecycle}"
 		if rest.endswith(suffix):
 			return rest[: -len(suffix)], [lifecycle], flag
 
-	return rest, list(LIFECYCLES), flag
+	return rest, list(LIFESTAGES), flag
 
 
 def mainstem_segments_upstream(edges_by_id, predecessors, start_edge_id):
@@ -149,5 +149,5 @@ def derive_spawnrear_habitat(habitat):
 	rear/spawn values (including overrides) are final."""
 
 	for species, lifecycles in habitat.items():
-		rear, spawn = lifecycles["rear"], lifecycles["spawn"]
-		lifecycles["spawnrear"] = {eid: rear.get(eid, False) or spawn.get(eid, False) for eid in set(rear) | set(spawn)}
+		rear, spawn = lifecycles[REAR], lifecycles[SPAWN]
+		lifecycles[SPAWNREAR] = {eid: rear.get(eid, False) or spawn.get(eid, False) for eid in set(rear) | set(spawn)}

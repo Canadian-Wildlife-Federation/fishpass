@@ -10,6 +10,7 @@ module's logic is fully unit-testable on small synthetic graphs with no database
 """
 
 import species_params as sp_mod
+from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
 
 
 def build_graph(edges):
@@ -235,8 +236,6 @@ def compute_route_measures(edges_by_id, predecessors, successor):
 	return result
 
 
-LIFESTAGES = ("spawn", "rear")
-
 
 def is_impassable(species_passability_value, species, impassable_threshold, lifestage=None):
 	"""Compute statistics impassable for `species` if either lifestage's
@@ -252,9 +251,7 @@ def is_impassable(species_passability_value, species, impassable_threshold, life
 		value = species_passability_value.get(f"{species}_{lifestage}", 0)
 		return value < impassable_threshold
 
-	rear = species_passability_value.get(f"{species}_rear", 0)
-	spawn = species_passability_value.get(f"{species}_spawn", 0)
-	return min(rear, spawn) < impassable_threshold
+	return min(species_passability_value.get(f"{species}_{lc}", 0) for lc in LIFESTAGES) < impassable_threshold
 
 
 def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold):
@@ -286,7 +283,7 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 
 		for b in barriers:
 			eid = b["edge_id"]
-			if eid not in lifestage_flags["natural_spawn"]:
+			if eid not in lifestage_flags[f"natural_{SPAWN}"]:
 				continue
 			struct = "natural" if b["structure_type"] == "natural" else "anthro"
 			for lc in LIFESTAGES:
@@ -295,11 +292,11 @@ def compute_barrier_here(edge_ids, barriers, species_list, impassable_threshold)
 					lifestage_ids[f"{struct}_{lc}_ids"][eid].append(b["feature_id"])
 
 		natural = {
-			eid: int(bool(lifestage_flags["natural_spawn"][eid] or lifestage_flags["natural_rear"][eid]))
+			eid: int(bool(lifestage_flags[f"natural_{SPAWN}"][eid] or lifestage_flags[f"natural_{REAR}"][eid]))
 			for eid in edge_ids
 		}
 		anthro = {
-			eid: int(bool(lifestage_flags["anthro_spawn"][eid] or lifestage_flags["anthro_rear"][eid]))
+			eid: int(bool(lifestage_flags[f"anthro_{SPAWN}"][eid] or lifestage_flags[f"anthro_{REAR}"][eid]))
 			for eid in edge_ids
 		}
 
@@ -337,9 +334,9 @@ def compute_barrier_stats(order_up, order_down, predecessors, successor, barrier
 	down_local = {}
 
 	count_keys = [
-		(struct if lc == "spawnrear" else f"{struct}_{lc}", f"{struct}_{lc}")
+		(struct if lc == SPAWNREAR else f"{struct}_{lc}", f"{struct}_{lc}")
 		for struct in ("natural", "anthro")
-		for lc in (*LIFESTAGES, "spawnrear")
+		for lc in LIFESTAGES_ALL
 	]
 
 	for species, data in barrier_here_by_species.items():
@@ -455,15 +452,15 @@ def compute_accessibility(edge_ids, barrier_stats):
 		for eid in edge_ids:
 			spawn[eid] = (
 				ACCESSIBILITY_ACCESSIBLE
-				if stats["downstream_natural_spawn_count"][eid] == 0
+				if stats[f"downstream_natural_{SPAWN}_count"][eid] == 0
 				else ACCESSIBILITY_INACCESSIBLE
 			)
 			rear[eid] = (
 				ACCESSIBILITY_ACCESSIBLE
-				if stats["downstream_natural_rear_count"][eid] == 0
+				if stats[f"downstream_natural_{REAR}_count"][eid] == 0
 				else ACCESSIBILITY_INACCESSIBLE
 			)
-		result[species] = {"spawn": spawn, "rear": rear}
+		result[species] = {SPAWN: spawn, REAR: rear}
 	return result
 
 
@@ -483,19 +480,19 @@ def compute_habitat_assignment(
 		rear = {}
 		spawn = {}
 		for eid in edge_ids:
-			rear_accessible = accessibility[species]["rear"][eid] == ACCESSIBILITY_ACCESSIBLE
-			spawn_accessible = accessibility[species]["spawn"][eid] == ACCESSIBILITY_ACCESSIBLE
+			rear_accessible = accessibility[species][REAR][eid] == ACCESSIBILITY_ACCESSIBLE
+			spawn_accessible = accessibility[species][SPAWN][eid] == ACCESSIBILITY_ACCESSIBLE
 			gradient = edge_gradient.get(eid)
 			strahler = edge_strahler.get(eid)
 			rear[eid] = (
 				rear_accessible
-				and sp_mod.habitat_gradient_ok(params, "rear", gradient)
-				and sp_mod.habitat_strahler_ok(params, "rear", strahler)
+				and sp_mod.habitat_gradient_ok(params, REAR, gradient)
+				and sp_mod.habitat_strahler_ok(params, REAR, strahler)
 			)
 			spawn[eid] = (
 				spawn_accessible
-				and sp_mod.habitat_gradient_ok(params, "spawn", gradient)
-				and sp_mod.habitat_strahler_ok(params, "spawn", strahler)
+				and sp_mod.habitat_gradient_ok(params, SPAWN, gradient)
+				and sp_mod.habitat_strahler_ok(params, SPAWN, strahler)
 			)
-		result[species] = {"rear": rear, "spawn": spawn}
+		result[species] = {REAR: rear, SPAWN: spawn}
 	return result

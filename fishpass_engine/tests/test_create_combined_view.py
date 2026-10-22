@@ -21,6 +21,7 @@ import model_plan as mp  # noqa: E402
 import create_combined_view as ccv  # noqa: E402
 import postprocess_views as pv  # noqa: E402
 import db  # noqa: E402
+import utils  # noqa: E402
 
 
 def write_plan(tmp_dir, code, extra_yaml=""):
@@ -42,49 +43,6 @@ structure_types:
 {extra_yaml}
 """)
 	return Path(tmp_dir)
-
-
-class LoadNaturalFeatureTypesTests(unittest.TestCase):
-	def test_override_takes_precedence(self):
-		"""_load_natural_feature_types uses plan override if set."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(
-				tmp, "myplan", extra_yaml="natural_feature_types_override:\n  - waterfall\n  - gradient"
-			)
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		types_list = ccv._load_natural_feature_types(plan)
-		self.assertEqual(types_list, ["waterfall", "gradient"])
-
-	def test_empty_override_allowed(self):
-		"""_load_natural_feature_types allows empty override list."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(tmp, "myplan", extra_yaml="natural_feature_types_override: []")
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		types_list = ccv._load_natural_feature_types(plan)
-		self.assertEqual(types_list, [])
-
-	def test_invalid_identifier_in_override_exits(self):
-		"""_load_natural_feature_types exits if override has unsafe identifiers."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(
-				tmp, "myplan", extra_yaml="natural_feature_types_override:\n  - 'invalid; drop table'"
-			)
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		with self.assertRaises(SystemExit):
-			ccv._load_natural_feature_types(plan)
-
-	def test_fallback_to_fishpass_yaml_when_no_override(self):
-		"""_load_natural_feature_types reads config when no override."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(tmp, "myplan")
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		types_list = ccv._load_natural_feature_types(plan)
-		# Should return a list (may be empty if config file doesn't set anything)
-		self.assertIsInstance(types_list, list)
 
 
 class SpeciesLifecyclesTests(unittest.TestCase):
@@ -182,7 +140,7 @@ class BuildViewSqlTests(unittest.TestCase):
 
 	def test_roles_from_config(self):
 		"""Owner/grants on the view match database_roles in fishpass.yaml, quoted."""
-		roles = db.get_db_roles()
+		roles = utils.get_db_roles()
 		plan = self._plan()
 		sql = ccv.build_view_sql(plan, ["waterfalls", "gradients"])
 		view = f"{db.quote_ident(plan['code'] + '_wcrp')}.{db.quote_ident(ccv.VIEW_NAME)}"

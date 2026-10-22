@@ -13,13 +13,21 @@ WCRP tracking table: the plan's <code>_wcrp.tracking_table_<code> is created at 
 run if it doesn't exist yet, and skipped (left untouched) if it does. Either outcome is written to
 the log and, when run in GitHub Actions, to the job summary. This happens before the output schema
 is touched, so a missing database-wide support object fails immediately.
+
+Azure export (docs/azure_exports.md): every run fills <output_schema>.azure_exports and
+<output_schema>.run_metadata, so the export can be run later on its own (azure_export.py). With
+--export-to-azure the export also runs at the end of the model run, and the export settings are
+checked before the model starts. If the export fails the run exits with an error, but the model
+results (already committed) are kept.
 """
 
 import argparse
 import logging
-import os
+import sys
 import time
+from datetime import datetime, timedelta, timezone
 
+import azure_export
 from compute_statistics import compute_statistics
 from create_combined_view import check_cabd_fdw_sources, create_combined_view
 from create_wcrp_tracking_table import (
@@ -35,36 +43,52 @@ from model_plan import load_model_plan
 from postprocess_views import create_barrier_views
 from rank_barriers import run_ranking
 from snap_structures import snap_structures
+from utils import setup_logging, write_job_summary
 
-logging.basicConfig(
-	level=logging.INFO,
-	format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-	datefmt="%Y-%m-%d %H:%M:%S",
-)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def write_job_summary(markdown):
-	"""Append markdown to the GitHub Actions job summary (shown on the run's summary page).
-	GITHUB_STEP_SUMMARY is only set inside GitHub Actions, so this is a no-op when run locally."""
-	summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-	if not summary_path:
-		return
-	with open(summary_path, "a", encoding="utf-8") as f:
-		f.write(markdown.rstrip() + "\n\n")
-
-
 def parse_args():
-	parser = argparse.ArgumentParser(description=__doc__)
+	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("plan_code", help="Plan code -- loads config/models/<plan_code>.yaml")
+	parser.add_argument(
+		"--export-to-azure", action="store_true", help="Export the results to Azure at the end of the run"
+	)
+	parser.add_argument("--export-type", choices=azure_export.EXPORT_TYPES, help="Required with --export-to-azure")
+	parser.add_argument("--version", default=None, help="Version label (required when --export-type is versioned)")
 	return parser.parse_args()
+
+
+def run_azure_export(conn, plan, export_type, version):
+	"""Run the export; on failure log it, note it in the job summary and exit with an error.
+	The model results are already committed, so they are kept."""
+	logger.info("Exporting to Azure")
+	try:
+		azure_export.run_export(conn, plan["code"], plan["output_schema"], export_type, version)
+	except (Exception, SystemExit) as e:
+		logger.error("Azure export failed: %s", e)
+		write_job_summary(
+			f"### Azure export\n:x: Export failed: {e}\n\nThe model results were kept. Once the cause "
+			f"is fixed, re-run the export with the export-only action."
+		)
+		sys.exit(1)
 
 
 def main():
 	start = time.monotonic()
+	run_started = datetime.now(timezone.utc)
 	args = parse_args()
 	require_env()
 	plan = load_model_plan(args.plan_code)
+
+	# Check the export settings before the model starts, so bad input fails now.
+	export_version = None
+	if args.export_to_azure:
+		if not args.export_type:
+			sys.exit("--export-type is required with --export-to-azure")
+		export_version = azure_export.validate_export_args(args.export_type, args.version)
+		azure_export.check_export_environment(plan["code"])
 
 	logger.info("Running model plan %r -> output schema %r", plan["code"], plan["output_schema"])
 
@@ -96,6 +120,7 @@ def main():
 			conn.commit()
 
 			init_output_schema(cursor, plan["output_schema"])
+			azure_export.create_export_tables(cursor, plan["output_schema"])
 			conn.commit()
 
 			srid = get_source_srid(cursor)
@@ -123,14 +148,23 @@ def main():
 			logger.info("Creating Combined Output View")
 			create_combined_view(conn, cursor, plan)
 
+			# Saved on every run (not only when exporting) so the export can be re-run later.
+			logger.info("Saving run metadata")
+			total_runtime = timedelta(seconds=int(time.monotonic() - start))
+			azure_export.write_run_metadata(cursor, plan["output_schema"], plan["code"], run_started, total_runtime)
+			conn.commit()
+
+		minutes, seconds = divmod(int(time.monotonic() - start), 60)
+		logger.info("Model run complete (%dmin, %dsec)", minutes, seconds)
+
+		if args.export_to_azure:
+			run_azure_export(conn, plan, args.export_type, export_version)
+
 	except Exception:
 		conn.rollback()
 		raise
 	finally:
 		conn.close()
-
-	minutes, seconds = divmod(int(time.monotonic() - start), 60)
-	logger.info("Model run complete (%dmin, %dsec)", minutes, seconds)
 
 
 if __name__ == "__main__":

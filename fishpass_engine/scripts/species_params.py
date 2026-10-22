@@ -5,16 +5,16 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SPECIES_PARAMS_FILE = REPO_ROOT / "config" / "fish_species_parameters.yaml"
+from utils import REAR, SPAWN, SPECIES_PARAMS_FILE
+
 
 FIELDS = (
 	"accessibility_gradient_spawning_max",
 	"accessibility_gradient_rearing_max",
-	"spawn_gradient_min",
-	"spawn_gradient_max",
-	"rear_gradient_min",
-	"rear_gradient_max",
+	f"{SPAWN}_gradient_min",
+	f"{SPAWN}_gradient_max",
+	f"{REAR}_gradient_min",
+	f"{REAR}_gradient_max",
 	"strahler_order_spawning_min",
 	"strahler_order_spawning_max",
 	"strahler_order_rearing_min",
@@ -26,7 +26,7 @@ FIELDS = (
 )
 
 
-def load_species_params(params_path=DEFAULT_SPECIES_PARAMS_FILE):
+def load_species_params(params_path=SPECIES_PARAMS_FILE):
 	"""Return {species_code: {field: value, ...}} for every species in the parameter file.
 	Fields not present in the file are None. Missing min/max fields mean "no restriction" is
 	not assumed -- see habitat_gradient_ok/habitat_strahler_ok below for how a blank max/min
@@ -63,7 +63,8 @@ def habitat_gradient_ok(params, lifecycle, segment_gradient):
 	return min_v <= segment_gradient < max_v
 
 
-LIFECYCLE_STRAHLER_FIELD = {"rear": "rearing", "spawn": "spawning"}
+# Values are the field-name words used in fish_species_parameters.yaml.
+LIFECYCLE_STRAHLER_FIELD = {REAR: "rearing", SPAWN: "spawning"}
 
 
 def habitat_strahler_ok(params, lifecycle, strahler_order):
