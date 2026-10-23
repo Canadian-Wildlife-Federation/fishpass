@@ -1,6 +1,6 @@
-# Azure Exports
+# Model Exports
 
-This document outlines the requirements for exporting FishPass engine results from the database to Azure Blob Storage.
+This document outlines the requirements for exporting FishPass engine results from the database to Azure Blob Storage. There is also an option to run the scripts locally and export to a local filestore.
 
 ## Overview
 
@@ -513,6 +513,21 @@ The output schema itself is found from the current plan file. If the plan's `out
 
 **!! Results can change after the run  !!**
 Some exports read from data that can be edited after the model run. The final structures view reads the [tracking table](./outputs/tracking_table.md), which is edited by hand, so an export run later can include edits made since the model ran. The export date/time in `metadata.yaml` shows when this may apply.
+
+## Local File Exports
+
+It is possible to run the export script locally, and write the results to the local machine instead of Azure. 
+
+This is useful for testing the exports or reviewing the results without uploading them. It writes the same files as the Azure export, from the same [export table](#export-table) and [run metadata table](#model-run-metadata-table), with the same formats and file names.
+
+- **GDAL is required** (`ogr2ogr`) is required on the path to write the GeoPackages.
+- Local export is for local runs only. It is refused when running in GitHub Actions, so the GitHub actions always export to Azure.
+- Only one of the Azure and local exports can be used per run.
+- No Azure sign-in or `AZURE_STORAGE_ACCOUNT_URL` is needed. 
+- The export type and version inputs work the same way as for the Azure export.
+
+Details on running local exports are found in [README.md](../README.md). 
+
 
 ## Open Questions
 

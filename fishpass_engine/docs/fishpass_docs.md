@@ -60,6 +60,10 @@ WCRP outputs live in a separate, persistent per-plan schema, `<code>_wcrp` (wher
 
 Settings used by these outputs live in [config/fishpass.yaml](../../config/fishpass.yaml): `database_roles` (owner and grant roles for every WCRP object) and `wcrp` (`label_in_wcrp_rank_threshold`, `min_avg_gain_km`). Both `wcrp` values can be overridden per plan with a field of the same name in the model plan file.
 
+### Exporting Outputs
+
+See [Exporting Model Results](model_exports.md) for details on exporting results to Azure (or local filesystem).
+
 
 ## Computations
 
@@ -380,6 +384,9 @@ barrier (all `all_barriers` rows except natural feature types), joining CABD att
 `cabd_fdw` foreign tables), per-species passability and habitat lengths (in km), every ranked table,
 and the tracking table.
 
+### Exporting Results
+
+See [Model Exports](model_exports.md).
 
 ## Outstanding Decisions
 
