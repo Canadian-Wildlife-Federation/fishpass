@@ -13,8 +13,8 @@ import logging
 
 from db import quote_ident
 from network_snap import linestring_zm_wkb, point_xyzm, snap_points_to_edge
+from utils import SNAPPED_GEOMETRY_SRID
 
-SNAPPED_GEOMETRY_SRID = 4617
 BATCH_SIZE = 5000  # rows per bulk write; bounds memory, not a correctness requirement
 
 logger = logging.getLogger(__name__)

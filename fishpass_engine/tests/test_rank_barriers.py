@@ -21,6 +21,7 @@ import model_plan as mp  # noqa: E402
 import postprocess_views as pv  # noqa: E402
 import rank_barriers as rb  # noqa: E402
 import db  # noqa: E402
+import utils  # noqa: E402
 
 
 def write_plan(tmp_dir, code, extra_yaml=""):
@@ -121,7 +122,7 @@ class RankingConfigTests(unittest.TestCase):
 		self.assertEqual(config.col_tracking_status, "structure_list_status_chn")
 
 	def test_leading_digit_plan_code_is_quoted(self):
-		"""A plan code starting with a digit (allowed by PLAN_CODE_RE) yields
+		"""A plan code starting with a digit (allowed by utils.SAFE_NAME_RE) yields
 		quoted -- and therefore valid -- identifiers."""
 		with tempfile.TemporaryDirectory() as tmp:
 			plan = mp.load_model_plan("1ns", models_dir=write_plan(tmp, "1ns"))
@@ -145,11 +146,11 @@ class RankingConfigTests(unittest.TestCase):
 	def test_min_avg_gain_default_from_config(self):
 		"""min_avg_gain_km defaults to config/fishpass.yaml's wcrp value."""
 		config = rb.RankingConfig(self.plan, "chn", "rear")
-		self.assertEqual(config.min_avg_gain_km, db.wcrp_setting({}, "min_avg_gain_km"))
+		self.assertEqual(config.min_avg_gain_km, utils.wcrp_setting({}, "min_avg_gain_km"))
 
 	def test_min_avg_gain_plan_override(self):
 		"""A plan's min_avg_gain_km overrides the config default."""
-		override = db.wcrp_setting({}, "min_avg_gain_km") + 1
+		override = utils.wcrp_setting({}, "min_avg_gain_km") + 1
 		with tempfile.TemporaryDirectory() as tmp:
 			plan = mp.load_model_plan("ns", models_dir=write_plan(tmp, "ns", f"min_avg_gain_km: {override}"))
 		config = rb.RankingConfig(plan, "chn", "rear")
@@ -245,7 +246,7 @@ class SQLBuildersTests(unittest.TestCase):
 
 	def test_finalize_uses_config_roles_quoted(self):
 		"""sql_finalize_output_table takes owner/grant roles from fishpass.yaml."""
-		roles = db.get_db_roles()
+		roles = utils.get_db_roles()
 		sql = rb.sql_finalize_output_table(self.config)
 		table = self.config.ranked
 		self.assertIn("        feature_id,", sql)

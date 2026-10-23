@@ -55,22 +55,17 @@ from db import (
 	as_role,
 	db_connect,
 	function_exists,
-	get_db_roles,
 	quote_ident,
 	require_env,
 	table_columns,
 	table_exists,
-	wcrp_tracking_enums,
 )
-from model_plan import IDENTIFIER_RE, load_model_plan
+from model_plan import load_model_plan
+from utils import IDENTIFIER_RE, get_db_roles, setup_logging, wcrp_tracking_enums
 
 logger = logging.getLogger(__name__)
 
-logging.basicConfig(
-	level=logging.INFO,
-	format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-	datefmt="%Y-%m-%d %H:%M:%S",
-)
+setup_logging()
 
 # The blank2null trigger function lives in the shared support schema and is created once
 # by init/database/wcrp_support.sql. The enum types are synced from config/fishpass.yaml
@@ -158,7 +153,7 @@ def _tracking_table_name(plan):
 
 def _wcrp_schema(plan):
 	"""The persistent per-WCRP schema, e.g. 'ns' -> 'ns_wcrp'. plan['code'] is
-	already validated by model_plan.PLAN_CODE_RE, and the _wcrp suffix keeps it
+	already validated by utils.SAFE_NAME_RE, and the _wcrp suffix keeps it
 	within the safe identifier charset. RAW name -- quote_ident() it before
 	interpolating into SQL (a code may start with a digit)."""
 	return f"{plan['code']}_wcrp"

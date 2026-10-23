@@ -222,8 +222,9 @@ class BreakNetworkEndMarkerTests(unittest.TestCase):
 		vertices = [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 10.0], [2.0, 0.0, 0.0, 20.0]]
 		wkb = ns.linestring_zm_wkb(vertices)
 		# STREAM_FIELDS order: id, aoi_id, ef_type, ef_subtype, rank, from_nexus_id, to_nexus_id,
-		# ecatchment_id, mainstem_id, graph_id, is_isolated, strahler_order, then geometry wkb.
-		return ("E", "aoi", "single", None, 1, "N0", "N2", "ec", "ms", "g1", False, 1, bytes(wkb))
+		# ecatchment_id, mainstem_id, graph_id, is_isolated, strahler_order, rivernameid1,
+		# stream_name_en, then geometry wkb.
+		return ("E", "aoi", "single", None, 1, "N0", "N2", "ec", "ms", "g1", False, 1, "rn1", "Test Brook", bytes(wkb))
 
 	def _by_column_and_ref_id(self, cursor):
 		by_column = {"downstream_edge_id": {}, "upstream_edge_id": {}}
@@ -269,7 +270,23 @@ class BreakNetworkBatchingTests(unittest.TestCase):
 	def _streams_row(self, edge_id, from_nexus, to_nexus):
 		vertices = [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 10.0], [2.0, 0.0, 0.0, 20.0]]
 		wkb = ns.linestring_zm_wkb(vertices)
-		return (edge_id, "aoi", "single", None, 1, from_nexus, to_nexus, "ec", "ms", "g1", False, 1, bytes(wkb))
+		return (
+			edge_id,
+			"aoi",
+			"single",
+			None,
+			1,
+			from_nexus,
+			to_nexus,
+			"ec",
+			"ms",
+			"g1",
+			False,
+			1,
+			"rn1",
+			"Test Brook",
+			bytes(wkb),
+		)
 
 	def test_multiple_flushes_when_batch_size_is_small(self):
 		edge_ids = ["E1", "E2", "E3"]

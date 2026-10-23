@@ -2,21 +2,12 @@
 docs/inputs/model_plan_file.md.
 """
 
-import re
 import sys
 from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MODELS_DIR = REPO_ROOT / "config" / "models"
-
-# Identifiers that get interpolated directly into SQL (schema/table names can't be bound
-# parameters in psycopg) are restricted to this safe charset.
-IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-PLAN_CODE_RE = re.compile(r"^[A-Za-z0-9_]+$")
-
-LIFECYCLES = ("rear", "spawn", "spawnrear")
+from utils import IDENTIFIER_RE, LIFESTAGES_ALL, MODELS_DIR, SAFE_NAME_RE, WCRP_SETTINGS
 
 DEFAULTS = {
 	"structure_snap_edge_distance_m": 100,
@@ -30,12 +21,10 @@ DEFAULTS = {
 	"impassable_threshold": 1.0,
 	"natural_feature_types_override": None,
 	# WCRP per-plan overrides. None = use the default from config/fishpass.yaml's 'wcrp'
-	# section (resolved at use time by db.wcrp_setting).
+	# section (resolved at use time by utils.wcrp_setting).
 	"label_in_wcrp_rank_threshold": None,
 	"min_avg_gain_km": None,
 }
-
-WCRP_PLAN_OVERRIDES = ("label_in_wcrp_rank_threshold", "min_avg_gain_km")
 
 REQUIRED_FIELDS = (
 	"code",
@@ -53,7 +42,7 @@ def _fail(plan_path, message):
 
 def wcrp_value_error(key, value):
 	"""Return an error message if `value` is not valid for WCRP setting `key`, else None.
-	Shared by plan validation (below) and db.wcrp_setting (fishpass.yaml defaults).
+	Shared by plan validation (below) and utils.wcrp_setting (fishpass.yaml defaults).
 	  * label_in_wcrp_rank_threshold -- a rank, so a whole number >= 1
 	  * min_avg_gain_km -- a distance in km, >= 0 (0 disables the minimum)
 	"""
@@ -108,10 +97,10 @@ def expand_reporting_values(reporting_values, target_species, plan_path):
 			_fail(plan_path, f"Invalid reporting_values entry (expected <species>_<lifecycle>): {rv!r}")
 
 		species_list = target_species if sp_part == "all" else [sp_part]
-		lifecycle_list = LIFECYCLES if lc_part == "all" else [lc_part]
+		lifecycle_list = LIFESTAGES_ALL if lc_part == "all" else [lc_part]
 
 		for lc in lifecycle_list:
-			if lc not in LIFECYCLES:
+			if lc not in LIFESTAGES_ALL:
 				_fail(plan_path, f"Invalid lifecycle in reporting_values entry {rv!r}: {lc!r}")
 		for sp in species_list:
 			if sp not in target_species:
@@ -127,7 +116,7 @@ def expand_reporting_values(reporting_values, target_species, plan_path):
 	return sorted(result)
 
 
-def load_model_plan(plan_code, models_dir=DEFAULT_MODELS_DIR):
+def load_model_plan(plan_code, models_dir=MODELS_DIR):
 	"""Load, validate, and apply defaults to config/models/<plan_code>.yaml.
 
 	Returns a dict with all fields from model_plan_file.md, plus:
@@ -135,7 +124,7 @@ def load_model_plan(plan_code, models_dir=DEFAULT_MODELS_DIR):
 	  * reporting_species_lifecycles -- expanded (species, lifecycle) tuples
 	"""
 
-	if not PLAN_CODE_RE.match(plan_code):
+	if not SAFE_NAME_RE.match(plan_code):
 		sys.exit(f"Invalid plan code: {plan_code!r}")
 
 	plan_path = Path(models_dir) / f"{plan_code}.yaml"
@@ -162,7 +151,7 @@ def load_model_plan(plan_code, models_dir=DEFAULT_MODELS_DIR):
 
 	if not isinstance(data["structure_types"], list) or not data["structure_types"]:
 		_fail(plan_path, "structure_types must be a non-empty list")
-	for key in WCRP_PLAN_OVERRIDES:
+	for key in WCRP_SETTINGS:
 		if data.get(key) is not None:
 			error = wcrp_value_error(key, data[key])
 			if error:

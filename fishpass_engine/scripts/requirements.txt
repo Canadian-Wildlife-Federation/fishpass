@@ -2,3 +2,5 @@ psycopg[binary]
 pyyaml
 shapely>=2.1
 requests
+azure-identity
+azure-storage-blob
