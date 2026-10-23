@@ -236,7 +236,6 @@ def compute_route_measures(edges_by_id, predecessors, successor):
 	return result
 
 
-
 def is_impassable(species_passability_value, species, impassable_threshold, lifestage=None):
 	"""Compute statistics impassable for `species` if either lifestage's
 	value is below impassable_threshold. A missing species_lifestage key is treated as 0
