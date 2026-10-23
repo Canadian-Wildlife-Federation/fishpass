@@ -119,14 +119,14 @@ For ALL runs, configure the run script. Set the various environment variables in
 
 **2. Run Scripts** 
 
-**Model & Export**
+**Run Model & Export (to Azure)**
 
 powershell
 ```
 .\fishpass_engine\run.ps1 myplan -ExportToAzure -ExportType unversioned
 ```
 ```
-.\fishpass_engine\run.ps1 myplan -ExportToAzure -ExportType versioned -Version v1.2
+.\fishpass_engine\run.ps1 myplan -ExportToAzure -ExportType versioned -ExportVersion v1.2
 ```
 
 bash
@@ -135,10 +135,26 @@ bash
 ```
 
 ```
-./fishpass_engine/run.sh myplan --export-to-azure --export-type versioned -version v1.2
+./fishpass_engine/run.sh myplan --export-to-azure --export-type versioned --export-version v1.2
 ```
 
-**Model Only**
+**Run Model & Export (to Local Directory)**
+
+Instead of Azure, the export files can be written to a local directory, using the same folder layout and
+file names as in Azure (`<directory>/fishpass-<plan>/runs/<type>/<folder>/`). This needs GDAL (`ogr2ogr`)
+but no Azure login. It is for local runs only and is refused in GitHub Actions.
+
+powershell
+```
+.\fishpass_engine\run.ps1 myplan -ExportToLocal -LocalExportDirectory C:\temp\exports -ExportType unversioned
+```
+
+bash
+```
+./fishpass_engine/run.sh myplan --export-to-local --local-export-directory /tmp/exports --export-type unversioned
+```
+
+**Run Model Only**
 
 ```powershell
 .\fishpass_engine\run.ps1 -PlanCode myplan
@@ -152,9 +168,14 @@ pip install -r fishpass_engine/scripts/requirements.txt
 python fishpass_engine/scripts/run_model.py myplan
 ```
 
-**Export Only**
+**Run Export Only (to Azure)**
 ```
-python fishpass_engine/scripts/azure_export.py myplan --export-type versioned --version v1.0
+python fishpass_engine/scripts/azure_export.py myplan --export-to-azure --export-type versioned --export-version v1.0
+```
+
+**Run Export Only (to Local Directory)**
+```
+python fishpass_engine/scripts/azure_export.py myplan --export-to-local --export-type unversioned  --local-export-directory C:\temp\exports
 ```
 
 ### Running Test Cases

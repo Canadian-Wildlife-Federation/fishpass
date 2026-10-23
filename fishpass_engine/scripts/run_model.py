@@ -18,7 +18,8 @@ Azure export (docs/azure_exports.md): every run fills <output_schema>.azure_expo
 <output_schema>.run_metadata, so the export can be run later on its own (azure_export.py). With
 --export-to-azure the export also runs at the end of the model run, and the export settings are
 checked before the model starts. If the export fails the run exits with an error, but the model
-results (already committed) are kept.
+results (already committed) are kept. For local runs, --export-to-local --local-export-directory <dir>
+writes the same files to a local directory instead (refused in GitHub Actions).
 """
 
 import argparse
@@ -52,25 +53,32 @@ logger = logging.getLogger(__name__)
 def parse_args():
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("plan_code", help="Plan code -- loads config/models/<plan_code>.yaml")
+	azure_export.add_export_args(parser)
 	parser.add_argument(
-		"--export-to-azure", action="store_true", help="Export the results to Azure at the end of the run"
+		"--export-type",
+		choices=azure_export.EXPORT_TYPES,
+		help="Required with --export-to-azure or --export-to-local",
 	)
-	parser.add_argument("--export-type", choices=azure_export.EXPORT_TYPES, help="Required with --export-to-azure")
-	parser.add_argument("--version", default=None, help="Version label (required when --export-type is versioned)")
+	parser.add_argument(
+		"--export-version", default=None, help="Version label (required when --export-type is versioned)"
+	)
 	return parser.parse_args()
 
 
-def run_azure_export(conn, plan, export_type, version):
+def run_export(conn, plan, export_location, export_type, version, local_export_directory):
 	"""Run the export; on failure log it, note it in the job summary and exit with an error.
 	The model results are already committed, so they are kept."""
-	logger.info("Exporting to Azure")
+	label = "Azure export" if export_location == "azure" else "Local export"
+	logger.info("Running %s", label)
 	try:
-		azure_export.run_export(conn, plan["code"], plan["output_schema"], export_type, version)
+		azure_export.run_export(
+			conn, plan["code"], plan["output_schema"], export_location, export_type, version, local_export_directory
+		)
 	except (Exception, SystemExit) as e:
-		logger.error("Azure export failed: %s", e)
+		logger.error("%s failed: %s", label, e)
 		write_job_summary(
-			f"### Azure export\n:x: Export failed: {e}\n\nThe model results were kept. Once the cause "
-			f"is fixed, re-run the export with the export-only action."
+			f"### {label}\n:x: Export failed: {e}\n\nThe model results were kept. Once the cause "
+			f"is fixed, re-run the export on its own (azure_export.py)."
 		)
 		sys.exit(1)
 
@@ -84,11 +92,12 @@ def main():
 
 	# Check the export settings before the model starts, so bad input fails now.
 	export_version = None
-	if args.export_to_azure:
-		if not args.export_type:
-			sys.exit("--export-type is required with --export-to-azure")
-		export_version = azure_export.validate_export_args(args.export_type, args.version)
-		azure_export.check_export_environment(plan["code"])
+	export_location = azure_export.resolve_export_location(
+		args.export_to_azure, args.export_to_local, args.local_export_directory, args.export_type
+	)
+	if export_location:
+		export_version = azure_export.validate_export_args(args.export_type, args.export_version)
+		azure_export.check_export_environment(plan["code"], export_location, args.local_export_directory)
 
 	logger.info("Running model plan %r -> output schema %r", plan["code"], plan["output_schema"])
 
@@ -157,8 +166,8 @@ def main():
 		minutes, seconds = divmod(int(time.monotonic() - start), 60)
 		logger.info("Model run complete (%dmin, %dsec)", minutes, seconds)
 
-		if args.export_to_azure:
-			run_azure_export(conn, plan, args.export_type, export_version)
+		if export_location:
+			run_export(conn, plan, export_location, args.export_type, export_version, args.local_export_directory)
 
 	except Exception:
 		conn.rollback()

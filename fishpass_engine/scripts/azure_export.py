@@ -17,7 +17,12 @@ AZURE_STORAGE_ACCOUNT_URL environment variable. GeoPackages are written with GDA
 must be on PATH.
 
 Run on its own (the export-only GitHub action) with:
-    python azure_export.py <plan_code> --export-type versioned --version v1.2
+    python azure_export.py <plan_code> --export-to-azure --export-type versioned --export-version v1.2
+
+For local runs only, the files can instead be written to a local directory (same folder layout and
+file names as in Azure, under <directory>/<container>/). No Azure sign-in is needed:
+    python azure_export.py <plan_code> --export-type unversioned --export-to-local --local-export-directory C:/temp/exports
+Local export is refused when running in GitHub Actions.
 """
 
 import argparse
@@ -49,6 +54,7 @@ EXPORTS_TABLE = "azure_exports"
 METADATA_TABLE = "run_metadata"
 
 EXPORT_TYPES = ("versioned", "unversioned")
+EXPORT_LOCATIONS = ("azure", "local")
 VERSION_RE = re.compile(r"^[A-Za-z0-9_.]{1,16}$")
 
 # format -> (file extension, blob content type)
@@ -148,7 +154,7 @@ def column(name, alias=None):
 
 def select_sql(columns, relation):
 	"""SELECT <columns> FROM <relation> -- `relation` must already be quoted."""
-	return "SELECT\n    " + ",\n    ".join(columns) + f"\nFROM {relation}"
+	return "SELECT " + ", ".join(columns) + f" FROM {relation}"
 
 
 def catalog_column_expr(name, typname, typtype, typcategory, geometry_column):
@@ -250,11 +256,26 @@ def check_ogr2ogr():
 		)
 
 
-def check_export_environment(plan_code):
+def check_export_environment(plan_code, export_location, local_export_directory=None):
 	"""Checks that need no database or Azure sign-in, run before a model run starts so bad
-	settings fail early: container name, ogr2ogr, the Azure packages and the account URL."""
+	settings fail early: container name and ogr2ogr, then for Azure the packages and account URL,
+	or for a local export that we are not on GitHub and the directory can be created."""
+	if export_location not in EXPORT_LOCATIONS:
+		sys.exit(f"Invalid export location {export_location!r} (expected azure or local)")
+	if export_location == "local" and os.environ.get("GITHUB_ACTIONS") == "true":
+		sys.exit("Local export is not available in GitHub Actions; use the Azure export.")
 	container_name(plan_code)
 	check_ogr2ogr()
+
+	if export_location == "local":
+		if not local_export_directory:
+			sys.exit("A local export directory is required for a local export.")
+		try:
+			Path(local_export_directory).mkdir(parents=True, exist_ok=True)
+		except OSError as e:
+			sys.exit(f"Cannot create local export directory {local_export_directory!r}: {e}")
+		return
+
 	if not os.environ.get(ACCOUNT_URL_ENV):
 		sys.exit(f"Missing required environment variable {ACCOUNT_URL_ENV} (https://<account>.blob.core.windows.net)")
 	try:
@@ -410,11 +431,12 @@ def _schema_hint(output_schema):
 	)
 
 
-def run_export(conn, plan_code, output_schema, export_type, version):
-	"""Write every file listed in azure_exports, plus the three metadata files, to Azure.
-	Existing files with the same name are overwritten. Returns the uploaded blob URLs."""
+def run_export(conn, plan_code, output_schema, export_location, export_type, version, local_export_directory=None):
+	"""Write every file listed in azure_exports, plus the three metadata files, to Azure
+	(export_location "azure") or to a local directory (export_location "local", local runs only).
+	Existing files with the same name are overwritten. Returns the blob URLs or local file paths."""
 	version = validate_export_args(export_type, version)
-	check_ogr2ogr()
+	check_export_environment(plan_code, export_location, local_export_directory)
 
 	with conn.cursor() as cursor:
 		missing = [t for t in (EXPORTS_TABLE, METADATA_TABLE) if not table_exists(cursor, output_schema, t)]
@@ -431,27 +453,45 @@ def run_export(conn, plan_code, output_schema, export_type, version):
 		exports = read_exports(cursor, output_schema)
 	conn.commit()
 
-	container = get_container(get_blob_service_client(), container_name(plan_code))
 	folder = run_folder(plan_code, version, meta["run_datetime"])
 	export_datetime = datetime.now(timezone.utc)
-	logger.info(
-		"Exporting %d file(s) + metadata for plan %s to %s/runs/%s/%s",
-		len(exports),
-		plan_code,
-		container.container_name,
-		export_type,
-		folder,
-	)
-
 	uploaded = []
-	with tempfile.TemporaryDirectory() as tmp:
-		tmp = Path(tmp)
+
+	if export_location == "azure":
+		label = "Azure export"
+		container = get_container(get_blob_service_client(), container_name(plan_code))
+		destination = container.container_name
 
 		def upload(local_path, file_name, content_type):
 			blob = blob_name(export_type, folder, file_name)
 			upload_file(container, local_path, blob, content_type)
+			local_path.unlink()
 			uploaded.append(f"{container.url}/{blob}")
 			logger.info("  uploaded %s", blob)
+
+	else:
+		label = "Local export"
+		root = Path(local_export_directory) / container_name(plan_code)
+		destination = str(root)
+
+		def upload(local_path, file_name, content_type):
+			target = root / blob_name(export_type, folder, file_name)
+			target.parent.mkdir(parents=True, exist_ok=True)
+			shutil.move(local_path, target)
+			uploaded.append(str(target))
+			logger.info("  wrote %s", target)
+
+	logger.info(
+		"Exporting %d file(s) + metadata for plan %s to %s/runs/%s/%s",
+		len(exports),
+		plan_code,
+		destination,
+		export_type,
+		folder,
+	)
+
+	with tempfile.TemporaryDirectory() as tmp:
+		tmp = Path(tmp)
 
 		for file_name, sql, fmt in exports:
 			ext, content_type = FORMATS[fmt]
@@ -463,7 +503,6 @@ def run_export(conn, plan_code, output_schema, export_type, version):
 			else:
 				write_geopackage(sql, path, file_name)
 			upload(path, f"{file_name}.{ext}", content_type)
-			path.unlink()
 
 		for file_name, text in (
 			("model_plan.yaml", meta["model_plan_file"]),
@@ -475,21 +514,50 @@ def run_export(conn, plan_code, output_schema, export_type, version):
 			upload(path, file_name, YAML_CONTENT_TYPE)
 
 	write_job_summary(
-		f"### Azure export\n:white_check_mark: Exported {len(uploaded)} file(s) to "
-		f"`{container.container_name}/runs/{export_type}/{folder}/`.\n\n" + "\n".join(f"- {url}" for url in uploaded)
+		f"### {label}\n:white_check_mark: Exported {len(uploaded)} file(s) to "
+		f"`{destination}/runs/{export_type}/{folder}/`.\n\n" + "\n".join(f"- {url}" for url in uploaded)
 	)
-	logger.info("Azure export complete: %d file(s).", len(uploaded))
+	logger.info("%s complete: %d file(s).", label, len(uploaded))
 	return uploaded
 
 
 # =================================================================================
-#  CLI (export-only)
+#  CLI
 # =================================================================================
+def add_export_args(parser):
+	"""The export location options, shared by this script and run_model.py."""
+	parser.add_argument("--export-to-azure", action="store_true", help="Export the results to Azure")
+	parser.add_argument(
+		"--export-to-local",
+		action="store_true",
+		help="Write the export files to a local directory instead of Azure (local runs only, not GitHub Actions)",
+	)
+	parser.add_argument(
+		"--local-export-directory", default=None, help="Directory to write to (required with --export-to-local)"
+	)
+
+
+def resolve_export_location(export_to_azure, export_to_local, local_export_directory, export_type):
+	"""Turn the export flags into "azure", "local" or None (no export). Exits on conflicting or
+	missing options."""
+	if export_to_azure and export_to_local:
+		sys.exit("Use only one of --export-to-azure and --export-to-local.")
+	if local_export_directory and not export_to_local:
+		sys.exit("--local-export-directory is only used with --export-to-local.")
+	if export_to_local and not local_export_directory:
+		sys.exit("--local-export-directory is required with --export-to-local.")
+	location = "azure" if export_to_azure else "local" if export_to_local else None
+	if location and not export_type:
+		sys.exit(f"--export-type is required with --export-to-{location}.")
+	return location
+
+
 def parse_args():
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("plan_code", help="Plan code -- loads config/models/<plan_code>.yaml")
 	parser.add_argument("--export-type", required=True, choices=EXPORT_TYPES)
-	parser.add_argument("--version", default=None, help="Version label (required when versioned)")
+	parser.add_argument("--export-version", default=None, help="Version label (required when versioned)")
+	add_export_args(parser)
 	parser.add_argument(
 		"--check-only",
 		action="store_true",
@@ -501,12 +569,17 @@ def parse_args():
 def main():
 	setup_logging()
 	args = parse_args()
-	version = validate_export_args(args.export_type, args.version)
+	export_location = resolve_export_location(
+		args.export_to_azure, args.export_to_local, args.local_export_directory, args.export_type
+	)
+	if not export_location:
+		sys.exit("Give one of --export-to-azure or --export-to-local.")
+	version = validate_export_args(args.export_type, args.export_version)
 
 	from model_plan import load_model_plan  # lazy: imports yaml
 
 	plan = load_model_plan(args.plan_code)
-	check_export_environment(plan["code"])
+	check_export_environment(plan["code"], export_location, args.local_export_directory)
 	if args.check_only:
 		logger.info("Export settings for plan %s are valid.", plan["code"])
 		return
@@ -514,7 +587,15 @@ def main():
 	require_env()
 	conn = db_connect()
 	try:
-		run_export(conn, plan["code"], plan["output_schema"], args.export_type, version)
+		run_export(
+			conn,
+			plan["code"],
+			plan["output_schema"],
+			export_location,
+			args.export_type,
+			version,
+			args.local_export_directory,
+		)
 	finally:
 		conn.close()
 

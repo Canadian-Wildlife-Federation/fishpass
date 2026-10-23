@@ -66,7 +66,7 @@ jobs:
       # Fails before the model starts if the version is missing/invalid or a tool is missing.
       - name: Check export settings
         if: inputs.export_to_azure
-        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-type "$EXPORT_TYPE" --version "$VERSION" --check-only
+        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-to-azure --export-type "$EXPORT_TYPE" --export-version "$VERSION" --check-only
 
       - name: Run model
         run: python fishpass_engine/scripts/run_model.py "$PLAN_CODE"
@@ -84,4 +84,4 @@ jobs:
 
       - name: Export to Azure
         if: inputs.export_to_azure
-        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-type "$EXPORT_TYPE" --version "$VERSION"
+        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-to-azure --export-type "$EXPORT_TYPE" --export-version "$VERSION"

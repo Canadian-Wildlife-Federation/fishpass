@@ -3,12 +3,18 @@ param(
     [string]$PlanCode,
 
     # Optional Azure export, e.g.
-    #   .\run.ps1 ns -ExportToAzure -ExportType versioned -Version v1.2
+    #   .\run.ps1 ns -ExportToAzure -ExportType versioned -ExportVersion v1.2
     # Sign in first with `az login` (see README.md).
     [switch]$ExportToAzure,
+
+    # Optional local export (instead of Azure), e.g.
+    #   .\run.ps1 ns -ExportToLocal -LocalExportDirectory C:\temp\exports -ExportType unversioned
+    [switch]$ExportToLocal,
+    [string]$LocalExportDirectory,
+
     [ValidateSet("versioned", "unversioned")]
     [string]$ExportType,
-    [string]$Version
+    [string]$ExportVersion
 )
 
 $env:FISHPASS_HOST = "localhost"
@@ -23,10 +29,12 @@ if (-not $env:AZURE_STORAGE_ACCOUNT_URL) {
 }
 
 $extraArgs = @()
-if ($ExportToAzure) {
-    $extraArgs += "--export-to-azure"
+if ($ExportToAzure) { $extraArgs += "--export-to-azure" }
+if ($ExportToLocal) { $extraArgs += "--export-to-local" }
+if ($LocalExportDirectory) { $extraArgs += @("--local-export-directory", $LocalExportDirectory) }
+if ($ExportToAzure -or $ExportToLocal) {
     if ($ExportType) { $extraArgs += @("--export-type", $ExportType) }
-    if ($Version) { $extraArgs += @("--version", $Version) }
+    if ($ExportVersion) { $extraArgs += @("--export-version", $ExportVersion) }
 }
 
 python "$PSScriptRoot\scripts\run_model.py" $PlanCode @extraArgs

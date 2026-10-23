@@ -5,6 +5,7 @@ Run with: python -m unittest fishpass_engine.tests.test_azure_export
 """
 
 import sys
+import tempfile
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -330,21 +331,21 @@ class RunExportTests(unittest.TestCase):
 	def test_missing_tables(self):
 		conn = self._conn()
 		with (
-			mock.patch.object(ae, "check_ogr2ogr"),
+			mock.patch.object(ae, "check_export_environment"),
 			mock.patch.object(ae, "table_exists", return_value=False),
 			self.assertRaises(SystemExit) as ctx,
 		):
-			ae.run_export(conn, "ns", "ns_out", "unversioned", None)
+			ae.run_export(conn, "ns", "ns_out", "azure", "unversioned", None)
 		self.assertIn("current plan file", str(ctx.exception))
 
 	def test_plan_code_mismatch(self):
 		conn = self._conn(meta=(RUN_DT, "u", "main", "abc", "other", None, "", ""))
 		with (
-			mock.patch.object(ae, "check_ogr2ogr"),
+			mock.patch.object(ae, "check_export_environment"),
 			mock.patch.object(ae, "table_exists", return_value=True),
 			self.assertRaises(SystemExit),
 		):
-			ae.run_export(conn, "ns", "ns_out", "unversioned", None)
+			ae.run_export(conn, "ns", "ns_out", "azure", "unversioned", None)
 
 	def test_uploads_every_file(self):
 		conn = self._conn(
@@ -357,7 +358,7 @@ class RunExportTests(unittest.TestCase):
 			uploads.append((blob, content_type))
 
 		with (
-			mock.patch.object(ae, "check_ogr2ogr"),
+			mock.patch.object(ae, "check_export_environment"),
 			mock.patch.object(ae, "table_exists", return_value=True),
 			mock.patch.object(ae, "get_blob_service_client"),
 			mock.patch.object(ae, "get_container", return_value=container) as get_container,
@@ -365,7 +366,7 @@ class RunExportTests(unittest.TestCase):
 			mock.patch.object(ae, "write_csv", side_effect=lambda conn, sql, path: path.write_text("c")),
 			mock.patch.object(ae, "upload_file", side_effect=fake_upload),
 		):
-			urls = ae.run_export(conn, "ns", "ns_out", "versioned", "v1")
+			urls = ae.run_export(conn, "ns", "ns_out", "azure", "versioned", "v1")
 
 		get_container.assert_called_once()
 		self.assertEqual(get_container.call_args[0][1], "fishpass-ns")
@@ -381,6 +382,76 @@ class RunExportTests(unittest.TestCase):
 			],
 		)
 		self.assertEqual(len(urls), 5)
+
+	def test_local_export_writes_every_file(self):
+		conn = self._conn(
+			exports=[("streams_as", "SELECT 1", "geopackage"), ("connectivity_summary", "SELECT 2", "csv")]
+		)
+		with (
+			tempfile.TemporaryDirectory() as out,
+			mock.patch.dict("os.environ", {"GITHUB_ACTIONS": ""}),
+			mock.patch.object(ae, "check_ogr2ogr"),
+			mock.patch.object(ae, "table_exists", return_value=True),
+			mock.patch.object(ae, "get_container") as get_container,
+			mock.patch.object(ae, "write_geopackage", side_effect=lambda sql, path, name: path.write_text("g")),
+			mock.patch.object(ae, "write_csv", side_effect=lambda conn, sql, path: path.write_text("c")),
+		):
+			paths = ae.run_export(conn, "ns", "ns_out", "local", "versioned", "v1", out)
+			folder = Path(out) / "fishpass-ns" / "runs" / "versioned" / "ns_v1_20261007143000"
+			written = sorted(p.name for p in folder.iterdir())
+
+		get_container.assert_not_called()
+		prefix = "ns_v1_20261007143000_"
+		self.assertEqual(
+			written,
+			sorted(
+				prefix + name
+				for name in (
+					"streams_as.gpkg",
+					"connectivity_summary.csv",
+					"model_plan.yaml",
+					"fish_species_parameters.yaml",
+					"metadata.yaml",
+				)
+			),
+		)
+		self.assertEqual(len(paths), 5)
+
+
+class ExportLocationTests(unittest.TestCase):
+	def test_resolve(self):
+		self.assertEqual(ae.resolve_export_location(True, False, None, "unversioned"), "azure")
+		self.assertEqual(ae.resolve_export_location(False, True, "d", "unversioned"), "local")
+		self.assertIsNone(ae.resolve_export_location(False, False, None, None))
+
+	def test_resolve_errors(self):
+		for args in (
+			(True, True, "d", "unversioned"),  # both
+			(False, True, None, "unversioned"),  # no directory
+			(False, False, "d", "unversioned"),  # directory without --export-to-local
+			(False, True, "d", None),  # no export type
+		):
+			with self.subTest(args=args), self.assertRaises(SystemExit):
+				ae.resolve_export_location(*args)
+
+	def test_local_refused_in_github_actions(self):
+		with (
+			mock.patch.dict("os.environ", {"GITHUB_ACTIONS": "true"}),
+			mock.patch.object(ae, "check_ogr2ogr"),
+			self.assertRaises(SystemExit) as ctx,
+		):
+			ae.check_export_environment("ns", "local", "somewhere")
+		self.assertIn("GitHub Actions", str(ctx.exception))
+
+	def test_local_creates_directory(self):
+		with (
+			tempfile.TemporaryDirectory() as tmp,
+			mock.patch.dict("os.environ", {"GITHUB_ACTIONS": ""}),
+			mock.patch.object(ae, "check_ogr2ogr"),
+		):
+			target = Path(tmp) / "a" / "b"
+			ae.check_export_environment("ns", "local", str(target))
+			self.assertTrue(target.is_dir())
 
 
 if __name__ == "__main__":

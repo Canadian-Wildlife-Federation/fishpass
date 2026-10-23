@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ -z "${1:-}" ]; then
-  echo "Usage: $0 <plan_code> [--export-to-azure --export-type versioned|unversioned [--version <version>]]" >&2
+  echo "Usage: $0 <plan_code> [--export-to-azure | --export-to-local --local-export-directory <dir>] [--export-type versioned|unversioned [--export-version <version>]]" >&2
   exit 1
 fi
 PLAN_CODE="$1"

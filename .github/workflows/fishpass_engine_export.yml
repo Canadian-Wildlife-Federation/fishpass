@@ -61,7 +61,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y gdal-bin
 
       - name: Check export settings
-        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-type "$EXPORT_TYPE" --version "$VERSION" --check-only
+        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-to-azure --export-type "$EXPORT_TYPE" --export-version "$VERSION" --check-only
 
       - name: Azure login (OIDC)
         uses: azure/login@v2
@@ -72,4 +72,4 @@ jobs:
           allow-no-subscriptions: true
 
       - name: Export to Azure
-        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-type "$EXPORT_TYPE" --version "$VERSION"
+        run: python fishpass_engine/scripts/azure_export.py "$PLAN_CODE" --export-to-azure --export-type "$EXPORT_TYPE" --export-version "$VERSION"
