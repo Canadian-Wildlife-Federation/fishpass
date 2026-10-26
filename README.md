@@ -22,6 +22,62 @@ The pipeline has three components, run in order:
    rebuilds the plan's WCRP combined output view. Requires chyf_loader (and gradient_barriers,
    if the plan uses gradient barriers) to have already run.
 
+## FishPass Architecture 
+```mermaid
+---
+config:
+  layout: elk
+  look: neo
+---
+flowchart TD
+    %% 1. Define Style Classes
+    classDef classBlack fill:#ffffff,stroke:#000,stroke-width:1px,color:#000;
+    classDef classYellowBox fill:#FFF2CC,stroke:#E4A11B,stroke-width:1px,color:#000;
+
+    %% 2. Nodes & Subgraphs
+    DEM[DEM]
+    
+    CHyF_Proc(<b>CHyF Elevation Processor</b><br/><small>Adds raw elevation and computes smoothed elevation for CHyF network</small>)
+
+    CHyF_DB[(<b>CHyF DB</b><br/><small>with mainstems, raw elevation, network groups, to/from nexus ids</small>)]
+
+    Loader(<b>FishPass - CHyF Loader</b><br/><small>Loads the CHyF network into FishPash DB and does any initial preprocessing.</small>)
+
+    subgraph FishPass_DB [FishPass DB]
+        CHyF_Data[Processed CHyF Data]
+        Gradient_Barriers[Gradient Barriers]
+        Output_Schema[<b>&lt;plan&gt;</b><br/>Output Schema]
+    end
+
+    Generator(<b>FishPass - Model Generator</b><br/><small>Using the prepocessed CHyF data and other input datasets, runs the fish pass modelling. Resulting models are versioned, exported, and placed on cloud storage.</small>)
+    Barrier_Generator(<b>FishPass - Gradient Barrier Generator</b><br/><small>Uses the CHyF network to compute gradient barriers.</small>)
+    
+    CABD[CABD API]
+    Cloud[Cloud Storage<br/><i><small>model exports</small></i>]
+
+    %% 3. Connections
+    DEM --> CHyF_Proc
+    CHyF_DB <--> CHyF_Proc
+    CHyF_DB --> Loader
+    
+    Loader --> CHyF_Data
+    CHyF_Data --> Generator
+    CHyF_Data --> Barrier_Generator
+    Barrier_Generator --> Gradient_Barriers
+    Output_Schema <--> Generator
+    Gradient_Barriers --> Generator
+    
+    CABD --> Generator
+    Generator --> Cloud
+
+    %% 4. Apply Styling
+    class DEM,CHyF_DB,CABD,Cloud,CHyF_Data,Output_Schema,Gradient_Barriers classBlack
+    class CHyF_Proc,Loader,Generator,Barrier_Generator classYellowBox
+    style FishPass_DB fill:#ffffff,stroke:#000,stroke-width:1px;
+
+
+```
+
 ## Development
 
 Code formatting and linting are handled by [ruff](https://docs.astral.sh/ruff/), pinned in
