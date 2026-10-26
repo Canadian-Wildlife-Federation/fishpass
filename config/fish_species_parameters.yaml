@@ -19,14 +19,15 @@ species:
     rear_channel_confinement_min: 0
     rear_channel_confinement_max: 100
     strahler_order_spawning_min: 1
-    strahler_order_spawning_max: 7
+    strahler_order_spawning_max: 99
     strahler_order_rearing_min: 1
-    strahler_order_rearing_max: 7
+    strahler_order_rearing_max: 99
     stream_order_1_spawning_weight: 0.25
     stream_order_1_rearing_weight: 0.25
     stream_order_2_spawning_weight: 0.75
     stream_order_2_rearing_weight: 0.75
 
+# American Eel parameters are not scientifically accurate at this time, but are included for demonstration purposes
   - code: ae
     name: American Eel
     accessibility_gradient_spawning_max: 1
