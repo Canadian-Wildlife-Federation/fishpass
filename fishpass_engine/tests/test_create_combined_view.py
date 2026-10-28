@@ -17,10 +17,10 @@ try:
 except ImportError:
 	sys.modules["yaml"] = types.ModuleType("yaml")
 
-import model_plan as mp  # noqa: E402
 import create_combined_view as ccv  # noqa: E402
-import postprocess_views as pv  # noqa: E402
 import db  # noqa: E402
+import model_plan as mp  # noqa: E402
+import postprocess_views as pv  # noqa: E402
 import utils  # noqa: E402
 
 
@@ -130,6 +130,28 @@ class BuildViewSqlTests(unittest.TestCase):
 		self.assertIn('"chn_rear_upstream_accessible_length_km"', sql)
 		self.assertNotIn("chn_rear_upstream_length_km", sql)
 		self.assertNotIn("bp_sth", sql)
+
+	def test_isolated_structures_require_reported_lifecycle_passability(self):
+		"""Isolated structures need non-NULL passability for reported life stages only."""
+		for lifecycle in ("spawn", "rear"):
+			with self.subTest(lifecycle=lifecycle):
+				sql = self._sql(reporting=f"chn_{lifecycle}")
+				where = sql.rsplit("WHERE ", 1)[1].split(";", 1)[0]
+				self.assertIn('stream_segment."is_isolated" IS NOT TRUE', where)
+				self.assertIn('ON stream_segment."id" = ab."downstream_edge_id"', sql)
+				self.assertIn(f'bp_chn."passability_status_{lifecycle}" IS NOT NULL', where)
+				other_lifecycle = "rear" if lifecycle == "spawn" else "spawn"
+				self.assertNotIn(f'bp_chn."passability_status_{other_lifecycle}" IS NOT NULL', where)
+		combined_sql = self._sql(reporting="chn_spawnrear")
+		combined_where = combined_sql.rsplit("WHERE ", 1)[1].split(";", 1)[0]
+		self.assertIn('bp_chn."passability_status_spawn" IS NOT NULL', combined_where)
+		self.assertIn('bp_chn."passability_status_rear" IS NOT NULL', combined_where)
+
+	def test_combined_view_requires_snapped_geometry(self):
+		"""Features without snapped geometry are excluded from the combined view."""
+		sql = self._sql()
+		where = sql.rsplit("WHERE ", 1)[1].split(";", 1)[0]
+		self.assertIn('ab."snapped_geometry" IS NOT NULL', where)
 
 	def test_label_threshold_default_and_override(self):
 		"""label_in_wcrp uses the fishpass.yaml default (30) unless the plan overrides."""

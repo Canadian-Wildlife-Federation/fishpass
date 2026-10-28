@@ -230,7 +230,7 @@ These are exported by default, and each comes from a row in the export table:
 | [Natural barriers](#natural-barriers) | The `<output_schema>.natural_barriers_<species>` views, which are created as a part of the model processing. Each view holds the natural barriers with the columns specific to that species. See [barriers.md](./outputs/barriers.md). | species | geopackage |
 | [Streams](#streams) | The `<output_schema>.streams_<species>` views, which are created as a part of the model processing. Each view holds the stream edges with the columns specific to that species. See [streams.md](./outputs/streams.md). | species | geopackage |
 | [Ranked barriers](#ranked-barriers) | `<code>_wcrp.ranked_barriers_<species>_<lifestage>_<code>`. See [ranked_barriers.md](./outputs/ranked_barriers.md). | species/lifestage | csv |
-| [Final structures](#final-structures) | `<code>_wcrp.combined_output_table_vw`. See [combined_output_view.md](./outputs/combined_output_view.md). | run | geopackage |
+| [Structures](#structures) | `<code>_wcrp.combined_output_table_vw`. See [combined_output_view.md](./outputs/combined_output_view.md). | run | geopackage |
 | [Connectivity summary](#connectivity-summary) | `<output_schema>.watershed_summary_stats`. See [watershed_summary.md](./outputs/watershed_summary.md). | run | csv |
 
 #### Natural Barriers
@@ -299,9 +299,9 @@ Notes on the example:
 - The columns are listed, not selected with `*`, because the view has two geometry columns (`geometry` and `snapped_geometry`) and a GeoPackage export must return exactly one.
 - GeoPackage has no uuid or list type, so the uuid columns are cast to text and the barrier id lists are written as text with the values separated by `|` (e.g. `id1|id2|id3`).
 - The length columns in the view depend on the lifestages reported for the species. When `spawnrear` is reported, the view has a third block of six columns with the `spawnrear_` prefix, which is added to the query.
-- `feature_id` is the barrier identifier (CABD id, gradient barrier id or new structure id), the same as `feature_id` in the ranked barriers and final structures exports and the tracking table. It is stable across model runs for CABD barriers and new structures; gradient barrier ids change whenever the gradient barriers table is recomputed. The per-run `all_barriers.id` is not in the view and is not exported.
+- `feature_id` is the barrier identifier (CABD id, gradient barrier id or new structure id), the same as `feature_id` in the ranked barriers and structures exports and the tracking table. It is stable across model runs for CABD barriers and new structures; gradient barrier ids change whenever the gradient barriers table is recomputed. The per-run `all_barriers.id` is not in the view and is not exported.
 - Only the four anthropogenic barrier id lists are exported. The view's natural barrier id lists (`downstream_natural_spawn_ids`, `downstream_natural_rear_ids`) are left out; the natural barrier counts are still exported.
-- The anthropogenic id lists hold `feature_id` values, which can be looked up in the final structures export.
+- The anthropogenic id lists hold `feature_id` values, which can be looked up in the structures export.
 - The view only holds natural barriers that snapped to the stream network.
 - `stream_name_en` is the name of the stream edge immediately upstream of the barrier (see [barriers.md](./outputs/barriers.md)).
 
@@ -364,7 +364,7 @@ FROM <output_schema>.streams_as
 
 Notes on the example:
 
-- GeoPackage has no uuid or list type, so `id` is cast to text and the barrier id lists are written as text with the values separated by `|`. The lists hold barrier `feature_id` values, which can be looked up in the final structures export.
+- GeoPackage has no uuid or list type, so `id` is cast to text and the barrier id lists are written as text with the values separated by `|`. The lists hold barrier `feature_id` values, which can be looked up in the structures export.
 - The weighted length columns in the view depend on the lifestages reported for the species: the `spawn_` block is only there when `spawn` is reported, and the `rear_` block only when `rear` is reported. There is no `spawnrear_` weighted length block.
 - The view only holds the stream edges that have statistics for the species, so the files for different species can have different edges.
 - The view only has some of the `streams` columns (`id`, `length`, `strahler_order`, `effective_length`, `segment_gradient`, `stream_name_en` and `geometry`). The other network columns (e.g. `aoi_id`, `ef_type`, `rank`, `mainstem_id`, `graph_id`) are not in the view and so are not exported.
@@ -402,14 +402,14 @@ Notes on the example:
 
 - The file name leaves off the plan code that ends the table name, because every file name already starts with it.
 - CSV has no list type, so `downstr_group_ids` is written as text with the values separated by `|` (e.g. `12|15|31`). A comma is not used because it is the CSV column separator.
-- `feature_id` is `all_barriers.feature_id`, so the file joins to the final structures export and the tracking table on `feature_id`.
+- `feature_id` is `all_barriers.feature_id`, so the file joins to the structures export and the tracking table on `feature_id`.
 - The table has no geometry. All lengths and gains are in km.
 
-#### Final Structures
+#### Structures
 
 One row is added to the export table for the run. The single file holds every reporting species and lifestage:
 
-Example filename: `runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_final_structures.gpkg`
+Example filename: `runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_structures.gpkg`
 
 Example `sql` for plan code `ns`, with one reporting species, `as`, reporting the `spawn` lifestage. It reads from `<code>_wcrp.combined_output_table_vw` (see [combined_output_view.md](./outputs/combined_output_view.md)). The view has a large number of columns that depend on the plan, so the example is shortened; the real query lists every column of the view, in view order:
 
@@ -512,7 +512,7 @@ The output schema itself is found from the current plan file. If the plan's `out
 **When an export fails.** The export is the last step of the model run, after all the model results are committed. If it fails, the run is marked as failed so that it is noticed, but the model results are kept. Once the cause is fixed, the export can be re-run without re-running the model, using the export-only action (see [New: Export-Only Action](#new-export-only-action)).
 
 **!! Results can change after the run  !!**
-Some exports read from data that can be edited after the model run. The final structures view reads the [tracking table](./outputs/tracking_table.md), which is edited by hand, so an export run later can include edits made since the model ran. The export date/time in `metadata.yaml` shows when this may apply.
+Some exports read from data that can be edited after the model run. The structures view reads the [tracking table](./outputs/tracking_table.md), which is edited by hand, so an export run later can include edits made since the model ran. The export date/time in `metadata.yaml` shows when this may apply.
 
 ## Local File Exports
 

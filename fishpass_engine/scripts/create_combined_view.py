@@ -42,7 +42,7 @@ import sys
 import azure_export
 from db import as_role, quote_ident, table_column_types, table_columns
 from postprocess_views import barrier_length_fields
-from utils import IDENTIFIER_RE, REAR, SPAWN, get_db_roles, natural_feature_types, wcrp_setting
+from utils import IDENTIFIER_RE, REAR, SPAWN, SPAWNREAR, get_db_roles, natural_feature_types, wcrp_setting
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +128,8 @@ TRACKING_ALIAS_OVERRIDES = {
 	"actual_project_cost_$": "actual_project_cost_dollars",
 }
 
-# Azure export of the view (azure_exports.md -- Final Structures).
-EXPORT_FILE_NAME = "final_structures"
+# Azure export of the view (azure_exports.md -- Structures).
+EXPORT_FILE_NAME = "structures"
 EXPORT_GEOMETRY_COLUMN = "snapped_geometry"
 
 # --- CABD FDW SOURCES ------------------------------------------------------------
@@ -246,6 +246,7 @@ def build_view_sql(plan, natural_feature_types):
 	dm = "dm"
 	sc = "sc"
 	tt = "tt"
+	stream = "stream_segment"
 
 	select_cols = []
 
@@ -289,6 +290,8 @@ def build_view_sql(plan, natural_feature_types):
 		f"LEFT JOIN {DAMS_FDW} {dm} ON {dm}.{quote_ident(CABD_JOIN_KEY)} = {ab}.{quote_ident('feature_id')}",
 		f"LEFT JOIN {STREAM_CROSSINGS_FDW} {sc} "
 		f"ON {sc}.{quote_ident(CABD_JOIN_KEY)} = {ab}.{quote_ident('feature_id')}",
+		f"LEFT JOIN {schema_id}.{quote_ident('streams')} {stream} "
+		f"ON {stream}.{quote_ident('id')} = {ab}.{quote_ident('downstream_edge_id')}",
 		f"LEFT JOIN {wcrp_id}.{quote_ident('tracking_table_' + watershed)} {tt} "
 		f"ON {tt}.{quote_ident('feature_id')} = {ab}.{quote_ident('feature_id')}",
 	]
@@ -306,14 +309,24 @@ def build_view_sql(plan, natural_feature_types):
 			f"ON {rk}.{quote_ident('feature_id')} = {ab}.{quote_ident('feature_id')}"
 		)
 
-	# --- WHERE: exclude natural feature types (waterfalls, gradients, ...). Any
-	#     feature_type NOT in that list -- dams, stream_crossings, and new
-	#     structures like beaver dams -- is kept. ---
+	# --- WHERE: exclude natural feature types and isolated structures without
+	#     passability values for the life stages reported by this model run, as
+	#     well as features without snapped geometry. ---
+	where_conditions = []
+	where_conditions.append(f"{ab}.{quote_ident('snapped_geometry')} IS NOT NULL")
 	if natural_feature_types:
 		natural_array = ", ".join(f"'{t}'" for t in natural_feature_types)
-		where = f"WHERE {ab}.{quote_ident('feature_type')} <> ALL (ARRAY[{natural_array}]::varchar[])"
-	else:
-		where = ""
+		where_conditions.append(f"{ab}.{quote_ident('feature_type')} <> ALL (ARRAY[{natural_array}]::varchar[])")
+
+	passability_checks = set()
+	for sp, lc in pairs:
+		lifecycles = (SPAWN, REAR) if lc == SPAWNREAR else (lc,)
+		for lifecycle in lifecycles:
+			passability_checks.add(f"bp_{sp}.{quote_ident(f'passability_status_{lifecycle}')} IS NOT NULL")
+	if passability_checks:
+		statuses_present = " AND ".join(sorted(passability_checks))
+		where_conditions.append(f"({stream}.{quote_ident('is_isolated')} IS NOT TRUE OR ({statuses_present}))")
+	where = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
 
 	select_sql = ",\n    ".join(select_cols)
 	joins_sql = "\n".join(joins)
@@ -360,14 +373,14 @@ def create_combined_view(conn, cursor, plan):
 		cursor,
 		plan["output_schema"],
 		EXPORT_FILE_NAME,
-		final_structures_export_sql(plan["code"], columns),
+		structures_export_sql(plan["code"], columns),
 		"geopackage",
 	)
 	conn.commit()
 
 
-def final_structures_export_sql(watershed, columns):
-	"""SQL for the final_structures GeoPackage export: every column of the view, in view order
+def structures_export_sql(watershed, columns):
+	"""SQL for the structures GeoPackage export: every column of the view, in view order
 	(`columns` from db.table_column_types), with uuid/enum columns cast to text, list columns as
 	|-separated text, and snapped_geometry as the one geometry column."""
 	if not columns:

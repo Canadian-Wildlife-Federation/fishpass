@@ -262,7 +262,7 @@ class ExportSqlTests(unittest.TestCase):
 		self.assertIn('"as_rear_passability"', sql)
 		self.assertTrue(sql.endswith('FROM "ns_wcrp"."ranked_barriers_as_spawn_ns"'))
 
-	def test_final_structures(self):
+	def test_structures(self):
 		columns = [
 			("feature_id", "uuid", "b", "U"),
 			("feature_type", "varchar", "b", "S"),
@@ -271,7 +271,7 @@ class ExportSqlTests(unittest.TestCase):
 			("priority", "tt_priority_type", "e", "E"),
 			("estimated_cost_dollars", "numeric", "b", "N"),
 		]
-		sql = ccv.final_structures_export_sql("ns", columns)
+		sql = ccv.structures_export_sql("ns", columns)
 		self.assertIn('"feature_id"::text AS "feature_id"', sql)
 		self.assertIn('"priority"::text AS "priority"', sql)
 		self.assertIn("array_to_string(\"downstr_group_ids_as_spawn\", '|')", sql)
