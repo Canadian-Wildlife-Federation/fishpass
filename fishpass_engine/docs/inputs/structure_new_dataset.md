@@ -4,6 +4,16 @@ The purpose of this table is to support new structure types not in the CABD (e.g
 
 Updates to these structures occur in the `support.structure_updates` table (and can be different for different plans).
 
+## Usage
+This table should only be used for new structure types that should be considered anthropogenic for the purposes of the model (i.e., they represent a barrier that could be addressed through human intervention). 
+
+It should **not** be used for any of the following:
+- Adding/removing gradient barriers --> will happen in the gradient barriers table
+- Adding/removing waterfalls --> will happen via the CABD
+- Changing the passability status for waterfalls --> will happen via the CABD or via the structure_updates table
+
+## Definition
+
 **Source:** FishPass Database
 
 **Table:** support.new_structures

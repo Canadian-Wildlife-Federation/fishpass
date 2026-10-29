@@ -43,3 +43,4 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+local_env.ps1
