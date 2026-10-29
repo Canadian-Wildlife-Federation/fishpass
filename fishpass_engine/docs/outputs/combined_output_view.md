@@ -4,7 +4,13 @@
 
 The single WCRP reporting view, with one row per actionable barrier. Rebuilt by `create_combined_view.py` at the end of every model run, using `DROP VIEW` then `CREATE`, so the column set can change between runs (e.g. after adding a species). It lives in the persistent `<code>_wcrp` schema, but anything that depends on it is dropped (`CASCADE`) when it's rebuilt. The view isn't rebuilt outside a model run, so changes such as new CABD attributes or a new label threshold appear after the next model run.
 
-**Row set:** every row of `<output_schema>.all_barriers` whose `feature_type` is NOT a natural feature type (`natural_feature_types_override` from the plan, otherwise `structure_classification.natural_feature_types` from `config/fishpass.yaml` -- e.g. waterfalls, gradients). This keeps dams, stream crossings, and new structures such as beaver dams. It also includes barriers that could not be snapped to the stream network; their passability, length, and ranking columns are NULL.
+**Row set:**
+
+Every row of <output_schema>.all_barriers that:
+- has a feature_type that is NOT a natural feature type (natural_feature_types_override from the plan, otherwise structure_classification.natural_feature_types from config/fishpass.yaml, e.g. waterfalls, gradients). This keeps dams, stream crossings, and new structures such as beaver dams;
+- was snapped to the stream network (snapped_geometry is not NULL);
+- structures on non-isolated segments are always kept; structures on isolated segments (is_isolated on their downstream edge) are kept only if they have passability values for every reported species and lifestage. This is intentional to retain information about any structures that are on isolated segments but that have been assessed or otherwise prioritized (e.g., where the stream network does not reflect reality, where an isolated segment should be connected to the rest of the network, or where an isolated segment represents an important area of habitat)
+
 
 **Sources and join keys:**
 
@@ -53,7 +59,7 @@ View Structure, in column order. `<sp>` = each reporting species and `<lc>` = ea
 | rank_w_total_upstr_hab_\<sp\>_\<lc\> | numeric | potential gain rank (ranked table `rank_w_total_upstr_<lc>_hab`) |
 | rank_combined_\<sp\>_\<lc\> | numeric | combined rank, from the ranked table |
 | label_in_wcrp_\<sp\>_\<lc\> | text | `yes` when `rank_combined <= label_in_wcrp_rank_threshold`, otherwise `no` (including barriers that weren't ranked) |
-| internal_name ... supporting_links | (tracking) | every non-species tracking table column, in tracking-table order (see [tracking_table.md](./tracking_table.md)), except `feature_id`. `road_name` and `structure_type` are renamed `tracking_road_name` and `tracking_structure_type` so they don't clash with the CABD columns of the same name. Set by `TRACKING_NON_SPECIES_COLUMNS`. |
+| internal_name ... supporting_links | (tracking) | every non-species tracking table column, in tracking-table order (see [tracking_table.md](./tracking_table.md)), except `feature_id`. `road_name` and `structure_type` are renamed `tracking_road_name` and `tracking_structure_type` so they don't clash with the CABD columns of the same name. `estimated_cost_$`, `estimated_rehabilitation_cost_$` and `actual_project_cost_$` are renamed `estimated_cost_dollars`, `estimated_rehabilitation_cost_dollars` and `actual_project_cost_dollars`, because some GIS tools reject or rename a `$` in a GeoPackage column name (see [azure_exports.md](../azure_exports.md#final-structures)). Set by `TRACKING_NON_SPECIES_COLUMNS` and `TRACKING_ALIAS_OVERRIDES`. |
 | structure_list_status_\<sp\>, partial_passability_\<sp\>, partial_passability_notes_\<sp\> | (tracking) | per-species tracking columns, for each reporting species |
 
 The per-species blocks are ordered by species code, and the per-(species, lifecycle) ranking blocks by (species, lifecycle).

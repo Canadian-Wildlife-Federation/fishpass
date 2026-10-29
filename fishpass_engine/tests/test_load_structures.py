@@ -6,7 +6,6 @@ Run with: python -m unittest fishpass_engine.tests.test_load_structures
 
 import json
 import sys
-import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -91,32 +90,6 @@ class ExplodeNewStructurePassabilityTests(unittest.TestCase):
 			result,
 			{"es_rear": 1, "es_spawn": 0, "wl_rear": 0, "wl_spawn": 0},
 		)
-
-
-class LoadNaturalFeatureTypesTests(unittest.TestCase):
-	def _write_config(self, text):
-		f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
-		f.write(text)
-		f.close()
-		return f.name
-
-	def test_reads_configured_list(self):
-		path = self._write_config(
-			"structure_classification:\n  natural_feature_types:\n    - waterfalls\n    - gradients\n"
-		)
-		self.assertEqual(ls.load_natural_feature_types(path), {"waterfalls", "gradients"})
-
-	def test_empty_list_means_everything_anthropogenic(self):
-		path = self._write_config("structure_classification:\n  natural_feature_types: []\n")
-		self.assertEqual(ls.load_natural_feature_types(path), set())
-
-	def test_missing_key_means_everything_anthropogenic(self):
-		path = self._write_config("structure_classification: {}\n")
-		self.assertEqual(ls.load_natural_feature_types(path), set())
-
-	def test_missing_file_exits(self):
-		with self.assertRaises(SystemExit):
-			ls.load_natural_feature_types("/nonexistent/fishpass.yaml")
 
 
 class FakeCursor:

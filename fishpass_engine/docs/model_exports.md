@@ -1,6 +1,6 @@
-# Azure Exports
+# Model Exports
 
-This document outlines the requirements for exporting FishPass engine results from the database to Azure Blob Storage.
+This document outlines the requirements for exporting FishPass engine results from the database to Azure Blob Storage. There is also an option to run the scripts locally and export to a local filestore.
 
 ## Overview
 
@@ -14,7 +14,21 @@ At the end of a model run, the results can optionally be exported to an Azure Bl
 
 ## Azure Connection
 
-The Azure connection details are stored as GitHub secrets and passed to the run as environment variables, the same way the `FISHPASS_*` database secrets are handled in [fishpass_engine.yml](../../.github/workflows/fishpass_engine.yml).
+The export signs in to Azure with OIDC (workload identity federation), so no Azure password or key is stored:
+
+- **GitHub actions** run in the `azure-export` GitHub environment, which the Azure app registration trusts. An `azure/login` step signs in just before the export. The run action signs in after the model has finished, because the sign-in lasts about an hour and a model run can take longer.
+- **Local runs** use the developer's own `az login`.
+
+The app registration (and each developer who exports locally) needs the **Storage Blob Data Contributor** role on the storage account. The storage account and app registration IDs are stored as secrets on the `azure-export` environment:
+
+| Secret | Value |
+| :---- | :---- |
+| `AZURE_CLIENT_ID` | Application (client) ID of the app registration |
+| `AZURE_TENANT_ID` | Directory (tenant) ID |
+| `AZURE_SUBSCRIPTION_ID` | Subscription ID |
+| `AZURE_STORAGE_ACCOUNT_URL` | `https://<account>.blob.core.windows.net` |
+
+The `FISHPASS_*` database secrets are passed to the run as before. See the [README](../README.md#azure-export) for the setup steps.
 
 ## GitHub Actions
 
@@ -40,6 +54,8 @@ Existing azure files with the same name from previous runs will be overwritten. 
 The model plan file, species parameter file and run details in `metadata.yaml` come from the run metadata table, so they are the versions used for the model run even if GitHub has changed since.
 
 The action stops with an error if the plan's output schema has no `azure_exports` or `run_metadata` table.
+
+**The output schema comes from the current plan file.** The action finds the output schema from `config/models/<plan_code>.yaml` on the branch it is run from, not from `run_metadata`; only the plan file contents written to the export come from `run_metadata`. If the plan's `output_schema` has changed since the model ran, the export looks in the new schema. It stops with an error, either because the tables are missing or because that schema's `run_metadata` is for a different plan, and it cannot find the old run. To re-export that run, run the export-only action from a branch or commit where `output_schema` still has its old value, or re-run the model.
 
 ## Azure Storage Location
 
@@ -214,7 +230,7 @@ These are exported by default, and each comes from a row in the export table:
 | [Natural barriers](#natural-barriers) | The `<output_schema>.natural_barriers_<species>` views, which are created as a part of the model processing. Each view holds the natural barriers with the columns specific to that species. See [barriers.md](./outputs/barriers.md). | species | geopackage |
 | [Streams](#streams) | The `<output_schema>.streams_<species>` views, which are created as a part of the model processing. Each view holds the stream edges with the columns specific to that species. See [streams.md](./outputs/streams.md). | species | geopackage |
 | [Ranked barriers](#ranked-barriers) | `<code>_wcrp.ranked_barriers_<species>_<lifestage>_<code>`. See [ranked_barriers.md](./outputs/ranked_barriers.md). | species/lifestage | csv |
-| [Final structures](#final-structures) | `<code>_wcrp.combined_output_table_vw`. See [combined_output_view.md](./outputs/combined_output_view.md). | run | geopackage |
+| [Structures](#structures) | `<code>_wcrp.combined_output_table_vw`. See [combined_output_view.md](./outputs/combined_output_view.md). | run | geopackage |
 | [Connectivity summary](#connectivity-summary) | `<output_schema>.watershed_summary_stats`. See [watershed_summary.md](./outputs/watershed_summary.md). | run | csv |
 
 #### Natural Barriers
@@ -229,6 +245,7 @@ Example `sql` for species `as`, reporting the `spawn` and `rear` lifestages. It 
 SELECT
     feature_id::text AS feature_id,
     feature_type,
+    stream_name_en,
     passability_status_spawn,
     passability_status_rear,
 
@@ -282,11 +299,11 @@ Notes on the example:
 - The columns are listed, not selected with `*`, because the view has two geometry columns (`geometry` and `snapped_geometry`) and a GeoPackage export must return exactly one.
 - GeoPackage has no uuid or list type, so the uuid columns are cast to text and the barrier id lists are written as text with the values separated by `|` (e.g. `id1|id2|id3`).
 - The length columns in the view depend on the lifestages reported for the species. When `spawnrear` is reported, the view has a third block of six columns with the `spawnrear_` prefix, which is added to the query.
-- `feature_id` is the barrier identifier (CABD id, gradient barrier id or new structure id), the same as `feature_id` in the ranked barriers and final structures exports and the tracking table. It is stable across model runs for CABD barriers and new structures; gradient barrier ids change whenever the gradient barriers table is recomputed. The per-run `all_barriers.id` is not in the view and is not exported.
+- `feature_id` is the barrier identifier (CABD id, gradient barrier id or new structure id), the same as `feature_id` in the ranked barriers and structures exports and the tracking table. It is stable across model runs for CABD barriers and new structures; gradient barrier ids change whenever the gradient barriers table is recomputed. The per-run `all_barriers.id` is not in the view and is not exported.
 - Only the four anthropogenic barrier id lists are exported. The view's natural barrier id lists (`downstream_natural_spawn_ids`, `downstream_natural_rear_ids`) are left out; the natural barrier counts are still exported.
-- The anthropogenic id lists hold `feature_id` values, which can be looked up in the final structures export.
+- The anthropogenic id lists hold `feature_id` values, which can be looked up in the structures export.
 - The view only holds natural barriers that snapped to the stream network.
-- The view does not have the `source`, `upstream_edge_id` or `downstream_edge_id` columns from `all_barriers`.
+- `stream_name_en` is the name of the stream edge immediately upstream of the barrier (see [barriers.md](./outputs/barriers.md)).
 
 #### Streams
 
@@ -303,6 +320,7 @@ SELECT
     strahler_order,
     effective_length,
     segment_gradient,
+    stream_name_en,
 
     -- accessibility and habitat
     spawn_accessibility,
@@ -346,10 +364,10 @@ FROM <output_schema>.streams_as
 
 Notes on the example:
 
-- GeoPackage has no uuid or list type, so `id` is cast to text and the barrier id lists are written as text with the values separated by `|`. The lists hold barrier `feature_id` values, which can be looked up in the final structures export.
+- GeoPackage has no uuid or list type, so `id` is cast to text and the barrier id lists are written as text with the values separated by `|`. The lists hold barrier `feature_id` values, which can be looked up in the structures export.
 - The weighted length columns in the view depend on the lifestages reported for the species: the `spawn_` block is only there when `spawn` is reported, and the `rear_` block only when `rear` is reported. There is no `spawnrear_` weighted length block.
 - The view only holds the stream edges that have statistics for the species, so the files for different species can have different edges.
-- The view only has some of the `streams` columns (`id`, `length`, `strahler_order`, `effective_length`, `segment_gradient` and `geometry`). The other network columns (e.g. `aoi_id`, `ef_type`, `rank`, `mainstem_id`, `graph_id`) are not in the view and so are not exported.
+- The view only has some of the `streams` columns (`id`, `length`, `strahler_order`, `effective_length`, `segment_gradient`, `stream_name_en` and `geometry`). The other network columns (e.g. `aoi_id`, `ef_type`, `rank`, `mainstem_id`, `graph_id`) are not in the view and so are not exported.
 
 #### Ranked Barriers
 
@@ -384,14 +402,14 @@ Notes on the example:
 
 - The file name leaves off the plan code that ends the table name, because every file name already starts with it.
 - CSV has no list type, so `downstr_group_ids` is written as text with the values separated by `|` (e.g. `12|15|31`). A comma is not used because it is the CSV column separator.
-- `feature_id` is `all_barriers.feature_id`, so the file joins to the final structures export and the tracking table on `feature_id`.
+- `feature_id` is `all_barriers.feature_id`, so the file joins to the structures export and the tracking table on `feature_id`.
 - The table has no geometry. All lengths and gains are in km.
 
-#### Final Structures
+#### Structures
 
 One row is added to the export table for the run. The single file holds every reporting species and lifestage:
 
-Example filename: `runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_final_structures.gpkg`
+Example filename: `runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_structures.gpkg`
 
 Example `sql` for plan code `ns`, with one reporting species, `as`, reporting the `spawn` lifestage. It reads from `<code>_wcrp.combined_output_table_vw` (see [combined_output_view.md](./outputs/combined_output_view.md)). The view has a large number of columns that depend on the plan, so the example is shortened; the real query lists every column of the view, in view order:
 
@@ -489,11 +507,28 @@ Notes on the example:
 
 The export is a separate step that only needs the database: the list of files comes from `<output_schema>.azure_exports` and the run details from `<output_schema>.run_metadata`. Both stay in the database until the next model run of that plan.
 
+The output schema itself is found from the current plan file. If the plan's `output_schema` has changed since the model ran, see the note in [New: Export-Only Action](#new-export-only-action).
+
 **When an export fails.** The export is the last step of the model run, after all the model results are committed. If it fails, the run is marked as failed so that it is noticed, but the model results are kept. Once the cause is fixed, the export can be re-run without re-running the model, using the export-only action (see [New: Export-Only Action](#new-export-only-action)).
 
 **!! Results can change after the run  !!**
-Some exports read from data that can be edited after the model run. The final structures view reads the [tracking table](./outputs/tracking_table.md), which is edited by hand, so an export run later can include edits made since the model ran. The export date/time in `metadata.yaml` shows when this may apply.
+Some exports read from data that can be edited after the model run. The structures view reads the [tracking table](./outputs/tracking_table.md), which is edited by hand, so an export run later can include edits made since the model ran. The export date/time in `metadata.yaml` shows when this may apply.
 
-## Open Questions - For Implementation
+## Local File Exports
 
-- **GitHub secret names**, and which kind of credential is used (connection string, SAS token, or service principal).
+It is possible to run the export script locally, and write the results to the local machine instead of Azure. 
+
+This is useful for testing the exports or reviewing the results without uploading them. It writes the same files as the Azure export, from the same [export table](#export-table) and [run metadata table](#model-run-metadata-table), with the same formats and file names.
+
+- **GDAL is required** (`ogr2ogr`) is required on the path to write the GeoPackages.
+- Local export is for local runs only. It is refused when running in GitHub Actions, so the GitHub actions always export to Azure.
+- Only one of the Azure and local exports can be used per run.
+- No Azure sign-in or `AZURE_STORAGE_ACCOUNT_URL` is needed. 
+- The export type and version inputs work the same way as for the Azure export.
+
+Details on running local exports are found in [README.md](../README.md). 
+
+
+## Open Questions
+
+- **Container public access under OIDC.** The export creates a missing container with anonymous blob access while signed in with the Storage Blob Data Contributor role. This has not been tested yet and may need more than that role. If it fails, either create each plan's container in the portal (public access level: Blob) or give the app registration a role that can change container settings.

@@ -39,17 +39,10 @@ the label_in_wcrp threshold) is picked up on the next full model run.
 import logging
 import sys
 
-from db import (
-	DEFAULT_CONFIG_FILE,
-	as_role,
-	get_db_roles,
-	load_config,
-	quote_ident,
-	table_columns,
-	wcrp_setting,
-)
-from model_plan import IDENTIFIER_RE
+import azure_export
+from db import as_role, quote_ident, table_column_types, table_columns
 from postprocess_views import barrier_length_fields
+from utils import IDENTIFIER_RE, REAR, SPAWN, SPAWNREAR, get_db_roles, natural_feature_types, wcrp_setting
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +117,20 @@ TRACKING_SPECIES_COLUMN_STEMS = [
 	"partial_passability",
 	"partial_passability_notes",
 ]
-# Output-name overrides for tracking columns whose raw name collides with a CABD
-# attribute, so both can coexist in the one-row-per-barrier view.
+# Output-name overrides for tracking columns: road_name/structure_type collide with a CABD
+# attribute, so both can coexist in the one-row-per-barrier view; the `$` columns are renamed
+# because some GIS tools reject or rename a `$` in a GeoPackage column name (azure_exports.md).
 TRACKING_ALIAS_OVERRIDES = {
 	"road_name": "tracking_road_name",
 	"structure_type": "tracking_structure_type",
+	"estimated_cost_$": "estimated_cost_dollars",
+	"estimated_rehabilitation_cost_$": "estimated_rehabilitation_cost_dollars",
+	"actual_project_cost_$": "actual_project_cost_dollars",
 }
+
+# Azure export of the view (azure_exports.md -- Structures).
+EXPORT_FILE_NAME = "structures"
+EXPORT_GEOMETRY_COLUMN = "snapped_geometry"
 
 # --- CABD FDW SOURCES ------------------------------------------------------------
 DAMS_FDW = "cabd_fdw.dams_view_en"
@@ -139,31 +140,13 @@ CABD_FDW_SQL_SCRIPT = "init/database/fishpass_cabd_raw_init.sql"
 
 # --- OTHER SETTINGS --------------------------------------------------------------
 # Shared settings live in config/fishpass.yaml, not here:
-#   * database_roles -- owner + grant roles for the view (db.get_db_roles)
-#   * wcrp.label_in_wcrp_rank_threshold -- per-plan overridable (db.wcrp_setting)
+#   * database_roles -- owner + grant roles for the view (utils.get_db_roles)
+#   * wcrp.label_in_wcrp_rank_threshold -- per-plan overridable (utils.wcrp_setting)
 
 
 # =================================================================================
 #  PLAN-DERIVED VALUES
 # =================================================================================
-def _load_natural_feature_types(plan, config_path=DEFAULT_CONFIG_FILE):
-	"""Feature types to EXCLUDE from the view. The plan's
-	natural_feature_types_override wins if set (model_plan already validated it);
-	otherwise read structure_classification.natural_feature_types from
-	fishpass.yaml. Values are interpolated into the view SQL, so hold them to the
-	safe identifier charset."""
-	override = plan.get("natural_feature_types_override")
-	if override is not None:
-		types = override
-	else:
-		cfg = load_config(config_path)
-		types = (cfg.get("structure_classification") or {}).get("natural_feature_types") or []
-	for t in types:
-		if not isinstance(t, str) or not IDENTIFIER_RE.match(t):
-			sys.exit(f"Invalid natural feature type (unsafe for SQL): {t!r}")
-	return list(types)
-
-
 def _species_lifecycles(plan):
 	"""{species: [lifecycle, ...]} and the sorted (species, lifecycle) pairs, from
 	the cached model_plan.expand_reporting_values() result. Species codes are
@@ -263,6 +246,7 @@ def build_view_sql(plan, natural_feature_types):
 	dm = "dm"
 	sc = "sc"
 	tt = "tt"
+	stream = "stream_segment"
 
 	select_cols = []
 
@@ -282,8 +266,8 @@ def build_view_sql(plan, natural_feature_types):
 	#    converted to km here), from the anthropogenic_barriers_<sp> views.
 	for sp in sorted(by_species):
 		bp = f"bp_{sp}"
-		select_cols.append(_col(bp, "passability_status_spawn", f"{sp}_spawn_passability"))
-		select_cols.append(_col(bp, "passability_status_rear", f"{sp}_rear_passability"))
+		select_cols.append(_col(bp, f"passability_status_{SPAWN}", f"{sp}_{SPAWN}_passability"))
+		select_cols.append(_col(bp, f"passability_status_{REAR}", f"{sp}_{REAR}_passability"))
 		for src in barrier_length_fields(by_species[sp]):
 			select_cols.append(f"{bp}.{quote_ident(src)} / 1000.0 AS {quote_ident(f'{sp}_{src}_km')}")
 
@@ -306,6 +290,8 @@ def build_view_sql(plan, natural_feature_types):
 		f"LEFT JOIN {DAMS_FDW} {dm} ON {dm}.{quote_ident(CABD_JOIN_KEY)} = {ab}.{quote_ident('feature_id')}",
 		f"LEFT JOIN {STREAM_CROSSINGS_FDW} {sc} "
 		f"ON {sc}.{quote_ident(CABD_JOIN_KEY)} = {ab}.{quote_ident('feature_id')}",
+		f"LEFT JOIN {schema_id}.{quote_ident('streams')} {stream} "
+		f"ON {stream}.{quote_ident('id')} = {ab}.{quote_ident('downstream_edge_id')}",
 		f"LEFT JOIN {wcrp_id}.{quote_ident('tracking_table_' + watershed)} {tt} "
 		f"ON {tt}.{quote_ident('feature_id')} = {ab}.{quote_ident('feature_id')}",
 	]
@@ -323,14 +309,24 @@ def build_view_sql(plan, natural_feature_types):
 			f"ON {rk}.{quote_ident('feature_id')} = {ab}.{quote_ident('feature_id')}"
 		)
 
-	# --- WHERE: exclude natural feature types (waterfalls, gradients, ...). Any
-	#     feature_type NOT in that list -- dams, stream_crossings, and new
-	#     structures like beaver dams -- is kept. ---
+	# --- WHERE: exclude natural feature types and isolated structures without
+	#     passability values for the life stages reported by this model run, as
+	#     well as features without snapped geometry. ---
+	where_conditions = []
+	where_conditions.append(f"{ab}.{quote_ident('snapped_geometry')} IS NOT NULL")
 	if natural_feature_types:
 		natural_array = ", ".join(f"'{t}'" for t in natural_feature_types)
-		where = f"WHERE {ab}.{quote_ident('feature_type')} <> ALL (ARRAY[{natural_array}]::varchar[])"
-	else:
-		where = ""
+		where_conditions.append(f"{ab}.{quote_ident('feature_type')} <> ALL (ARRAY[{natural_array}]::varchar[])")
+
+	passability_checks = set()
+	for sp, lc in pairs:
+		lifecycles = (SPAWN, REAR) if lc == SPAWNREAR else (lc,)
+		for lifecycle in lifecycles:
+			passability_checks.add(f"bp_{sp}.{quote_ident(f'passability_status_{lifecycle}')} IS NOT NULL")
+	if passability_checks:
+		statuses_present = " AND ".join(sorted(passability_checks))
+		where_conditions.append(f"({stream}.{quote_ident('is_isolated')} IS NOT TRUE OR ({statuses_present}))")
+	where = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
 
 	select_sql = ",\n    ".join(select_cols)
 	joins_sql = "\n".join(joins)
@@ -359,8 +355,7 @@ def create_combined_view(conn, cursor, plan):
 	after run_ranking (it reads the ranked tables). Uses DROP VIEW + CREATE (not
 	CREATE OR REPLACE) so the column set can change between runs (e.g. adding a
 	species)."""
-	natural_feature_types = _load_natural_feature_types(plan)
-	sql = build_view_sql(plan, natural_feature_types)
+	sql = build_view_sql(plan, natural_feature_types(plan))
 	owner = get_db_roles()["owner"]
 	view = f"{plan['code']}_wcrp.{VIEW_NAME}"
 
@@ -371,3 +366,25 @@ def create_combined_view(conn, cursor, plan):
 		cursor.execute(sql)
 		conn.commit()
 		logger.info("Combined output view %s created.", view)
+
+	# Added as the connecting user (after as_role), who owns the output schema's azure_exports.
+	columns = table_column_types(cursor, f"{plan['code']}_wcrp", VIEW_NAME)
+	azure_export.add_export(
+		cursor,
+		plan["output_schema"],
+		EXPORT_FILE_NAME,
+		structures_export_sql(plan["code"], columns),
+		"geopackage",
+	)
+	conn.commit()
+
+
+def structures_export_sql(watershed, columns):
+	"""SQL for the structures GeoPackage export: every column of the view, in view order
+	(`columns` from db.table_column_types), with uuid/enum columns cast to text, list columns as
+	|-separated text, and snapped_geometry as the one geometry column."""
+	if not columns:
+		sys.exit(f"{watershed}_wcrp.{VIEW_NAME} has no columns -- was the view created?")
+	exprs = [azure_export.catalog_column_expr(*col, geometry_column=EXPORT_GEOMETRY_COLUMN) for col in columns]
+	relation = f"{quote_ident(watershed + '_wcrp')}.{quote_ident(VIEW_NAME)}"
+	return azure_export.select_sql([e for e in exprs if e], relation)

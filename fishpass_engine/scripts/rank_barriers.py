@@ -19,9 +19,10 @@ run if it's missing (create_wcrp_tracking_table.ensure_tracking_table).
 import logging
 import sys
 
-from db import as_role, get_db_roles, quote_ident, wcrp_setting
-from model_plan import IDENTIFIER_RE
+import azure_export
+from db import as_role, quote_ident
 from postprocess_views import barrier_length_fields
+from utils import IDENTIFIER_RE, REAR, SPAWN, get_db_roles, wcrp_setting
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,8 @@ logger = logging.getLogger(__name__)
 # per (species, lifecycle) pair (see resolve_ranking_pairs).
 #
 # Shared settings live in config/fishpass.yaml, not here:
-#   * database_roles -- owner + grant roles for the ranked tables (db.get_db_roles)
-#   * wcrp.min_avg_gain_km -- per-plan overridable (db.wcrp_setting)
+#   * database_roles -- owner + grant roles for the ranked tables (utils.get_db_roles)
+#   * wcrp.min_avg_gain_km -- per-plan overridable (utils.wcrp_setting)
 
 # Rehabilitated-structure match. The tracking table's status column is a
 # controlled enum (support.tt_structure_list_status_type), so this is a strict
@@ -106,7 +107,7 @@ class RankingConfig:
 		self.roles = get_db_roles()
 
 		# Identifiers. Every schema/table name is quote_ident()-ed: plan['code']
-		# is only held to PLAN_CODE_RE, which allows a leading digit (e.g. '1ns'),
+		# is only held to utils.SAFE_NAME_RE, which allows a leading digit (e.g. '1ns'),
 		# and an unquoted 1ns_wcrp is a SQL syntax error. *_name attributes keep
 		# the RAW names for bound parameters (catalog lookups) and for building
 		# derived names (index names).
@@ -154,13 +155,13 @@ class RankingConfig:
 		self.gain_avg = "avg_gain_per_barrier_km"
 		self.gain_w_avg = "w_avg_gain_per_barrier_km"
 		# Downstream id arrays (native uuid[]).
-		self.col_downstr_ids_spawn = "downstream_anthro_spawn_ids"
-		self.col_downstr_ids_rear = "downstream_anthro_rear_ids"
+		self.col_downstr_ids_spawn = f"downstream_anthro_{SPAWN}_ids"
+		self.col_downstr_ids_rear = f"downstream_anthro_{REAR}_ids"
 		# Passability gate columns + surfaced decimal outputs.
-		self.col_passability_spawn = "passability_status_spawn"
-		self.col_passability_rear = "passability_status_rear"
-		self.out_passability_spawn = f"{self.species}_spawn_passability"
-		self.out_passability_rear = f"{self.species}_rear_passability"
+		self.col_passability_spawn = f"passability_status_{SPAWN}"
+		self.col_passability_rear = f"passability_status_{REAR}"
+		self.out_passability_spawn = f"{self.species}_{SPAWN}_passability"
+		self.out_passability_rear = f"{self.species}_{REAR}_passability"
 
 
 # =================================================================================
@@ -171,9 +172,9 @@ def _passability_predicate(c):
 	# spawn-impassable, rear keeps rear-impassable, and spawnrear keeps a barrier
 	# impassable for either spawn or rear. A barrier fully passable ('1') for the
 	# ranked lifestage(s) is dropped (unless folded back in as rehabilitated).
-	if c.lifecycle == "spawn":
+	if c.lifecycle == SPAWN:
 		return f"b.{c.col_passability_spawn}::text <> '1'"
-	if c.lifecycle == "rear":
+	if c.lifecycle == REAR:
 		return f"b.{c.col_passability_rear}::text <> '1'"
 	return f"(b.{c.col_passability_spawn}::text <> '1' OR b.{c.col_passability_rear}::text <> '1')"
 
@@ -587,6 +588,7 @@ def run_ranking(conn, cursor, plan):
 	# the connecting user is only a granted member of the role. as_role() rolls
 	# back + RESETs afterwards (even on error) because run_model.py shares this
 	# connection across phases, so the role change must not leak past ranking.
+	configs = []
 	with as_role(conn, cursor, owner):
 		probe = RankingConfig(plan, *pairs[0])
 		validate_tracking_feature_ids(cursor, probe)
@@ -598,3 +600,40 @@ def run_ranking(conn, cursor, plan):
 				logger.info("  -> %s", label)
 				cursor.execute(fn(c))
 				conn.commit()
+			configs.append(c)
+
+	# Added as the connecting user (after as_role), who owns the output schema's azure_exports.
+	for c in configs:
+		azure_export.add_export(
+			cursor, c.schema, f"ranked_barriers_{c.species}_{c.lifecycle}", ranked_barriers_export_sql(c), "csv"
+		)
+	conn.commit()
+
+
+def ranked_barriers_export_sql(c):
+	"""SQL for the ranked_barriers_<species>_<lifecycle> CSV export: the ranked table's columns
+	(see sql_finalize_output_table), with downstr_group_ids as |-separated text."""
+	columns = [
+		azure_export.column(name)
+		for name in (
+			"feature_id",
+			"group_id",
+			"num_barriers_group",
+			c.gain_total,
+			c.gain_w_total,
+			c.gain_avg,
+			c.gain_w_avg,
+		)
+	]
+	columns.append(azure_export.pipe_list("downstr_group_ids"))
+	columns += [
+		azure_export.column(name)
+		for name in (
+			"rank_w_avg_gain_tiered",
+			f"rank_w_total_upstr_{c.lifecycle}_hab",
+			"rank_combined",
+			c.out_passability_spawn,
+			c.out_passability_rear,
+		)
+	]
+	return azure_export.select_sql(columns, c.ranked)

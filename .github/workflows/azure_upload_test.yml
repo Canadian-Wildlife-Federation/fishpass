@@ -1,0 +1,120 @@
+name: Azure Upload Test
+
+# Checks the Azure export setup end to end, using the same sign-in (OIDC) and the same container /
+# upload code as the export (fishpass_engine/scripts/azure_export.py):
+#   1. sign in to Azure
+#   2. create the container with anonymous blob access (if it doesn't exist)
+#   3. set the container's access level to public (blob)
+#   4. upload a small test file
+#   5. download it anonymously (no sign-in) to prove it is public
+#   6. optionally delete the container again
+on:
+  workflow_dispatch:
+    inputs:
+      container:
+        description: "Test container name (lowercase letters, numbers and -)"
+        required: true
+        default: "fishpass-upload-test"
+      delete_container:
+        description: "Delete the test container at the end"
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  upload_test:
+    runs-on: ubuntu-latest
+    # The Azure federated credential trusts this environment.
+    environment: azure-export
+    env:
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: fishpass_engine/scripts
+      AZURE_STORAGE_ACCOUNT_URL: ${{ secrets.AZURE_STORAGE_ACCOUNT_URL }}
+      CONTAINER: ${{ inputs.container }}
+      TEST_BLOB: upload-test/hello.txt
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install -r fishpass_engine/scripts/requirements.txt
+
+      - name: Check settings
+        run: |
+          if [ -z "$AZURE_STORAGE_ACCOUNT_URL" ]; then
+            echo "::error::The AZURE_STORAGE_ACCOUNT_URL secret is not set on the azure-export environment."
+            exit 1
+          fi
+          if ! [[ "$CONTAINER" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || [[ "$CONTAINER" == *--* ]]; then
+            echo "::error::Invalid container name: $CONTAINER"
+            exit 1
+          fi
+
+      - name: 1. Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
+
+      - name: 2-4. Create container, set public, upload file
+        run: |
+          python - <<'EOF'
+          import os, tempfile
+          from pathlib import Path
+
+          import azure_export
+
+          name, blob = os.environ["CONTAINER"], os.environ["TEST_BLOB"]
+          service = azure_export.get_blob_service_client()
+
+          print(f"2. Creating container {name} with anonymous blob access (if missing)...")
+          container = azure_export.get_container(service, name)
+          print("   ok")
+
+          print("3. Setting the container access level to public (blob)...")
+          container.set_container_access_policy(signed_identifiers={}, public_access="blob")
+          level = container.get_container_properties().public_access
+          print(f"   access level is now: {level}")
+          if level != "blob":
+              raise SystemExit(f"Expected public access 'blob', got {level!r}")
+
+          print(f"4. Uploading {blob}...")
+          path = Path(tempfile.gettempdir()) / "hello.txt"
+          path.write_text(f"FishPass upload test, run {os.environ.get('GITHUB_RUN_ID', 'local')}\n")
+          azure_export.upload_file(container, path, blob, "text/plain")
+          print(f"   ok: {container.url}/{blob}")
+          EOF
+
+      - name: 5. Download anonymously
+        run: |
+          url="${AZURE_STORAGE_ACCOUNT_URL%/}/$CONTAINER/$TEST_BLOB"
+          echo "Downloading $url without signing in..."
+          if ! curl --fail --silent --show-error "$url"; then
+            echo "::error::Anonymous download failed. Check that 'Allow Blob anonymous access' is enabled on the storage account."
+            exit 1
+          fi
+          echo "Public download works: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 6. Delete test container
+        if: always() && inputs.delete_container
+        run: |
+          python - <<'EOF'
+          import os
+          import azure_export
+
+          name = os.environ["CONTAINER"]
+          service = azure_export.get_blob_service_client()
+          try:
+              service.delete_container(name)
+              print(f"Deleted container {name}")
+          except Exception as e:
+              print(f"Could not delete container {name}: {e}")
+          EOF

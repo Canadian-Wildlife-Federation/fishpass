@@ -6,6 +6,7 @@ import json
 
 
 from db import quote_ident
+from utils import SNAPPED_GEOMETRY_SRID
 
 
 def write_barrier_stat_tables(cursor, output_schema, barrier_rows):
@@ -40,7 +41,7 @@ def create_and_populate_gradient_barriers_cache(cursor, output_schema, srid):
 			feature_id uuid PRIMARY KEY,
 			species_passability_value jsonb NOT NULL,
 			geometry geometry(point, {srid}) NOT NULL,
-			snapped_geometry geometry(point, 4617)
+			snapped_geometry geometry(point, {SNAPPED_GEOMETRY_SRID})
 		);
 	""")
 	cursor.execute(f"""

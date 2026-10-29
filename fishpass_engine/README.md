@@ -2,7 +2,7 @@
 
 Runs a model plan end-to-end: loads a stream network, barriers, and habitat data for the plan's
 AOI, applies structure/habitat updates, snaps everything onto the network, and computes
-per-species/lifecycle accessibility, habitat, and upstream-length statistics. Every run then
+per-species/lifecycle accessibility, habitat, and upstream-length statistics and optionally export the results to Azure storage account. Every run then
 ranks barriers per species/lifecycle and rebuilds the plan's WCRP combined output view. See
 [fishpass_docs.md](docs/fishpass_docs.md) for the full requirements and design
 decisions behind this tool -- in particular its **Outstanding Decisions** section, which lists
@@ -38,6 +38,7 @@ Run `fishpass_user.sql` first, since the other scripts create objects for the `f
   `natural_feature_types_override`) falls back to `anthropogenic`. Also holds the
   `database_roles` (owner/grant roles for WCRP objects) and `wcrp` defaults
   (`label_in_wcrp_rank_threshold`, `min_avg_gain_km` -- both overridable per plan).
+* If exporting to Azure, the Azure OIDC connection setup must be configured to allow the GitHub Actions write to Azure.
 
 ## Warnings
 
@@ -67,22 +68,96 @@ avoids this.
 to stay under this, but a single feature type that's dense across a huge AOI selection could
 still need a smaller `chunk_size` than the default -- see `cabd_client.py`.
 
-## Running - Via GitHub Action
+## Running - GitHub Actions
 
-Run the **FishPass Modelling Engine** GitHub Action (`workflow_dispatch`, manual trigger),
-supplying the `plan_code` input. Database connection details come from GitHub Actions secrets
-(`FISHPASS_HOST`, `FISHPASS_PORT`, `FISHPASS_DBNAME`, `FISHPASS_USER`, `FISHPASS_PASSWORD`) --
+### FishPass Modelling Engine
+
+Run the **FishPass Modelling Engine** GitHub Action (`workflow_dispatch`, manual trigger). This action has the following parameters:
+  * **plan_code** - the plan to execute
+  * **export_to_azure** - true/false if you want the model results exported to a (publicly accessible) Azure blob storage container
+  * **export_type** - versioned or unversioned (affects the Azure export filenames)
+  * **version** - applies to versioned exports only, the version number for the exported results (affects the Azure export filenames)
+
+Database & Azure connection details come from GitHub Actions secrets
+(`FISHPASS_HOST`, `FISHPASS_PORT`, `FISHPASS_DBNAME`, `FISHPASS_USER`, `FISHPASS_PASSWORD`, `AZURE_STORAGE_ACCOUNT_URL`) --
 never stored in a config file or logged.
 
-There is no separate setup step for a new plan: the first model run creates the plan's WCRP
-tracking table. The run's summary page shows whether the tracking table was created or skipped.
 
-## Local Use
+### FishPass Azure Export
+
+The **FishPass Azure Export** action exports the last model run of a plan again without re-running the model. Use it after a failed export, or to publish a reviewed unversioned run as a versioned one. Files with the same name are overwritten.
+
+This action takes the plan_code, export_type, and version parameters as described above for the **FishPass Modelling Engine** action.
+
+The output schema comes from the current plan file. The export-only action finds the output schema from the plan file on the branch it runs from. If the plan's output_schema has changed since the model ran, the export won't find the run and will stop with an error.
+
+For further details see [Azure Exports](../fishpass_engine/docs/azure_exports.md).
+
+## Running - Locally
+
+### Warnings
+
+If including export to Azure in local run the local exports write to the real public Azure storage account.
+
+### Prerequisite
+
+If you want to run the model locally and export the results to Azure you need ensure the following conditions are met before you run the scripts:
+
+1. **Azure Permissions** - Your own Azure account needs the 'Storage Blob Data Contributor' role on the storage account. Owner or Contributor alone is not enough. It can take
+   5-10 minutes to take effect.
+2. **Supporting Tools** - You need the following tools installed locally
+   * The Azure CLI
+   * GDAL, so that `ogr2ogr` is on PATH. The export needs it to write the GeoPackage files.
+3. **Azure Login** - Before running you must sign in to Azure via the CLI using `az login`.
+
 
 ### Running Locally
 
+**1. Configure** 
+
+For ALL runs, configure the run script. Set the various environment variables in the run script (`run.ps1` / `run.sh`)
+
+**2. Run Scripts** 
+
+**Run Model & Export (to Azure)**
+
+powershell
+```
+.\fishpass_engine\run.ps1 myplan -ExportToAzure -ExportType unversioned
+```
+```
+.\fishpass_engine\run.ps1 myplan -ExportToAzure -ExportType versioned -ExportVersion v1.2
+```
+
+bash
+```
+./fishpass_engine/run.sh myplan --export-to-azure --export-type unversioned
+```
+
+```
+./fishpass_engine/run.sh myplan --export-to-azure --export-type versioned --export-version v1.2
+```
+
+**Run Model & Export (to Local Directory)**
+
+Instead of Azure, the export files can be written to a local directory, using the same folder layout and
+file names as in Azure (`<directory>/fishpass-<plan>/runs/<type>/<folder>/`). This needs GDAL (`ogr2ogr`)
+but no Azure login. It is for local runs only and is refused in GitHub Actions.
+
+powershell
+```
+.\fishpass_engine\run.ps1 myplan -ExportToLocal -LocalExportDirectory C:\temp\exports -ExportType unversioned
+```
+
+bash
+```
+./fishpass_engine/run.sh myplan --export-to-local --local-export-directory /tmp/exports --export-type unversioned
+```
+
+**Run Model Only**
+
 ```powershell
-.\fishpass_engine\run_local.ps1 -PlanCode myplan
+.\fishpass_engine\run.ps1 -PlanCode myplan
 ```
 
 Or directly:
@@ -91,6 +166,16 @@ Or directly:
 export FISHPASS_HOST=... FISHPASS_PORT=... FISHPASS_DBNAME=... FISHPASS_USER=... FISHPASS_PASSWORD=...
 pip install -r fishpass_engine/scripts/requirements.txt
 python fishpass_engine/scripts/run_model.py myplan
+```
+
+**Run Export Only (to Azure)**
+```
+python fishpass_engine/scripts/azure_export.py myplan --export-to-azure --export-type versioned --export-version v1.0
+```
+
+**Run Export Only (to Local Directory)**
+```
+python fishpass_engine/scripts/azure_export.py myplan --export-to-local --export-type unversioned  --local-export-directory C:\temp\exports
 ```
 
 ### Running Test Cases
@@ -108,9 +193,10 @@ python -m unittest discover -s fishpass_engine/tests -p "test_*.py" -v
 
 | Module | Phase |
 | :---- | :---- |
+| `run_model.py` | Entry point to fishpass modelling script. |
 | `model_plan.py` | Load/validate `config/models/<plan_code>.yaml` |
 | `load_stream_network.py` | Initialize + Load Stream Network |
-| `cabd_client.py`, `load_structures.py` | Load Structures steps 1-4, 6-7 (`load_structures.load_natural_feature_types` loads `config/fishpass.yaml`) |
+| `cabd_client.py`, `load_structures.py` | Load Structures steps 1-4, 6-7 (the natural feature types come from `utils.natural_feature_types`) |
 | `network_snap.py`, `snap_structures.py` | Load Structures step 5 (snapping) |
 | `load_habitat.py` | Process Habitat |
 | `network_break.py` | Compute Statistics step 2 (network breaking) |
@@ -124,5 +210,11 @@ python -m unittest discover -s fishpass_engine/tests -p "test_*.py" -v
 | `postprocess_views.py` | Create Barrier Views (also the single source of the barrier length-field names, `barrier_length_fields`) |
 | `rank_barriers.py` | Rank Barriers (`<code>_wcrp.ranked_barriers_<species>_<lifecycle>_<code>`) |
 | `create_combined_view.py` | Create Combined View (`<code>_wcrp.combined_output_table_vw`) |
+| `azure_export.py` | Azure export: the `azure_exports` / `run_metadata` tables, and the export itself (also the export-only CLI) |
 | `create_wcrp_tracking_table.py` | Pre-run WCRP setup: `sync_wcrp_tracking_enums` (syncs the `support.tt_*` enums from `config/fishpass.yaml`) and `ensure_tracking_table` (creates the tracking table if missing) |
-| `db.py` | Shared DB connection/identifier-quoting helpers, `config/fishpass.yaml` loaders (`get_db_roles`, `wcrp_setting`), `as_role` role switching |
+| `db.py` | Shared DB connection/identifier-quoting helpers, `as_role` role switching, catalog checks |
+| `utils.py` | Shared non-DB helpers: repo paths, shared constants (`IDENTIFIER_RE`, `SAFE_NAME_RE`, `SNAPPED_GEOMETRY_SRID`), `setup_logging`, `config/fishpass.yaml` loaders (`get_db_roles`, `wcrp_setting`, `natural_feature_types`), run details, GitHub Actions job summary |
+
+
+
+

@@ -14,33 +14,12 @@ matter for a reason not captured here.
 import json
 import logging
 import sys
-from pathlib import Path
-
-import yaml
 
 from cabd_client import CUSTOM_FEATURE_TYPE_FIELDS, fetch_feature_type, map_passability
 from db import quote_ident, quote_qualified_ident
-from model_plan import IDENTIFIER_RE
+from utils import IDENTIFIER_RE, LIFESTAGES, REAR, SNAPPED_GEOMETRY_SRID, SPAWN, natural_feature_types
 
 logger = logging.getLogger(__name__)
-
-STRUCTURE_LIFESTAGES = ("rear", "spawn")
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CLASSIFICATION_CONFIG = REPO_ROOT / "config" / "fishpass.yaml"
-
-
-def load_natural_feature_types(config_path=DEFAULT_CLASSIFICATION_CONFIG):
-	"""Classify Structures. Returns the set of feature_type values classified as
-	'natural' -- any feature_type not in this set is classified as 'anthropogenic' (see
-	classify_structures). See config/fishpass.yaml."""
-
-	if not Path(config_path).is_file():
-		sys.exit(f"FishPass config file not found: {config_path}")
-	with open(config_path) as f:
-		data = yaml.safe_load(f) or {}
-	raw = (data.get("structure_classification") or {}).get("natural_feature_types") or []
-	return set(raw)
 
 
 def create_cabd_table(cursor, output_schema, feature_type, srid):
@@ -79,7 +58,7 @@ def create_structures_table(cursor, output_schema, srid):
 			source varchar NOT NULL CHECK (source IN ('cabd', 'new_structure', 'gradient_barriers')),
 			structure_type varchar CHECK (structure_type IN ('natural', 'anthropogenic')),
 			geometry geometry(point, {srid}) NOT NULL,
-			snapped_geometry geometry(point, 4617),
+			snapped_geometry geometry(point, {SNAPPED_GEOMETRY_SRID}),
 			upstream_edge_id uuid,
 			downstream_edge_id uuid,
 			network_vertex_x double precision,
@@ -107,8 +86,8 @@ def explode_new_structure_passability(passability_status_rear, passability_statu
 	no entry in the relevant column defaults to impassable (0) -- unlike
 	explode_structure_update, there is no pre-existing all_barriers row for a brand-new
 	structure to fall back to; this call builds the initial insert."""
-	result = {f"{sp}_{lc}": 0 for sp in target_species for lc in STRUCTURE_LIFESTAGES}
-	for lifestage, status in (("rear", passability_status_rear), ("spawn", passability_status_spawn)):
+	result = {f"{sp}_{lc}": 0 for sp in target_species for lc in LIFESTAGES}
+	for lifestage, status in ((REAR, passability_status_rear), (SPAWN, passability_status_spawn)):
 		if not status:
 			continue
 		_require_passability_object(status, lifestage, row_id)
@@ -125,7 +104,7 @@ def explode_structure_update(passability_status_rear, passability_status_spawn, 
 	in apply_structure_updates leaves the structure's existing default (from CABD or
 	support.new_structures) untouched."""
 	result = {}
-	for lifestage, status in (("rear", passability_status_rear), ("spawn", passability_status_spawn)):
+	for lifestage, status in ((REAR, passability_status_rear), (SPAWN, passability_status_spawn)):
 		if not status:
 			continue
 		_require_passability_object(status, lifestage, row_id)
@@ -150,7 +129,7 @@ def build_cabd_row(feature, target_species, custom_fields=()):
 	passability_status_code = props.get("passability_status_code")
 	lon, lat = feature["geometry"]["coordinates"][:2]
 	value = map_passability(passability_status_code)
-	species_passability_value = {f"{sp}_{lc}": value for sp in target_species for lc in STRUCTURE_LIFESTAGES}
+	species_passability_value = {f"{sp}_{lc}": value for sp in target_species for lc in LIFESTAGES}
 	custom_values = tuple(props.get(field["name"]) for field in custom_fields)
 	return (cabd_id, json.dumps(species_passability_value), passability_status_code, *custom_values, lon, lat)
 
@@ -244,7 +223,7 @@ def load_new_structures(cursor, output_schema, plan, srid):
 	table_ident = quote_qualified_ident(plan["structure_new_table"])
 	cursor.execute(
 		f"""
-		SELECT new_structure_id, feature_type, passability_status_rear, passability_status_spawn, ST_AsBinary(point)
+		SELECT new_structure_id, feature_type, passability_status_{REAR}, passability_status_{SPAWN}, ST_AsBinary(point)
 		FROM {table_ident}
 		WHERE feature_type = ANY(%s)
 		  AND ('all' = ANY(update_scope) OR %s = ANY(update_scope))
@@ -294,7 +273,7 @@ def apply_structure_updates(cursor, output_schema, plan):
 	table_ident = quote_qualified_ident(plan["structure_update_table"])
 	cursor.execute(
 		f"""
-		SELECT feature_id, passability_status_rear, passability_status_spawn
+		SELECT feature_id, passability_status_{REAR}, passability_status_{SPAWN}
 		FROM {table_ident}
 		WHERE ('all' = ANY(update_scope) OR %s = ANY(update_scope))
 		ORDER BY (update_type = 'local_override'), update_date ASC
@@ -406,9 +385,6 @@ def load_structures(conn, cursor, plan, srid):
 		gb_count = add_gradient_barriers(cursor, output_schema, plan, srid)
 		logger.info("Added %d gradient barrier(s).", gb_count)
 
-	natural_feature_types = plan["natural_feature_types_override"]
-	if natural_feature_types is None:
-		natural_feature_types = load_natural_feature_types()
-	classify_structures(cursor, output_schema, natural_feature_types)
+	classify_structures(cursor, output_schema, natural_feature_types(plan))
 
 	conn.commit()

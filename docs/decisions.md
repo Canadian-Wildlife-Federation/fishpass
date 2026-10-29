@@ -37,3 +37,7 @@ So accessibility is defined as:
 ## Upstream and Downstream Barrier IDs
 
 For upstream and downstream barrier counts and IDs, only the counts are produced for the combined `spawnrear` lifestage, not a full list of IDs. In the `spawnrear` counts, a barrier that is impassable for both spawning and rearing is only counted once.
+
+## Combined Output View
+- Structures on non-isolated segments are always kept
+- Structures on isolated segments (is_isolated on their downstream edge) are kept only if they have passability values for every reported species and lifestage. This is intentional to retain information about any structures that are on isolated segments but that have been assessed or otherwise prioritized (e.g., where the stream network does not reflect reality, where an isolated segment should be connected to the rest of the network, or where an isolated segment represents an important area of habitat)

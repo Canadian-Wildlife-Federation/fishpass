@@ -17,10 +17,11 @@ try:
 except ImportError:
 	sys.modules["yaml"] = types.ModuleType("yaml")
 
-import model_plan as mp  # noqa: E402
 import create_combined_view as ccv  # noqa: E402
-import postprocess_views as pv  # noqa: E402
 import db  # noqa: E402
+import model_plan as mp  # noqa: E402
+import postprocess_views as pv  # noqa: E402
+import utils  # noqa: E402
 
 
 def write_plan(tmp_dir, code, extra_yaml=""):
@@ -42,49 +43,6 @@ structure_types:
 {extra_yaml}
 """)
 	return Path(tmp_dir)
-
-
-class LoadNaturalFeatureTypesTests(unittest.TestCase):
-	def test_override_takes_precedence(self):
-		"""_load_natural_feature_types uses plan override if set."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(
-				tmp, "myplan", extra_yaml="natural_feature_types_override:\n  - waterfall\n  - gradient"
-			)
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		types_list = ccv._load_natural_feature_types(plan)
-		self.assertEqual(types_list, ["waterfall", "gradient"])
-
-	def test_empty_override_allowed(self):
-		"""_load_natural_feature_types allows empty override list."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(tmp, "myplan", extra_yaml="natural_feature_types_override: []")
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		types_list = ccv._load_natural_feature_types(plan)
-		self.assertEqual(types_list, [])
-
-	def test_invalid_identifier_in_override_exits(self):
-		"""_load_natural_feature_types exits if override has unsafe identifiers."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(
-				tmp, "myplan", extra_yaml="natural_feature_types_override:\n  - 'invalid; drop table'"
-			)
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		with self.assertRaises(SystemExit):
-			ccv._load_natural_feature_types(plan)
-
-	def test_fallback_to_fishpass_yaml_when_no_override(self):
-		"""_load_natural_feature_types reads config when no override."""
-		with tempfile.TemporaryDirectory() as tmp:
-			models_dir = write_plan(tmp, "myplan")
-			plan = mp.load_model_plan("myplan", models_dir=models_dir)
-
-		types_list = ccv._load_natural_feature_types(plan)
-		# Should return a list (may be empty if config file doesn't set anything)
-		self.assertIsInstance(types_list, list)
 
 
 class SpeciesLifecyclesTests(unittest.TestCase):
@@ -173,6 +131,28 @@ class BuildViewSqlTests(unittest.TestCase):
 		self.assertNotIn("chn_rear_upstream_length_km", sql)
 		self.assertNotIn("bp_sth", sql)
 
+	def test_isolated_structures_require_reported_lifecycle_passability(self):
+		"""Isolated structures need non-NULL passability for reported life stages only."""
+		for lifecycle in ("spawn", "rear"):
+			with self.subTest(lifecycle=lifecycle):
+				sql = self._sql(reporting=f"chn_{lifecycle}")
+				where = sql.rsplit("WHERE ", 1)[1].split(";", 1)[0]
+				self.assertIn('stream_segment."is_isolated" IS NOT TRUE', where)
+				self.assertIn('ON stream_segment."id" = ab."downstream_edge_id"', sql)
+				self.assertIn(f'bp_chn."passability_status_{lifecycle}" IS NOT NULL', where)
+				other_lifecycle = "rear" if lifecycle == "spawn" else "spawn"
+				self.assertNotIn(f'bp_chn."passability_status_{other_lifecycle}" IS NOT NULL', where)
+		combined_sql = self._sql(reporting="chn_spawnrear")
+		combined_where = combined_sql.rsplit("WHERE ", 1)[1].split(";", 1)[0]
+		self.assertIn('bp_chn."passability_status_spawn" IS NOT NULL', combined_where)
+		self.assertIn('bp_chn."passability_status_rear" IS NOT NULL', combined_where)
+
+	def test_combined_view_requires_snapped_geometry(self):
+		"""Features without snapped geometry are excluded from the combined view."""
+		sql = self._sql()
+		where = sql.rsplit("WHERE ", 1)[1].split(";", 1)[0]
+		self.assertIn('ab."snapped_geometry" IS NOT NULL', where)
+
 	def test_label_threshold_default_and_override(self):
 		"""label_in_wcrp uses the fishpass.yaml default (30) unless the plan overrides."""
 		self.assertIn("rank_combined <= 30::numeric", self._sql())
@@ -182,7 +162,7 @@ class BuildViewSqlTests(unittest.TestCase):
 
 	def test_roles_from_config(self):
 		"""Owner/grants on the view match database_roles in fishpass.yaml, quoted."""
-		roles = db.get_db_roles()
+		roles = utils.get_db_roles()
 		plan = self._plan()
 		sql = ccv.build_view_sql(plan, ["waterfalls", "gradients"])
 		view = f"{db.quote_ident(plan['code'] + '_wcrp')}.{db.quote_ident(ccv.VIEW_NAME)}"
