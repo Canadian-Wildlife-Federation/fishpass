@@ -4,7 +4,13 @@
 
 The single WCRP reporting view, with one row per actionable barrier. Rebuilt by `create_combined_view.py` at the end of every model run, using `DROP VIEW` then `CREATE`, so the column set can change between runs (e.g. after adding a species). It lives in the persistent `<code>_wcrp` schema, but anything that depends on it is dropped (`CASCADE`) when it's rebuilt. The view isn't rebuilt outside a model run, so changes such as new CABD attributes or a new label threshold appear after the next model run.
 
-**Row set:** every row of `<output_schema>.all_barriers` whose `feature_type` is NOT a natural feature type (`natural_feature_types_override` from the plan, otherwise `structure_classification.natural_feature_types` from `config/fishpass.yaml` -- e.g. waterfalls, gradients). This keeps dams, stream crossings, and new structures such as beaver dams. It also includes barriers that could not be snapped to the stream network; their passability, length, and ranking columns are NULL.
+**Row set:**
+
+Every row of <output_schema>.all_barriers that:
+- has a feature_type that is NOT a natural feature type (natural_feature_types_override from the plan, otherwise structure_classification.natural_feature_types from config/fishpass.yaml, e.g. waterfalls, gradients). This keeps dams, stream crossings, and new structures such as beaver dams;
+- was snapped to the stream network (snapped_geometry is not NULL);
+- structures on non-isolated segments are always kept; structures on isolated segments (is_isolated on their downstream edge) are kept only if they have passability values for every reported species and lifestage. This is intentional to retain information about any structures that are on isolated segments but that have been assessed or otherwise prioritized (e.g., where the stream network does not reflect reality, where an isolated segment should be connected to the rest of the network, or where an isolated segment represents an important area of habitat)
+
 
 **Sources and join keys:**
 
