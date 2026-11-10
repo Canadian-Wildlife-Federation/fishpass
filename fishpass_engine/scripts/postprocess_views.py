@@ -290,9 +290,9 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
 		disconnected_{REAR}_km,
 		connected_{SPAWNREAR}_km,
 		disconnected_{SPAWNREAR}_km,
-		ROUND((disconnected_{SPAWN}_km / NULLIF(total_{SPAWN}_km, 0))::numeric, 2) AS pct_disconnected_{SPAWN},
-		ROUND((disconnected_{REAR}_km / NULLIF(total_{REAR}_km, 0))::numeric, 2) AS pct_disconnected_{REAR},
-		ROUND((disconnected_{SPAWNREAR}_km / NULLIF(total_{SPAWNREAR}_km, 0))::numeric, 2) AS pct_disconnected_{SPAWNREAR}
+		ROUND((connected_{SPAWN}_km / NULLIF(total_{SPAWN}_km, 0))::numeric, 2) AS pct_connected_{SPAWN},
+		ROUND((connected_{REAR}_km / NULLIF(total_{REAR}_km, 0))::numeric, 2) AS pct_connected_{REAR},
+		ROUND((connected_{SPAWNREAR}_km / NULLIF(total_{SPAWNREAR}_km, 0))::numeric, 2) AS pct_connected_{SPAWNREAR}
 	FROM aggregated;	
     """
 
@@ -341,7 +341,7 @@ EXPORT_SUMMARY_FIELDS = (
 	"total_km",
 	*(f"total_{lc}_km" for lc in EXPORT_LIFECYCLE_ORDER),
 	*(f"{kind}_{lc}_km" for lc in EXPORT_LIFECYCLE_ORDER for kind in ("connected", "disconnected")),
-	*(f"pct_disconnected_{lc}" for lc in EXPORT_LIFECYCLE_ORDER),
+	*(f"pct_connected_{lc}" for lc in EXPORT_LIFECYCLE_ORDER),
 )
 
 
