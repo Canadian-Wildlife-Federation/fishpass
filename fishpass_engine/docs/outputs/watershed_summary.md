@@ -17,8 +17,8 @@ A single materialized view, with one row per reporting species, summarizing tota
 | disconnected\_rear\_km | double | Sum of `rear_weighted_disconnected_length` across all edges, in km. |
 | connected\_spawnrear\_km | double | Sum, per edge, of the lesser of its spawn/rear weighted connected length, in km. |
 | disconnected\_spawnrear\_km | double | Sum, per edge, of the lesser of its spawn/rear weighted disconnected length, in km. |
-| pct\_disconnected\_spawn | numeric | `disconnected_spawn_km / total_spawn_km`, rounded to 2 decimals. NULL if total\_spawn\_km is 0. |
-| pct\_disconnected\_rear | numeric | `disconnected_rear_km / total_rear_km`, rounded to 2 decimals. NULL if total\_rear\_km is 0. |
-| pct\_disconnected\_spawnrear | numeric | `disconnected_spawnrear_km / total_spawnrear_km`, rounded to 2 decimals. NULL if total\_spawnrear\_km is 0. |
+| pct\_connected\_spawn | numeric | `connected_spawn_km / total_spawn_km`, rounded to 2 decimals. NULL if total\_spawn\_km is 0. |
+| pct\_connected\_rear | numeric | `connected_rear_km / total_rear_km`, rounded to 2 decimals. NULL if total\_rear\_km is 0. |
+| pct\_connected\_spawnrear | numeric | `connected_spawnrear_km / total_spawnrear_km`, rounded to 2 decimals. NULL if total\_spawnrear\_km is 0. |
 
 A species with no entries in `reporting_species_lifecycles` produces no row. If no species are configured at all, the view is skipped entirely (a warning is logged).

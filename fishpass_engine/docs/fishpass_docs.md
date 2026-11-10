@@ -352,7 +352,7 @@ Once statistics are populated, create the reporting views over `all_barriers`/`s
 ### Summary Statistics
 
 A single `watershed_summary_stats` materialized view is created: one row per reporting
-species with total/connected/disconnected habitat length (km) and percent-disconnected figures,
+species with total/connected/disconnected habitat length (km) and percent-connected figures,
 computed directly from `streams.species_stats` in one pass over the network (see
 [outputs/watershed_summary.md](./outputs/watershed_summary.md)).
 
