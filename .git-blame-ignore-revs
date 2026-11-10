@@ -4,3 +4,6 @@
 
 # style: apply ruff format and lint fixes across the repo
 7e5825494dcad6b9f1f3a6b63ff1a72e4a90bab9
+
+# style: apply ruff format to fishpass_qa.py
+3a6edcf18fe7c5cba4e7df9e3713a8fb7a89592b
