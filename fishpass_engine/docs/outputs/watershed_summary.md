@@ -21,4 +21,6 @@ A single materialized view, with one row per reporting species, summarizing tota
 | pct\_connected\_rear | numeric | `connected_rear_km / total_rear_km`, rounded to 2 decimals. NULL if total\_rear\_km is 0. |
 | pct\_connected\_spawnrear | numeric | `connected_spawnrear_km / total_spawnrear_km`, rounded to 2 decimals. NULL if total\_spawnrear\_km is 0. |
 
+**Note:** the `pct_connected_*` fields are fractions between 0 and 1, not percentages (e.g. 0.75 means 75% connected).
+
 A species with no entries in `reporting_species_lifecycles` produces no row. If no species are configured at all, the view is skipped entirely (a warning is logged).
