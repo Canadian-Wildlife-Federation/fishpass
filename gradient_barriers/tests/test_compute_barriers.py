@@ -76,22 +76,33 @@ class FakeConnection:
 		self.commit_count += 1
 
 
-def run_compute_barriers(rows, species_params, aoi_ids=None):
+def run_compute_barriers(rows, species_params, aoi_ids=None, barrier_offset_m=0.0):
 	"""Run compute_barriers against a FakeConnection(rows), with insert_barriers patched to
 	record each batch it's called with instead of touching a database.
+
+	barrier_offset_m defaults to 0 here (barrier placed at the measured vertex itself) so the
+	gradient-focused tests can assert barrier locations directly against fixture vertices;
+	BarrierOffsetTests covers non-zero offsets.
 
 	Returns (total, batches) -- total is compute_barriers' own returned count, batches is the
 	list of barrier-lists passed to each insert_barriers call, in call order. cursor/srid are
 	arbitrary placeholders since the real insert_barriers is patched out."""
 	batches = []
 	with mock.patch.object(cb, "insert_barriers", side_effect=lambda cursor, srid, batch: batches.append(list(batch))):
-		total = cb.compute_barriers(FakeConnection(rows), "cursor", "srid", species_params, aoi_ids=aoi_ids)
+		total = cb.compute_barriers(
+			FakeConnection(rows),
+			"cursor",
+			"srid",
+			species_params,
+			aoi_ids=aoi_ids,
+			barrier_offset_m=barrier_offset_m,
+		)
 	return total, batches
 
 
-def flat_barriers(rows, species_params, aoi_ids=None):
+def flat_barriers(rows, species_params, aoi_ids=None, barrier_offset_m=0.0):
 	"""Convenience for tests that just want the full ordered barrier list, not per-batch detail."""
-	total, batches = run_compute_barriers(rows, species_params, aoi_ids=aoi_ids)
+	total, batches = run_compute_barriers(rows, species_params, aoi_ids=aoi_ids, barrier_offset_m=barrier_offset_m)
 	barriers = [b for batch in batches for b in batch]
 	assert len(barriers) == total
 	return barriers
@@ -172,13 +183,13 @@ class ComputeBarriersTests(unittest.TestCase):
 
 		self.assertEqual(len(barriers), 2)
 
-		i_lon, i_lat, i_gradient, i_species = barriers[0]
+		i_lon, i_lat, i_gradient, i_species, _ds_lon, _ds_lat = barriers[0]
 		self.assertAlmostEqual(i_lon, i[0], places=9)
 		self.assertAlmostEqual(i_lat, i[1], places=9)
 		self.assertAlmostEqual(i_gradient, 0.0525)
 		self.assertEqual(i_species, ["chn_rear"])
 
-		a_lon, a_lat, a_gradient, a_species = barriers[1]
+		a_lon, a_lat, a_gradient, a_species, _ds_lon, _ds_lat = barriers[1]
 		self.assertAlmostEqual(a_lon, a[0], places=9)
 		self.assertAlmostEqual(a_lat, a[1], places=9)
 		self.assertAlmostEqual(a_gradient, 0.005)
@@ -229,7 +240,7 @@ class ComputeBarriersTests(unittest.TestCase):
 		# once `up` is walked. boundary's own 100m mark (target 160m) is never reached -- the
 		# mainstem only reaches 105m -- so it's left in the window and discarded.
 		self.assertEqual(len(barriers), 1)
-		lon, lat, gradient, species = barriers[0]
+		lon, lat, gradient, species, _ds_lon, _ds_lat = barriers[0]
 		self.assertAlmostEqual(lon, i2[0], places=9)
 		self.assertAlmostEqual(lat, i2[1], places=9)
 		expected_interp_elev = 6.0 + (100.0 - 60.0) / (105.0 - 60.0) * (7.0 - 6.0)
@@ -250,7 +261,7 @@ class ComputeBarriersTests(unittest.TestCase):
 		barriers = flat_barriers(rows, LOW_THRESHOLDS)
 
 		self.assertEqual(len(barriers), 1)
-		lon, lat, gradient, species = barriers[0]
+		lon, lat, gradient, species, _ds_lon, _ds_lat = barriers[0]
 		self.assertAlmostEqual(lon, a[0], places=9)
 		self.assertAlmostEqual(lat, a[1], places=9)
 		self.assertAlmostEqual(gradient, 0.10)
@@ -276,6 +287,114 @@ class ComputeBarriersTests(unittest.TestCase):
 		self.assertAlmostEqual(barriers[0][2], 0.0525)
 		self.assertAlmostEqual(barriers[1][0], a[0], places=9)
 		self.assertAlmostEqual(barriers[1][2], 0.005)
+
+
+class BarrierOffsetTests(unittest.TestCase):
+	"""Barriers are placed barrier_offset_m upstream of the measured vertex, along the mainstem.
+	Fixtures all run due north from BASE_LAT, so a point d metres upstream is at
+	BASE_LAT + lat_offset_deg(d)."""
+
+	def assert_placed(self, barrier, measured_m, offset_m):
+		"""The barrier point is offset_m upstream of the measured vertex at measured_m, and the
+		downstream point is the measured vertex itself."""
+		lon, lat, _gradient, _species, ds_lon, ds_lat = barrier
+		self.assertAlmostEqual(lon, BASE_LON, places=9)
+		self.assertAlmostEqual(lat, BASE_LAT + lat_offset_deg(measured_m + offset_m), places=9)
+		self.assertAlmostEqual(ds_lon, BASE_LON, places=9)
+		self.assertAlmostEqual(ds_lat, BASE_LAT + lat_offset_deg(measured_m), places=9)
+
+	def test_offset_100_places_barrier_at_upstream_end_of_window(self):
+		# worked example: i@0m and A@50m resolve; their barriers land at 100m and 150m, both
+		# interpolated within the A(50m)->B(200m) segment
+		i = point_at(0.0, 0.0)
+		a = point_at(50.0, 5.0)
+		b = point_at(200.0, 5.75)
+		rows = [edge_row("worked-e1", "1", 1, [b, a, i])]
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS, barrier_offset_m=100.0)
+
+		self.assertEqual(len(barriers), 2)
+		self.assert_placed(barriers[0], 0.0, 100.0)
+		self.assert_placed(barriers[1], 50.0, 100.0)
+		# gradients are unaffected by where the barrier is placed
+		self.assertAlmostEqual(barriers[0][2], 0.0525)
+		self.assertAlmostEqual(barriers[1][2], 0.005)
+
+	def test_offset_crosses_edge_boundary(self):
+		# edge1 0-60m, edge2 60-105m; i2's barrier at 80m lands on edge2
+		i2 = point_at(0.0, 0.0)
+		boundary = point_at(60.0, 6.0)
+		up = point_at(105.0, 7.0)
+		rows = [
+			edge_row("multi-e1", "multi", 1, [boundary, i2]),
+			edge_row("multi-e2", "multi", 2, [up, boundary]),
+		]
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS, barrier_offset_m=80.0)
+
+		self.assertEqual(len(barriers), 1)
+		self.assert_placed(barriers[0], 0.0, 80.0)
+
+	def test_offset_lands_beyond_invalid_elevation_vertex(self):
+		# the invalid-elevation vertex @50m still contributes geometry: A's barrier at 75m is
+		# interpolated between it and B
+		a = point_at(0.0, 0.0)
+		invalid = point_at(50.0, cb.NO_DATA)
+		b = point_at(150.0, 15.0)
+		rows = [edge_row("nodata-e1", "nodata", 1, [b, invalid, a])]
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS, barrier_offset_m=75.0)
+
+		self.assertEqual(len(barriers), 1)
+		self.assert_placed(barriers[0], 0.0, 75.0)
+		self.assertAlmostEqual(barriers[0][2], 0.10)
+
+	def test_offset_with_dense_vertices_and_many_barriers(self):
+		# vertices every 10m, all steep -- exercises path pruning across many resolves
+		n_vertices = 30
+		vertices = [point_at(i * 10.0, i * 10.0 * 0.5) for i in range(n_vertices)]
+		rows = [edge_row("dense", "dense", 1, list(reversed(vertices)))]
+
+		barriers = flat_barriers(rows, LOW_THRESHOLDS, barrier_offset_m=35.0)
+
+		# vertices 0..18 have a full 100m upstream with margin; vertex 19's target lands exactly on
+		# the last vertex (290m) so whether it resolves is a float tie -- don't depend on it
+		self.assertIn(len(barriers), (19, 20))
+		for k, barrier in enumerate(barriers):
+			self.assert_placed(barrier, k * 10.0, 35.0)
+
+	def test_default_offset_is_100(self):
+		self.assertEqual(cb.DEFAULT_BARRIER_OFFSET_M, 100.0)
+		i = point_at(0.0, 0.0)
+		a = point_at(50.0, 5.0)
+		b = point_at(200.0, 5.75)
+		rows = [edge_row("worked-e1", "1", 1, [b, a, i])]
+		with mock.patch.object(cb, "insert_barriers", side_effect=lambda c, s, batch: captured.extend(batch)):
+			captured = []
+			cb.compute_barriers(FakeConnection(rows), "cursor", "srid", LOW_THRESHOLDS)
+		self.assert_placed(captured[0], 0.0, 100.0)
+
+
+class PointAlongTests(unittest.TestCase):
+	def test_exact_vertex_hit(self):
+		path = [(0.0, 0.0, 0.0), (10.0, 1.0, 2.0), (20.0, 3.0, 4.0)]
+		self.assertEqual(cb.point_along(path, 10.0), (1.0, 2.0))
+		self.assertEqual(cb.point_along(path, 0.0), (0.0, 0.0))
+		self.assertEqual(cb.point_along(path, 20.0), (3.0, 4.0))
+
+	def test_interpolates_within_segment(self):
+		path = [(0.0, 0.0, 0.0), (10.0, 1.0, 2.0), (20.0, 3.0, 4.0)]
+		lon, lat = cb.point_along(path, 15.0)
+		self.assertAlmostEqual(lon, 2.0)
+		self.assertAlmostEqual(lat, 3.0)
+
+	def test_zero_length_segment(self):
+		path = [(0.0, 0.0, 0.0), (10.0, 1.0, 1.0), (10.0, 1.0, 1.0), (20.0, 2.0, 2.0)]
+		self.assertEqual(cb.point_along(path, 10.0), (1.0, 1.0))
+
+	def test_clamps_beyond_path_end(self):
+		path = [(0.0, 0.0, 0.0), (10.0, 1.0, 2.0)]
+		self.assertEqual(cb.point_along(path, 10.0 + 1e-9), (1.0, 2.0))
 
 
 class AoiScopedComputeBarriersTests(unittest.TestCase):
@@ -307,7 +426,7 @@ class AoiScopedComputeBarriersTests(unittest.TestCase):
 		barriers = flat_barriers(rows, LOW_THRESHOLDS, aoi_ids=["aoi-target"])
 
 		self.assertEqual(len(barriers), 3)
-		for (lon, lat, gradient, species), expected_point in zip(barriers, [p0, p1, p3]):
+		for (lon, lat, gradient, species, _ds_lon, _ds_lat), expected_point in zip(barriers, [p0, p1, p3]):
 			self.assertAlmostEqual(lon, expected_point[0], places=9)
 			self.assertAlmostEqual(lat, expected_point[1], places=9)
 			self.assertAlmostEqual(gradient, 0.10)
@@ -411,7 +530,7 @@ class RealWorldMultiSpeciesTests(unittest.TestCase):
 		]
 
 		self.assertEqual(len(barriers), len(expected))
-		for (lon, lat, gradient, species), (exp_lon, exp_lat, exp_gradient, exp_species) in zip(barriers, expected):
+		for (lon, lat, gradient, species, _ds_lon, _ds_lat), (exp_lon, exp_lat, exp_gradient, exp_species) in zip(barriers, expected):
 			self.assertAlmostEqual(lon, exp_lon, places=9)
 			self.assertAlmostEqual(lat, exp_lat, places=9)
 			self.assertAlmostEqual(gradient, exp_gradient)
@@ -513,6 +632,83 @@ class LoadAoiConfigTests(unittest.TestCase):
 			config_path.write_text("workunits: ['08MF001; DROP TABLE support.gradient_barriers;']\n")
 			with self.assertRaises(SystemExit):
 				cb.load_aoi_config(config_path)
+
+
+class LoadBarrierOffsetTests(unittest.TestCase):
+	def _config(self, tmp, text):
+		config_path = Path(tmp) / "gradient_barriers.yaml"
+		config_path.write_text(text)
+		return config_path
+
+	def test_missing_file_uses_default(self):
+		self.assertEqual(cb.load_barrier_offset(Path("/no/such/gradient_barriers.yaml")), 100.0)
+
+	def test_missing_key_uses_default(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			self.assertEqual(cb.load_barrier_offset(self._config(tmp, "workunits: []\n")), 100.0)
+
+	def test_value_is_read(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			self.assertEqual(cb.load_barrier_offset(self._config(tmp, "barrier_offset_m: 25\n")), 25.0)
+			self.assertEqual(cb.load_barrier_offset(self._config(tmp, "barrier_offset_m: 0\n")), 0.0)
+
+	def test_invalid_values_exit(self):
+		for text in ("barrier_offset_m: 150\n", "barrier_offset_m: -1\n", "barrier_offset_m: ten\n", "barrier_offset_m: true\n"):
+			with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+				with self.assertRaises(SystemExit):
+					cb.load_barrier_offset(self._config(tmp, text))
+
+
+class InsertMetadataRecordTests(unittest.TestCase):
+	def test_records_barrier_offset(self):
+		cursor = mock.Mock()
+		cb.insert_metadata_record(cursor, ["all"], [{"code": "chn"}], 40.0)
+		sql, params = cursor.execute.call_args_list[-1].args
+		self.assertIn("barrier_offset_m", sql)
+		self.assertEqual(params[0], ["all"])
+		self.assertEqual(params[2], 40.0)
+		self.assertIn("ADD COLUMN IF NOT EXISTS barrier_offset_m", cursor.execute.call_args_list[0].args[0])
+
+
+class DownstreamColumnsSqlTests(unittest.TestCase):
+	def test_insert_writes_barrier_and_downstream_points(self):
+		cursor = mock.Mock()
+		cb.insert_barriers(cursor, 4617, [(1.0, 2.0, 0.2, ["chn_rear"], 3.0, 4.0)])
+		sql, rows = cursor.executemany.call_args.args
+		self.assertIn("downstream_geometry", sql)
+		self.assertEqual(rows, [(1.0, 2.0, 4617, 3.0, 4.0, 4617, 0.2, ["chn_rear"], ["chn_rear"])])
+
+	def test_assign_workunits_sets_both_columns(self):
+		cursor = mock.Mock()
+		cb.assign_workunits(cursor)
+		sqls = [call.args[0] for call in cursor.execute.call_args_list]
+		self.assertEqual(len(sqls), 2)
+		self.assertIn("SET workunit", sqls[0])
+		self.assertIn("ST_Intersects(b.geometry,", sqls[0])
+		self.assertIn("SET downstream_workunit", sqls[1])
+		self.assertIn("ST_Intersects(b.downstream_geometry,", sqls[1])
+
+	def test_scoped_clear_selects_by_downstream_workunit(self):
+		cursor = mock.Mock()
+		with (
+			mock.patch.object(cb, "table_exists", return_value=True),
+			mock.patch.object(cb, "column_exists", return_value=True),
+			mock.patch.object(cb, "next_archive_name_postfix", return_value="20261112_1"),
+		):
+			cb.backup_and_clear_aoi_rows(cursor, 4617, ["08MF001"])
+		sqls = [call.args[0] for call in cursor.execute.call_args_list]
+		self.assertTrue(all("downstream_workunit &&" in sql for sql in sqls))
+		self.assertTrue(any(sql.startswith("DELETE") for sql in sqls))
+
+	def test_scoped_clear_exits_on_table_without_downstream_columns(self):
+		cursor = mock.Mock()
+		with (
+			mock.patch.object(cb, "table_exists", return_value=True),
+			mock.patch.object(cb, "column_exists", return_value=False),
+		):
+			with self.assertRaises(SystemExit):
+				cb.backup_and_clear_aoi_rows(cursor, 4617, ["08MF001"])
+		cursor.execute.assert_not_called()
 
 
 class FetchEdgesAoiFilterTests(unittest.TestCase):

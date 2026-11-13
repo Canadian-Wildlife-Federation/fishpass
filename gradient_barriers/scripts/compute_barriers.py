@@ -31,6 +31,9 @@ DEFAULT_CONFIG_FILE = REPO_ROOT / "config" / "gradient_barriers.yaml"
 SHORT_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 UPSTREAM_DISTANCE_M = 100.0  # the distance to travel upstream to determine gradient
+# default distance upstream of the measured vertex (within the UPSTREAM_DISTANCE_M gradient window)
+# at which to place the barrier point; overridden by barrier_offset_m in the config file
+DEFAULT_BARRIER_OFFSET_M = 100.0
 EARTH_RADIUS_M = 6_371_008.8  # mean Earth radius (IUGG); chyf_raw geometries are geographic (deg)
 NO_DATA = -9999  # sentinel used in chyf_raw for a missing smoothed-elevation (M ordinate) value
 
@@ -55,18 +58,37 @@ def parse_args():
 	return parser.parse_args()
 
 
+def _read_config(config_path):
+	"""Return the parsed config file as a dict ({} if config_path doesn't exist or is empty)."""
+	if not config_path.is_file():
+		return {}
+	with open(config_path) as f:
+		return yaml.safe_load(f) or {}
+
+
+def load_barrier_offset(config_path):
+	"""Return the barrier_offset_m setting from config_path: the distance (m) upstream of the
+	measured vertex, within its UPSTREAM_DISTANCE_M gradient window, at which to place the
+	barrier point. Returns DEFAULT_BARRIER_OFFSET_M if the file or setting is missing."""
+
+	value = _read_config(config_path).get("barrier_offset_m")
+	if value is None:
+		return DEFAULT_BARRIER_OFFSET_M
+	if isinstance(value, bool) or not isinstance(value, (int, float)) or not (0 <= value <= UPSTREAM_DISTANCE_M):
+		sys.exit(
+			f"Invalid barrier_offset_m in {config_path}: "
+			f"expected a number between 0 and {UPSTREAM_DISTANCE_M:g} (or blank), got {value!r}"
+		)
+	return float(value)
+
+
 def load_aoi_config(config_path):
 	"""Return the list of chyf_raw.aoi.short_name values to scope this run to, from the
 	workunits setting in config_path.
 	Returns [] (meaning: recompute the entire network) if config_path doesn't exist or
 	workunits is empty."""
 
-	if not config_path.is_file():
-		return []
-
-	with open(config_path) as f:
-		data = yaml.safe_load(f) or {}
-	short_names = data.get("workunits") or []
+	short_names = _read_config(config_path).get("workunits") or []
 
 	invalid = [s for s in short_names if not SHORT_NAME_RE.match(s)]
 	if invalid:
@@ -186,6 +208,8 @@ def create_tables(cursor, srid):
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			geometry geometry(point, {srid}) NOT NULL,
 			workunit varchar[],
+			downstream_geometry geometry(point, {srid}) NOT NULL,
+			downstream_workunit varchar[],
 			gradient double precision NOT NULL,
 			computed_species varchar[] NOT NULL,
 			actual_species varchar[] NOT NULL,
@@ -193,12 +217,17 @@ def create_tables(cursor, srid):
 		);
 	""")
 	cursor.execute("CREATE INDEX gradient_barriers_geometry_idx ON support.gradient_barriers USING gist (geometry);")
+	cursor.execute(
+		"CREATE INDEX gradient_barriers_downstream_geometry_idx "
+		"ON support.gradient_barriers USING gist (downstream_geometry);"
+	)
 
 	cursor.execute("""
 		CREATE TABLE support.gradient_barriers_metadata (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			aoi varchar[] NOT NULL,
 			species_params jsonb NOT NULL,
+			barrier_offset_m double precision,
 			run_at timestamptz NOT NULL DEFAULT now()
 		);
 	""")
@@ -219,6 +248,11 @@ def prepare_tables(cursor, srid):
 		archive_name = f"gradient_barriers_archive_{archive_postfix}"
 		cursor.execute(f"ALTER TABLE support.gradient_barriers RENAME TO {archive_name};")
 		cursor.execute(f"ALTER INDEX support.gradient_barriers_geometry_idx RENAME TO {archive_name}_geometry_idx;")
+		# tables created before downstream_geometry existed won't have this index
+		cursor.execute(
+			f"ALTER INDEX IF EXISTS support.gradient_barriers_downstream_geometry_idx "
+			f"RENAME TO {archive_name}_downstream_geometry_idx;"
+		)
 		logger.info("Archived existing table to support.%s", archive_name)
 
 	if table_exists(cursor, "gradient_barriers_metadata"):
@@ -232,36 +266,62 @@ def prepare_tables(cursor, srid):
 	create_tables(cursor, srid)
 
 
-def insert_metadata_record(cursor, aoi, species_params):
+def insert_metadata_record(cursor, aoi, species_params, barrier_offset_m):
 	"""Append a row to support.gradient_barriers_metadata recording this run's AOI scope
-	({'all'} for a full run, or the reprocessed short_names for a partial run) and the fish
-	species parameters that were in effect."""
+	({'all'} for a full run, or the reprocessed short_names for a partial run), the fish
+	species parameters and the barrier_offset_m that were in effect."""
 
+	# metadata tables created before barrier_offset_m existed won't have the column yet
 	cursor.execute(
-		"INSERT INTO support.gradient_barriers_metadata (aoi, species_params) VALUES (%s, %s::jsonb)",
-		(aoi, json.dumps(species_params)),
+		"ALTER TABLE support.gradient_barriers_metadata ADD COLUMN IF NOT EXISTS barrier_offset_m double precision"
 	)
+	cursor.execute(
+		"INSERT INTO support.gradient_barriers_metadata (aoi, species_params, barrier_offset_m) "
+		"VALUES (%s, %s::jsonb, %s)",
+		(aoi, json.dumps(species_params), barrier_offset_m),
+	)
+
+
+def column_exists(cursor, table_name, column_name):
+	cursor.execute(
+		"SELECT 1 FROM information_schema.columns "
+		"WHERE table_schema = 'support' AND table_name = %s AND column_name = %s",
+		(table_name, column_name),
+	)
+	return cursor.fetchone() is not None
 
 
 def backup_and_clear_aoi_rows(cursor, srid, short_names):
 	"""Back up the existing support.gradient_barriers rows for short_names to a timestamped
-	audit table, then delete them from the live table, ahead of a scoped recompute."""
+	audit table, then delete them from the live table, ahead of a scoped recompute.
+
+	Rows are selected by downstream_workunit (the workunit of the vertex the gradient was measured
+	from), not workunit (where the barrier point sits, up to barrier_offset_m further upstream),
+	because a scoped run recreates barriers based on the measured vertex's edge -- so a barrier is
+	deleted by the same scoped run that recreates it, even if it was placed across a workunit
+	boundary."""
 
 	if not table_exists(cursor, "gradient_barriers"):
 		logger.info("support.gradient_barriers does not exist yet -- creating it.")
 		create_tables(cursor, srid)
 		return
 
+	if not column_exists(cursor, "gradient_barriers", "downstream_workunit"):
+		sys.exit(
+			"support.gradient_barriers predates the downstream_geometry/downstream_workunit columns, "
+			"so it can't be safely reprocessed per AOI. Run a full (unscoped) run first."
+		)
+
 	backup_name = next_archive_name_postfix(cursor, "gradient_barriers_aoi_backup")
 	backup_name = f"gradient_barriers_aoi_backup_{backup_name}"
 
 	cursor.execute(
 		f"CREATE TABLE support.{backup_name} AS "
-		f"SELECT *, now() AS archived_at FROM support.gradient_barriers WHERE workunit && %s::varchar[]",
+		f"SELECT *, now() AS archived_at FROM support.gradient_barriers WHERE downstream_workunit && %s::varchar[]",
 		(short_names,),
 	)
 	cursor.execute(
-		"DELETE FROM support.gradient_barriers WHERE workunit && %s::varchar[]",
+		"DELETE FROM support.gradient_barriers WHERE downstream_workunit && %s::varchar[]",
 		(short_names,),
 	)
 	logger.info(
@@ -342,7 +402,42 @@ def flag_species(gradient, species_params):
 	]
 
 
-def resolve_vertex(window, prev, cum_dist, elevation, lon, lat, species_params, in_scope):
+def point_along(path, target_dist):
+	"""Return the (lon, lat) of the point at cumulative distance target_dist along `path`, a
+	sequence of (cum_dist, lon, lat) walked vertices in increasing cum_dist order, linearly
+	interpolated between the two vertices whose segment contains it.
+
+	target_dist is clamped to path's extent, which absorbs float round-off when the target
+	lands exactly on the first or last vertex."""
+	first_dist, first_lon, first_lat = path[0]
+	if target_dist <= first_dist:
+		return first_lon, first_lat
+	prev_dist, prev_lon, prev_lat = first_dist, first_lon, first_lat
+	for dist, lon, lat in path:
+		if dist >= target_dist:
+			if dist == prev_dist:
+				return lon, lat
+			frac = (target_dist - prev_dist) / (dist - prev_dist)
+			return prev_lon + frac * (lon - prev_lon), prev_lat + frac * (lat - prev_lat)
+		prev_dist, prev_lon, prev_lat = dist, lon, lat
+	return prev_lon, prev_lat
+
+
+def prune_path(path, window):
+	"""Drop vertices from the front of `path` that no pending `window` vertex can still need to
+	place a barrier: every future barrier target is >= window[0]'s cum_dist, so only the last
+	path vertex at or before that distance (and everything after it) has to be kept. With an
+	empty window, only the most recent vertex is kept."""
+	if not window:
+		while len(path) > 1:
+			path.popleft()
+		return
+	oldest_pending_dist = window[0][0]
+	while len(path) >= 2 and path[1][0] <= oldest_pending_dist:
+		path.popleft()
+
+
+def resolve_vertex(window, prev, cum_dist, elevation, lon, lat, species_params, in_scope, path, barrier_offset_m):
 	"""Append a newly-walked vertex to `window` (mutated in place), then pop and resolve any
 	vertices whose point >= UPSTREAM_DISTANCE_M upstream has now been reached.
 
@@ -362,9 +457,17 @@ def resolve_vertex(window, prev, cum_dist, elevation, lon, lat, species_params, 
 	unbounded through a long out-of-scope stretch of a mainstem), it just never produces a
 	barrier.
 
-	Returns the list of (lon, lat, gradient, computed_species) barrier tuples produced by this
-	vertex (usually 0 or 1, but more than one queued vertex can resolve off the same newly-
-	arrived vertex if they're closely spaced).
+	Returns the list of (lon, lat, gradient, computed_species, downstream_lon, downstream_lat)
+	barrier tuples produced by this vertex (usually 0 or 1, but more than one queued vertex can
+	resolve off the same newly-arrived vertex if they're closely spaced). lon/lat is the placed
+	barrier point; downstream_lon/downstream_lat is the measured vertex itself.
+
+	A barrier isn't placed at the resolved vertex itself but barrier_offset_m further upstream
+	along the mainstem (interpolated on `path`, which must already include this newly-walked
+	vertex), so a barrier measured from a tributary's confluence vertex sits on the tributary
+	rather than on the confluence shared with the receiving stream. Since the vertex only
+	resolves once cum_dist is >= UPSTREAM_DISTANCE_M past it, and barrier_offset_m <=
+	UPSTREAM_DISTANCE_M, that point is always within the walked path.
 	"""
 	window.append((cum_dist, elevation, lon, lat, in_scope))
 
@@ -380,11 +483,12 @@ def resolve_vertex(window, prev, cum_dist, elevation, lon, lat, species_params, 
 			continue
 		computed_species = flag_species(gradient, species_params)
 		if computed_species:
-			barriers.append((i_lon, i_lat, gradient, computed_species))
+			b_lon, b_lat = point_along(path, i_dist + barrier_offset_m)
+			barriers.append((b_lon, b_lat, gradient, computed_species, i_lon, i_lat))
 	return barriers
 
 
-def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
+def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None, barrier_offset_m=DEFAULT_BARRIER_OFFSET_M):
 	"""Walk every mainstem in chyf_raw.flowpath in a single pass -- for each vertex (in
 	downstream -> upstream order), compute its gradient as soon as its upstream point comes
 	into view, check it against every species/lifestage threshold immediately, and cache it
@@ -403,7 +507,8 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 	Vertices whose smoothed elevation is missing (the NO_DATA sentinel, or NaN) are skipped: they
 	never become a barrier and never become the interpolation reference (`prev`), but distance
 	still accumulates through them and the last valid vertex remains the interpolation reference
-	until another valid vertex is walked -- see resolve_vertex.
+	until another valid vertex is walked -- see resolve_vertex. Their position is still recorded in
+	`path` though, since a barrier placed barrier_offset_m upstream can land beyond one.
 	"""
 	aoi_id_set = set(aoi_ids) if aoi_ids is not None else None
 	edges = fetch_edges(conn, aoi_ids=aoi_ids)
@@ -416,11 +521,13 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 	running_total = 0.0
 	prev = None  # (cum_dist, elevation) of the vertex immediately before the one just walked
 	window = deque()  # (cum_dist, elevation, lon, lat, in_scope) vertices awaiting an upstream match
+	path = deque()  # (cum_dist, lon, lat) recently walked vertices, for placing barriers -- see prune_path
 
 	try:
 		for _edge_id, mainstem_id, mainstem_seq, edge_aoi_id, wkb in edges:
 			if mainstem_id != current_mainstem:
 				window.clear()  # vertices left waiting had no upstream point on this mainstem
+				path.clear()
 				running_total = 0.0
 				prev = None
 				current_mainstem = mainstem_id
@@ -445,10 +552,15 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 					prev_lon, prev_lat, _ = vertices[i - 1]
 					running_total += haversine_m(prev_lon, prev_lat, lon, lat)
 				cum_dist = running_total
+				path.append((cum_dist, lon, lat))
 				if math.isnan(m) or m == NO_DATA:
 					invalid_elevation_count += 1
+					prune_path(path, window)
 					continue
-				barriers.extend(resolve_vertex(window, prev, cum_dist, m, lon, lat, species_params, in_scope))
+				barriers.extend(
+					resolve_vertex(window, prev, cum_dist, m, lon, lat, species_params, in_scope, path, barrier_offset_m)
+				)
+				prune_path(path, window)
 				prev = (cum_dist, m)
 				if len(barriers) >= BARRIER_CACHE_SIZE:
 					insert_barriers(cursor, srid, barriers)
@@ -471,35 +583,37 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None):
 
 def insert_barriers(cursor, srid, barriers):
 	rows = [
-		(lon, lat, srid, gradient, computed_species, computed_species)
-		for lon, lat, gradient, computed_species in barriers
+		(lon, lat, srid, ds_lon, ds_lat, srid, gradient, computed_species, computed_species)
+		for lon, lat, gradient, computed_species, ds_lon, ds_lat in barriers
 	]
 
 	cursor.executemany(
 		"""
 		INSERT INTO support.gradient_barriers
-			(geometry, gradient, computed_species, actual_species)
-		VALUES (ST_SetSRID(ST_MakePoint(%s, %s), %s), %s, %s, %s)
+			(geometry, downstream_geometry, gradient, computed_species, actual_species)
+		VALUES (ST_SetSRID(ST_MakePoint(%s, %s), %s), ST_SetSRID(ST_MakePoint(%s, %s), %s), %s, %s, %s)
 		""",
 		rows,
 	)
 
 
 def assign_workunits(cursor):
-	"""Spatially assign `workunit` to every row that doesn't have one yet."""
+	"""Spatially assign `workunit` (from the barrier point, `geometry`) and `downstream_workunit`
+	(from the measured vertex, `downstream_geometry`) to every row that doesn't have them yet."""
 
-	cursor.execute("""
-		UPDATE support.gradient_barriers b
-		SET workunit = matched.short_names
-		FROM (
-			SELECT b.id, array_agg(DISTINCT a.short_name) AS short_names
-			FROM support.gradient_barriers b
-			JOIN chyf_raw.aoi a ON ST_Intersects(b.geometry, a.geometry)
-			WHERE b.workunit IS NULL
-			GROUP BY b.id
-		) AS matched
-		WHERE b.id = matched.id;
-	""")
+	for workunit_col, geometry_col in (("workunit", "geometry"), ("downstream_workunit", "downstream_geometry")):
+		cursor.execute(f"""
+			UPDATE support.gradient_barriers b
+			SET {workunit_col} = matched.short_names
+			FROM (
+				SELECT b.id, array_agg(DISTINCT a.short_name) AS short_names
+				FROM support.gradient_barriers b
+				JOIN chyf_raw.aoi a ON ST_Intersects(b.{geometry_col}, a.geometry)
+				WHERE b.{workunit_col} IS NULL
+				GROUP BY b.id
+			) AS matched
+			WHERE b.id = matched.id;
+		""")
 
 
 def format_elapsed(seconds):
@@ -520,6 +634,8 @@ def main():
 	require_env()
 	species_params = load_species_parameters(args.species_params)
 	short_names = load_aoi_config(args.config)
+	barrier_offset_m = load_barrier_offset(args.config)
+	logger.info("Placing barriers %gm upstream of the measured vertex.", barrier_offset_m)
 
 	conn = db_connect()
 	try:
@@ -531,16 +647,23 @@ def main():
 				aois = resolve_aois(cursor, short_names)
 				backup_and_clear_aoi_rows(cursor, srid, short_names)
 				conn.commit()
-				count = compute_barriers(conn, cursor, srid, species_params, aoi_ids=[a["id"] for a in aois])
+				count = compute_barriers(
+					conn,
+					cursor,
+					srid,
+					species_params,
+					aoi_ids=[a["id"] for a in aois],
+					barrier_offset_m=barrier_offset_m,
+				)
 				if not table_exists(cursor, "gradient_barriers_metadata"):
 					logger.info("gradient_barriers_metadata table does not exist - metadata will not be updated")
 				else:
-					insert_metadata_record(cursor, short_names, species_params)
+					insert_metadata_record(cursor, short_names, species_params, barrier_offset_m)
 			else:
 				prepare_tables(cursor, srid)
 				conn.commit()
-				count = compute_barriers(conn, cursor, srid, species_params)
-				insert_metadata_record(cursor, ["all"], species_params)
+				count = compute_barriers(conn, cursor, srid, species_params, barrier_offset_m=barrier_offset_m)
+				insert_metadata_record(cursor, ["all"], species_params, barrier_offset_m)
 
 			logger.info("Computed and inserted %d barrier point(s).", count)
 			if count:
