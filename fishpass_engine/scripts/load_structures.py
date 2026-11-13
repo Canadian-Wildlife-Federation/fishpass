@@ -63,6 +63,7 @@ def create_structures_table(cursor, output_schema, srid):
 			downstream_edge_id uuid,
 			network_vertex_x double precision,
 			network_vertex_y double precision,
+			upstream_stream_length double precision,
 			species_stats jsonb
 		);
 	""")

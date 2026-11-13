@@ -59,6 +59,9 @@ class CreateNaturalAnthropogenicViewsTests(unittest.TestCase):
 		self.assertNotIn("cabd_waterfalls", sql_anthro)
 		self.assertNotIn("fall_name_en", sql_anthro)
 		self.assertNotIn("fall_height_m", sql_anthro)
+		# upstream_stream_length is on the natural view only.
+		self.assertIn("ab.downstream_edge_id, ab.upstream_stream_length,", sql_natural)
+		self.assertNotIn("upstream_stream_length", sql_anthro)
 
 	def test_natural_view_has_null_waterfall_columns_without_waterfalls(self):
 		cursor = FakeCursor()
@@ -199,6 +202,20 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 			"(ab.species_stats->'ae'->>'rear_upstream_length')::double precision AS rear_upstream_length", sql_anthro_ae
 		)
 		self.assertNotIn("spawn_upstream_length", sql_anthro_ae)
+
+	def test_new_upstream_length_columns_on_natural_views_only(self):
+		cursor = FakeCursor()
+		pv.create_species_barrier_views(cursor, "model_test", [("as", "rear")])
+		sql_natural = next(sql for sql, _ in cursor.executed if '"model_test"."natural_barriers_as"' in sql)
+		sql_anthro = next(sql for sql, _ in cursor.executed if '"model_test"."anthropogenic_barriers_as"' in sql)
+
+		self.assertIn("ab.downstream_edge_id, ab.upstream_stream_length,", sql_natural)
+		# Both lifestages, even though only rear is reported.
+		for lc in ("spawn", "rear"):
+			field = f"{lc}_upstream_below_gradient_threshold_length"
+			self.assertIn(f"(ab.species_stats->'as'->>'{field}')::double precision AS {field}", sql_natural)
+		self.assertNotIn("upstream_stream_length", sql_anthro)
+		self.assertNotIn("below_gradient_threshold", sql_anthro)
 
 	def test_rejects_unsafe_species_code(self):
 		cursor = FakeCursor()

@@ -366,6 +366,32 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		self.assertEqual(route_measures["E1"], (8.0, 18.0))
 		self.assertEqual(route_measures["E2"], (0.0, 20.0))  # tributary mainstem, resets at its own mouth
 
+	def test_new_upstream_lengths_at_confluence_use_raw_length(self):
+		plan, species_params = self._plan_and_species_params()
+		edges = self._edges()
+		# Zero E2's effective_length: the new stats sum raw length, so E2 still counts.
+		edges[1]["effective_length"] = 0.0
+		barriers = [
+			{
+				"id": "b1",
+				"feature_id": "feature-b1",
+				"edge_id": "E3",
+				"upstream_edge_id": None,  # confluence
+				"species_passability_value": {"es_rear": 1, "es_spawn": 1},
+				"structure_type": "natural",
+			}
+		]
+
+		_edge_stats, barrier_rows, _route_measures = gc.process_component(1, edges, barriers, [], plan, species_params)
+
+		row = barrier_rows[0]
+		self.assertEqual(row["upstream_stream_length"], 10.0 + 20.0)
+		# No accessibility thresholds in these params -> no limit.
+		self.assertEqual(row["stats"]["es"]["spawn_upstream_below_gradient_threshold_length"], 30.0)
+		self.assertEqual(row["stats"]["es"]["rear_upstream_below_gradient_threshold_length"], 30.0)
+		# The existing length fields still use effective_length (and are None at a confluence).
+		self.assertIsNone(row["stats"]["es"]["rear_upstream_length"])
+
 	def test_natural_spawn_barrier_blocks_upstream_spawn_accessibility_only(self):
 		plan, species_params = self._plan_and_species_params()
 		# edge_id="E3" sits at the E1/E2 confluence, so upstream_edge_id is ambiguous/None here
@@ -501,6 +527,9 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 				"stream_order_1_spawning_weight": 0.25,
 				"stream_order_2_rearing_weight": 0.75,
 				"stream_order_2_spawning_weight": 0.25,
+				# E1 (9.0) is over both; E2 (6.0) is exactly the spawn threshold, over rear's.
+				"accessibility_gradient_spawning_max": 6.0,
+				"accessibility_gradient_rearing_max": 1.0,
 			}
 		}
 		return plan, species_params
@@ -641,6 +670,18 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		self.assertAlmostEqual(stats["spawnrear_weighted_disconnected_upstream_length"], 375.0 * 1.0)
 		self.assertAlmostEqual(stats["spawnrear_functional_weighted_connected_upstream_length"], 375.0 * 0.0)
 		self.assertAlmostEqual(stats["spawnrear_functional_weighted_disconnected_upstream_length"], 375.0 * 1.0)
+
+	def test_upstream_stream_and_gradient_threshold_lengths(self):
+		# b1 sits at E8's start: E1..E7 (700 m) is upstream. b2 sits at E9's start: E1..E8 (800 m).
+		# Neither sum stops at the other barrier.
+		b1, b2 = self.barrier_rows_by_id["b1"], self.barrier_rows_by_id["b2"]
+		self.assertEqual(b1["upstream_stream_length"], 700.0)
+		self.assertEqual(b2["upstream_stream_length"], 800.0)
+		# spawn (<= 6.0) drops only E1; rear (<= 1.0) drops E1 and E2.
+		self.assertEqual(b1["stats"]["es"]["spawn_upstream_below_gradient_threshold_length"], 600.0)
+		self.assertEqual(b1["stats"]["es"]["rear_upstream_below_gradient_threshold_length"], 500.0)
+		self.assertEqual(b2["stats"]["es"]["spawn_upstream_below_gradient_threshold_length"], 700.0)
+		self.assertEqual(b2["stats"]["es"]["rear_upstream_below_gradient_threshold_length"], 600.0)
 
 	def test_barrier_b2_stats_read_at_its_upstream_edge_e8(self):
 		stats = self.barrier_rows_by_id["b2"]["stats"]["es"]

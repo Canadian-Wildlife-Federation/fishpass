@@ -16,9 +16,10 @@ All structures used in the analysis, including those loaded from the CABD databa
 | upstream\_edge\_id | uuid | The upstream edge id from the streams table. |
 | downstream\_edge\_id | uuid | The downstream edge id from the stream table. |
 | species\_passability\_value | jsonb | Passability values for each species, lifestage of this barriers.  This should be populated for each species,lifestage the user is reporting on. |
+| upstream\_stream\_length | double | Total length (m) of every stream edge upstream of the barrier, all the way to the headwaters. There is no habitat, accessibility, species or barrier filter, so it is one value per barrier. Sums the raw stream `length` (not `effective_length`). Has a value at a confluence (all inflowing edges are added) and is 0 at a headwater. NULL for barriers that did not snap to a processed edge. |
 | species\_statistics** | jsonb | This is a jsonb column containing all species statistics. We will use views to convert these into user-friendly columns. See table below for complete description. |
 
-## **species_statistics
+### **species_statistics
 
 This column contains the following fields for each species identifies in the model parameters.
 
@@ -44,6 +45,8 @@ This column contains the following fields for each species identifies in the mod
 | downstream\_natural\_rear\_ids | uuid\[\] | The barrier ids of natural structures that are downstream and rear impassable for the given species. |
 | spawn\_upstream\_accessible\_length | double | The sum of the effective length of any edges upstream flagged as naturally accessible for spawning |
 | rear\_upstream\_accessible\_length | double | The sum of the effective length of any edges upstream flagged as naturally accessible for spawning. |
+| spawn\_upstream\_below\_gradient\_threshold\_length | double | The sum of the raw stream `length` (not `effective_length`) of every upstream edge whose `segment_gradient` is less than or equal to the species' `accessibility_gradient_spawning_max` (fish species parameter file), all the way to the headwaters. No barrier stops the sum. Edges with no gradient are not counted; a blank threshold means no limit. Has a value at a confluence and is 0 at a headwater. Computed for every species, whether or not spawn is reported. |
+| rear\_upstream\_below\_gradient\_threshold\_length | double | Same as spawn upstream below gradient threshold length, but using `accessibility_gradient_rearing_max`. |
 | spawn\_upstream\_length | double | The sum of the effective length of any upstream edges flagged as spawning habitat. |
 | rear\_upstream\_length | double | The sum of the effective length of any upstream edges flagged as rearing habitat. |
 | spawnrear_upstream_length | double | The sum of the effective length of any upstream edges flagged as spawning or rearing habitat. Each edge is only counted once. |
@@ -74,6 +77,7 @@ The `all_barriers` rows for each structure type that snapped onto a processed st
 | stream\_name\_en | text | English name of the stream edge immediately upstream of the barrier (`upstream_edge_id`), from `streams.stream_name_en`. NULL when that edge has no CHyF name, or when `upstream_edge_id` is NULL (for example, a barrier snapped at a confluence). |
 | upstream\_edge\_id | uuid | The upstream edge id from the streams table. |
 | downstream\_edge\_id | uuid | The downstream edge id from the streams table. |
+| upstream\_stream\_length | double | `natural_barriers` only. `all_barriers.upstream_stream_length`. |
 | species\_passability\_value | jsonb | Passability values for each species, lifestage. |
 | geometry | Point | Raw geometry |
 | snapped\_geometry | Point | Geometry snapped to stream network |
@@ -88,6 +92,8 @@ The waterfall columns come from the `waterfalls` entry in `CUSTOM_FEATURE_TYPE_F
 Each reporting species has anthropogenic and natural views with the computed statistics available as columns. Both expose one identifier, `feature_id`, whose value is `all_barriers.feature_id`. They omit the per-run `all_barriers.id`, which is used internally by the ranking work table.
 
 Besides the statistics columns, each view has `feature_type`, `stream_name_en`, `upstream_edge_id`, `downstream_edge_id`, `geometry` and `snapped_geometry` (as described for `natural_barriers` / `anthropogenic_barriers` above), and that species' `passability_status_spawn` and `passability_status_rear` (double) from `species_passability_value`.
+
+The `natural_barriers_<species>` views also have `upstream_stream_length` and the `spawn_upstream_below_gradient_threshold_length` and `rear_upstream_below_gradient_threshold_length` columns (both lifestages, whatever is reported). The `anthropogenic_barriers_<species>` views do not have these columns.
 
 ## Views: `<output_schema>.unsnapped_barriers`
 

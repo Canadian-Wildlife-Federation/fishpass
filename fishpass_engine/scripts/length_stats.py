@@ -3,7 +3,15 @@ aggregates and per-barrier upstream/downstream counts (the latter now also carry
 upstream length figures, read from the per-species length aggregates at the barrier's snapped
 edge).
 
-All length computations use effective_length.
+All length computations use effective_length, except two whose length is set by
+UPSTREAM_STREAM_LENGTH_COLUMN (raw length or effective_length; raw length for now):
+`upstream_stream_length` (every upstream edge, no filter, one value per barrier rather than per
+species) and `<lc>_upstream_below_gradient_threshold_length` (upstream edges whose
+segment_gradient is within that species' accessibility gradient threshold for spawn/rear). Both
+are plain sums to the headwaters (no barrier stops them), and both are read at a barrier as the
+sum of the running totals of every edge flowing into its downstream_edge_id (its predecessors),
+so they have a value at a confluence too (one inflowing edge gives that edge's total; none, at a
+headwater, gives 0.0).
 
 The per-edge `<lc>_weighted_length` value (and the raw stream-order-weight formula behind it) is
 only computed for the "rear" and "spawn" lifecycles -- the species parameter file has no
@@ -37,8 +45,20 @@ graph_stats.is_impassable's combined "impassable if either lifestage fails" rule
 """
 
 from graph_stats import ACCESSIBILITY_ACCESSIBLE, propagate_upstream_multi, propagate_upstream_with_reset_multi
-from species_params import stream_order_weight
+from species_params import accessibility_gradient_ok, stream_order_weight
 from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
+
+UPSTREAM_STREAM_LENGTH = "upstream_stream_length"
+BELOW_GRADIENT_THRESHOLD_SUFFIX = "_upstream_below_gradient_threshold_length"
+
+# Streams length summed for ONLY these two barrier stats:
+#   - upstream_stream_length (all_barriers column)
+#   - <lc>_upstream_below_gradient_threshold_length (species_stats)
+# "length" uses the raw stream length (the raw_stream_length parameter of compute_length_stats);
+# any other value uses effective_length instead.
+# It is NOT used by any other length statistic -- habitat, accessible, functional and
+# weighted lengths always use effective_length, and are not affected by this setting.
+UPSTREAM_STREAM_LENGTH_COLUMN = "length"
 
 
 def masked_local_value(edge_ids, effective_length, flag):
@@ -78,7 +98,7 @@ def connected_disconnected_weighted_length(base_weighted, downstream_first_barri
 	return connected, disconnected
 
 
-def compute_species_length_stats(
+def compute_length_stats(
 	order_up,
 	predecessors,
 	edge_ids,
@@ -90,9 +110,29 @@ def compute_species_length_stats(
 	species_params_by_code,
 	reporting_species_lifecycles,
 	downstream_first_barrier_passability,
+	raw_stream_length,
+	segment_gradient,
 ):
-	"""Returns {species: {"spawn_upstream_accessible_length": {edge_id: float},
+	"""Returns (species_result, upstream_stream_length_by_edge).
+
+	raw_stream_length: {edge_id: length}. Each edge's own raw stream length. Used only for
+	upstream_stream_length and <lc>_upstream_below_gradient_threshold_length, and only while
+	UPSTREAM_STREAM_LENGTH_COLUMN is "length"; otherwise those two use effective_length. Every
+	other length field here always uses effective_length.
+
+	segment_gradient: {edge_id: gradient or None}. Each edge's gradient, used to decide whether the
+	edge counts toward <lc>_upstream_below_gradient_threshold_length.
+
+	upstream_stream_length_by_edge is {edge_id: float}: that edge's length plus the length of every
+	edge above it, with no filter. It is kept outside species_result because it is not per species.
+
+	species_result is {species: {"spawn_upstream_accessible_length": {edge_id: float},
 	"rear_upstream_accessible_length": {edge_id: float},
+	"spawn_upstream_below_gradient_threshold_length",
+	"rear_upstream_below_gradient_threshold_length": {edge_id: float} (running totals, including
+	the edge itself, of the length of edges whose segment_gradient passes
+	species_params.accessibility_gradient_ok -- computed for every species, for both spawn and
+	rear, like the accessible lengths),
 	"<lc>_upstream_length", "<lc>_functional_upstream_length": {edge_id: float},
 	"<lc>_weighted_length", "<lc>_weighted_connected_length", "<lc>_weighted_disconnected_length":
 	{edge_id: float} (rear/spawn only),
@@ -135,6 +175,17 @@ def compute_species_length_stats(
 	connected_by_species_lc = {}
 	disconnected_by_species_lc = {}
 
+	# Length used for upstream_stream_length and the gradient-threshold lengths only.
+	if UPSTREAM_STREAM_LENGTH_COLUMN == "length":
+		upstream_stream_lengths = raw_stream_length
+	else:
+		upstream_stream_lengths = effective_length
+
+	# Not per species: every edge, no filter.
+	plain_zeros[UPSTREAM_STREAM_LENGTH] = 0.0
+	for eid in edge_ids:
+		plain_local[eid][UPSTREAM_STREAM_LENGTH] = upstream_stream_lengths[eid]
+
 	for species in species_list:
 		accessible_by_lc = {
 			lc: {eid: accessibility[species][lc][eid] == ACCESSIBILITY_ACCESSIBLE for eid in edge_ids}
@@ -147,10 +198,19 @@ def compute_species_length_stats(
 			for eid in edge_ids:
 				plain_local[eid][accessible_field] = accessible_local[eid]
 
+		params = species_params_by_code[species]
+		for lc_key in LIFESTAGES:
+			gradient_field = f"{species}:{lc_key}{BELOW_GRADIENT_THRESHOLD_SUFFIX}"
+			plain_zeros[gradient_field] = 0.0
+			for eid in edge_ids:
+				if accessibility_gradient_ok(params, lc_key, segment_gradient.get(eid)):
+					plain_local[eid][gradient_field] = upstream_stream_lengths[eid]
+				else:
+					plain_local[eid][gradient_field] = 0.0
+
 		is_barrier = {eid: bool(barrier_here_by_species[species]["anthro"].get(eid)) for eid in edge_ids}
 		lifecycles = {lc for sp, lc in reporting_species_lifecycles if sp == species}
 		lifecycles_by_species[species] = lifecycles
-		params = species_params_by_code[species]
 
 		rear_spawn_base_weighted = {}
 		if lifecycles & set(LIFESTAGES_ALL):
@@ -217,6 +277,10 @@ def compute_species_length_stats(
 			}
 			for lc in LIFESTAGES
 		}
+		for lc in LIFESTAGES:
+			species_result[f"{lc}{BELOW_GRADIENT_THRESHOLD_SUFFIX}"] = {
+				eid: v[f"{species}:{lc}{BELOW_GRADIENT_THRESHOLD_SUFFIX}"] for eid, v in plain_acc.items()
+			}
 		for lc in lifecycles_by_species[species]:
 			species_result[f"{lc}_upstream_length"] = {
 				eid: v[f"{species}:{lc}_upstream_length"] for eid, v in plain_acc.items()
@@ -235,10 +299,13 @@ def compute_species_length_stats(
 				species_result[f"{lc}_weighted_connected_length"] = connected_by_species_lc[(species, lc)]
 				species_result[f"{lc}_weighted_disconnected_length"] = disconnected_by_species_lc[(species, lc)]
 		result[species] = species_result
-	return result
+	upstream_stream_length_by_edge = {eid: v[UPSTREAM_STREAM_LENGTH] for eid, v in plain_acc.items()}
+	return result, upstream_stream_length_by_edge
 
 
-def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_here_by_species, species_length_stats):
+def compute_barrier_upstream_downstream_stats(
+	barriers, barrier_stats, barrier_here_by_species, species_length_stats, predecessors
+):
 	"""Step 9's third bullet group: for each barrier and each species,
 	upstream/downstream natural/anthropogenic counts (downstream ids of both types, plus upstream
 	anthro ids -- natural_barriers_<species>/anthropogenic_barriers_<species> want upstream anthro
@@ -257,7 +324,10 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 	reading at downstream_edge_id would double-count that edge, which starts right at the barrier
 	and so isn't upstream of it. Taken as-is (no subtraction) from species_length_stats at that
 	edge. upstream_edge_id is None for a barrier snapped at a multi-edge confluence (see
-	network_break.py); the length fields are then also None.
+	network_break.py); the length fields are then also None -- except
+	<lc>_upstream_below_gradient_threshold_length, which is instead the sum of the running totals
+	of every edge flowing into downstream_edge_id (its predecessors), so it has a value at a
+	confluence too (and is 0.0 at a headwater). predecessors is graph_stats.build_graph's.
 
 	Returns {internal_barrier_id: {species: {upstream_natural_spawnrear_count, upstream_anthro_spawnrear_count,
 	downstream_natural_spawnrear_count, downstream_anthro_spawnrear_count, downstream_natural_spawn_ids,
@@ -269,7 +339,7 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 	<lc>_weighted_connected_upstream_length/<lc>_weighted_disconnected_upstream_length/
 	<lc>_functional_weighted_connected_upstream_length/<lc>_functional_weighted_disconnected_upstream_length}}.
 	barrier_stats is compute_barrier_stats' output, barrier_here_by_species is
-	compute_barrier_here's output, species_length_stats is compute_species_length_stats' output;
+	compute_barrier_here's output, species_length_stats is compute_length_stats' output;
 	barriers is the same list passed to compute_barrier_here (needs internal "id", stable
 	"feature_id", "edge_id", "upstream_edge_id", and "species_passability_value").
 
@@ -325,6 +395,10 @@ def compute_barrier_upstream_downstream_stats(barriers, barrier_stats, barrier_h
 				if field.endswith(
 					base_suffix
 				):  # covers func_base_suffix too, since it's a longer suffix ending the same way
+					continue
+				if field.endswith(BELOW_GRADIENT_THRESHOLD_SUFFIX):
+					# Sum of the running totals of every edge flowing into the barrier's point.
+					species_stats[field] = sum((values[p] for p in predecessors.get(edge_id, [])), 0.0)
 					continue
 				species_stats[field] = values.get(upstream_edge_id) if upstream_edge_id is not None else None
 

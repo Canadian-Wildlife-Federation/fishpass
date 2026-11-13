@@ -244,6 +244,7 @@ SELECT
     stream_name_en,
     passability_status_spawn,
     passability_status_rear,
+    upstream_stream_length,
 
     -- barrier counts
     upstream_natural_spawn_count,
@@ -285,6 +286,10 @@ SELECT
     rear_functional_weighted_connected_upstream_length,
     rear_functional_weighted_disconnected_upstream_length,
 
+    -- upstream length within the accessibility gradient threshold (always in the view)
+    spawn_upstream_below_gradient_threshold_length,
+    rear_upstream_below_gradient_threshold_length,
+
     -- the one geometry column, used as the geometry in the GeoPackage
     snapped_geometry AS geometry
 FROM <output_schema>.natural_barriers_as
@@ -300,6 +305,7 @@ Notes on the example:
 - The anthropogenic id lists hold `feature_id` values, which can be looked up in the structures export.
 - The view only holds natural barriers that snapped to the stream network.
 - `stream_name_en` is the name of the stream edge immediately upstream of the barrier (see [barriers.md](./outputs/barriers.md)).
+- `upstream_stream_length` and the two `*_upstream_below_gradient_threshold_length` columns are only in the natural barriers export, not in any anthropogenic barrier output (see [barriers.md](./outputs/barriers.md)).
 
 #### Streams
 

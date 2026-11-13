@@ -28,6 +28,13 @@ SPECIES_LIFECYCLE_WEIGHTED_FIELDS = (
 # Accessible-length fields, written for both spawn and rear for every target species
 # (independent of the plan's reporting_values).
 SPECIES_LENGTH_FIELDS = tuple(f"{lc}_upstream_accessible_length" for lc in (SPAWN, REAR))
+# Upstream length within each lifestage's accessibility gradient threshold, written for both
+# spawn and rear for every target species. Exposed on the natural_barriers_<species> views and
+# export only -- deliberately not part of barrier_length_fields(), which also feeds the
+# anthropogenic views, rank_barriers.py and create_combined_view.py.
+NATURAL_BARRIER_GRADIENT_LENGTH_FIELDS = tuple(
+	f"{lc}_upstream_below_gradient_threshold_length" for lc in (SPAWN, REAR)
+)
 
 
 def barrier_length_fields(lifecycles):
@@ -63,7 +70,9 @@ def create_natural_anthropogenic_views(cursor, output_schema, plan):
 	for table, structure_type in (("natural_barriers", "natural"), ("anthropogenic_barriers", "anthropogenic")):
 		waterfall_columns = ""
 		waterfall_join = ""
+		upstream_stream_length_column = ""
 		if structure_type == "natural":
+			upstream_stream_length_column = " ab.upstream_stream_length,"
 			if has_waterfalls:
 				waterfall_columns = "".join(f", wf.{field['name']}" for field in waterfall_fields)
 				waterfall_join = f"""
@@ -75,7 +84,7 @@ def create_natural_anthropogenic_views(cursor, output_schema, plan):
 
 		cursor.execute(f"""
 			CREATE VIEW {schema_ident}.{table} AS
-			SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,
+			SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,{upstream_stream_length_column}
 			ab.species_passability_value, ab.geometry, ab.snapped_geometry, ab.species_stats{waterfall_columns}
 			FROM {schema_ident}.all_barriers ab
 			LEFT JOIN {schema_ident}.streams s
@@ -121,16 +130,22 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 		]
 		for column_name in barrier_length_fields(lifecycles):
 			columns.append(f"({stats}->>'{column_name}')::double precision AS {column_name}")
-		column_sql = ",\n\t\t\t".join(columns)
+		natural_columns = columns + [
+			f"({stats}->>'{column_name}')::double precision AS {column_name}"
+			for column_name in NATURAL_BARRIER_GRADIENT_LENGTH_FIELDS
+		]
 
 		for table_prefix, structure_type in (
 			("natural_barriers", "natural"),
 			("anthropogenic_barriers", "anthropogenic"),
 		):
+			is_natural = structure_type == "natural"
+			column_sql = ",\n\t\t\t".join(natural_columns if is_natural else columns)
+			upstream_stream_length_column = " ab.upstream_stream_length," if is_natural else ""
 			view_ident = quote_ident(f"{table_prefix}_{species}")
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
-				SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,
+				SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,{upstream_stream_length_column}
 				(ab.species_passability_value->>'{species}_{SPAWN}')::double precision AS passability_status_{SPAWN},
 				(ab.species_passability_value->>'{species}_{REAR}')::double precision AS passability_status_{REAR},
 				ab.geometry, ab.snapped_geometry,
@@ -353,10 +368,12 @@ def natural_barriers_export_sql(output_schema, species, lifecycles):
 		azure_export.column("stream_name_en"),
 		azure_export.column(f"passability_status_{SPAWN}"),
 		azure_export.column(f"passability_status_{REAR}"),
+		azure_export.column("upstream_stream_length"),
 	]
 	columns += [azure_export.column(f) for f in EXPORT_BARRIER_COUNT_FIELDS]
 	columns += [azure_export.pipe_list(f) for f in EXPORT_BARRIER_ID_FIELDS]
 	columns += [azure_export.column(f) for f in barrier_length_fields(lifecycles)]
+	columns += [azure_export.column(f) for f in NATURAL_BARRIER_GRADIENT_LENGTH_FIELDS]
 	columns.append(azure_export.column("snapped_geometry", "geometry"))
 	relation = f"{quote_ident(output_schema)}.{quote_ident(f'natural_barriers_{species}')}"
 	return azure_export.select_sql(columns, relation)
