@@ -35,6 +35,7 @@ The `FISHPASS_*` database secrets are passed to the run as before. See the [READ
 The existing fishpass run action will be updated to include azure export option and a new export-only action will be implement to export the results (or re-export the results).
 
 ### Update: FishPass Run Action
+
 Three inputs are added to the FishPass run action:
 
 | Input | Type | Applies when | Description |
@@ -83,13 +84,11 @@ Azure container names only allow lowercase letters, numbers and `-`, and must be
 | `ASF_Phase_1` | `fishpass-asf-phase-1` |
 | `ns__2026_` | `fishpass-ns-2026` |
 
-
-
 **Public Access Permission**
 
 The containers will be configured to allow "Blob anonymous access" to allow the exports to be publicily available via a download link. 
 
-### Azure Blob Names 
+### Azure Blob Names
 
 Within the container, each run gets its own folder and every file is prefixed with the folder name:
 
@@ -112,7 +111,6 @@ runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_streams_as.gpkg
 runs/versioned/ns_v1.2_20261007143000/ns_v1.2_20261007143000_metadata.yaml
 runs/unversioned/ns_20261007143000/ns_20261007143000_streams_as.gpkg
 ```
-
 
 ## Database Control Tables
 
@@ -148,7 +146,7 @@ GeoPackage has no uuid or enum type. The `sql` for a `geopackage` export must ca
 
 No cast is needed for a `csv` export, where every value is written as text.
 
-### Model Run Metadata Table 
+### Model Run Metadata Table
 
 **Table:** `<output_schema>.run_metadata`
 
@@ -166,8 +164,6 @@ The model run saves the details of the run to this table before the export start
 | species\_parameter\_file | text | The full contents of `config/fish_species_parameters.yaml` used for the run. |
 
 The type, version and export date/time are not stored here. They belong to an export, not to the model run, and can differ each time the export is run.
-
-
 
 ## Data Exports
 
@@ -502,7 +498,6 @@ Notes on the example:
 - The same columns are written for every plan.
 - When the plan has no reporting species the view is not created, so no row is added to the export table and no file is written.
 
-
 ## Re-running an Export
 
 The export is a separate step that only needs the database: the list of files comes from `<output_schema>.azure_exports` and the run details from `<output_schema>.run_metadata`. Both stay in the database until the next model run of that plan.
@@ -516,18 +511,17 @@ Some exports read from data that can be edited after the model run. The structur
 
 ## Local File Exports
 
-It is possible to run the export script locally, and write the results to the local machine instead of Azure. 
+It is possible to run the export script locally, and write the results to the local machine instead of Azure.
 
 This is useful for testing the exports or reviewing the results without uploading them. It writes the same files as the Azure export, from the same [export table](#export-table) and [run metadata table](#model-run-metadata-table), with the same formats and file names.
 
 - **GDAL is required** (`ogr2ogr`) is required on the path to write the GeoPackages.
 - Local export is for local runs only. It is refused when running in GitHub Actions, so the GitHub actions always export to Azure.
 - Only one of the Azure and local exports can be used per run.
-- No Azure sign-in or `AZURE_STORAGE_ACCOUNT_URL` is needed. 
+- No Azure sign-in or `AZURE_STORAGE_ACCOUNT_URL` is needed.
 - The export type and version inputs work the same way as for the Azure export.
 
-Details on running local exports are found in [README.md](../README.md). 
-
+Details on running local exports are found in [README.md](../README.md).
 
 ## Open Questions
 

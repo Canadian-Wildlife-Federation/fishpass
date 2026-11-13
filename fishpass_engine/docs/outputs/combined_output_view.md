@@ -7,10 +7,10 @@ The single WCRP reporting view, with one row per actionable barrier. Rebuilt by 
 **Row set:**
 
 Every row of <output_schema>.all_barriers that:
-- has a feature_type that is NOT a natural feature type (natural_feature_types_override from the plan, otherwise structure_classification.natural_feature_types from config/fishpass.yaml, e.g. waterfalls, gradients). This keeps dams, stream crossings, and new structures such as beaver dams;
-- was snapped to the stream network (snapped_geometry is not NULL);
-- structures on non-isolated segments are always kept; structures on isolated segments (is_isolated on their downstream edge) are kept only if they have passability values for every reported species and lifestage. This is intentional to retain information about any structures that are on isolated segments but that have been assessed or otherwise prioritized (e.g., where the stream network does not reflect reality, where an isolated segment should be connected to the rest of the network, or where an isolated segment represents an important area of habitat)
 
+* has a feature_type that is NOT a natural feature type (natural_feature_types_override from the plan, otherwise structure_classification.natural_feature_types from config/fishpass.yaml, e.g. waterfalls, gradients). This keeps dams, stream crossings, and new structures such as beaver dams;
+* was snapped to the stream network (snapped_geometry is not NULL);
+* structures on non-isolated segments are always kept; structures on isolated segments (is_isolated on their downstream edge) are kept only if they have passability values for every reported species and lifestage. This is intentional to retain information about any structures that are on isolated segments but that have been assessed or otherwise prioritized (e.g., where the stream network does not reflect reality, where an isolated segment should be connected to the rest of the network, or where an isolated segment represents an important area of habitat)
 
 **Sources and join keys:**
 

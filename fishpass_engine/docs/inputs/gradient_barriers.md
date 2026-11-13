@@ -7,5 +7,3 @@ Gradient barriers are only included in the analysis if the `structure_types` par
 A copy of the gradient barriers used in the analysis is made in the `<output_scheam>.gradient_barriers` file.
 
 See `gradient_barriers` for a tool to generate barriers.
-
-

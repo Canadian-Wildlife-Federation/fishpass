@@ -1,6 +1,6 @@
 # Watershed Summary Outputs
 
-### Views: `<output_schema>.watershed_summary_stats`
+## Views: `<output_schema>.watershed_summary_stats`
 
 A single materialized view, with one row per reporting species, summarizing total habitat length and connectivity across the whole output schema. It is built directly from `<output_schema>.streams` in a single pass, laterally unnesting each edge's `species_stats` for the species found in the plan's `reporting_species_lifecycles`.
 

@@ -16,22 +16,22 @@ We need to add province_territory_code varchar[] field to the chyf aoi table.
 
 At one point the accessibility computation was defined as:
 
-```
-* IF (the species if valid for that edge) AND (downstream natural impassable barrier for species/lifecycle count = 0) THEN 
-    * NATURALLY ACCESSIBLE 
-* ELSE
-    * NATURALLY INACCESSIBLE
+```text
+IF (the species if valid for that edge) AND (downstream natural impassable barrier for species/lifecycle count = 0) THEN 
+    NATURALLY ACCESSIBLE 
+ELSE
+    NATURALLY INACCESSIBLE
 ```
 
 The `(the species if valid for that edge)` was designed to allow certain species to be modelled only on specific workunits (or watersheds?).  It was decided to drop this requirement for the initial Phase. If a users only requires results on specific workunits (watersheds) they can filter the results of the analysis as desired.
 
 So accessibility is defined as:
 
-```
-* IF (downstream natural impassable barrier for species/lifecycle count = 0) THEN 
-    * NATURALLY ACCESSIBLE 
-* ELSE
-    * NATURALLY INACCESSIBLE
+```text
+IF (downstream natural impassable barrier for species/lifecycle count = 0) THEN 
+  NATURALLY ACCESSIBLE 
+ELSE
+  NATURALLY INACCESSIBLE
 ```
 
 ## Upstream and Downstream Barrier IDs
@@ -39,5 +39,10 @@ So accessibility is defined as:
 For upstream and downstream barrier counts and IDs, only the counts are produced for the combined `spawnrear` lifestage, not a full list of IDs. In the `spawnrear` counts, a barrier that is impassable for both spawning and rearing is only counted once.
 
 ## Combined Output View
+
 - Structures on non-isolated segments are always kept
 - Structures on isolated segments (is_isolated on their downstream edge) are kept only if they have passability values for every reported species and lifestage. This is intentional to retain information about any structures that are on isolated segments but that have been assessed or otherwise prioritized (e.g., where the stream network does not reflect reality, where an isolated segment should be connected to the rest of the network, or where an isolated segment represents an important area of habitat)
+
+## Graident Barrier Locations
+
+See: [Barriers at Confluence Points](../gradient_barriers/docs/gradient_barriers_doc.md#barriers-at-confluence-points)
