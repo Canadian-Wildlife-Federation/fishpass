@@ -29,24 +29,24 @@ This is run via a GitHub action, triggered by `workflow_dispatch` (manual), matc
 
 Gradient barriers are computed at all locations where the gradient is greater than the maximum gradient defined in the fish species parameter files.
 
-* The accessibility_gradient_spawning_max and accessibility_gradient_rearing_max attributes are used for gradient limits
+* The `accessibility_gradient_spawning_max` and `accessibility_gradient_rearing_max` attributes are used for gradient limits
 * Each barrier is flagged with the species and lifecycles (spawn, rear) they are barriers for. A single point can be a barrier for any number of species/lifecycles.
 
 **Table: support.gradient_barriers**
 
-Existing tables are renamed `support.gradient_barriers_archive_<yyyymmdd>_<seq>`, to prevent losing manual updates. The `seq` is incremented if today's archive name is already taken. This full-table archive/recreate only happens on an unscoped (whole-network) run -- see "AOI-scoped reprocessing" below for the alternative when only one or a few AOI(s) are being redone.
+Each run creates a new set of output tables, however existing tables are renamed `support.gradient_barriers_archive_<yyyymmdd>_<seq>`, to prevent losing manual updates. The `seq` is incremented if today's archive name is already taken. This full-table archive/recreate only happens on an unscoped (whole-network) run -- see "AOI-scoped reprocessing" below for the alternative when only one or a few AOI(s) are being redone.
 
-| Column           | Type      | Description                                                                                                                                                                                                                                                                       | 
-| ---------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| id               | uuid      | Unique system generated id                                                                                                                                                                                                                                                        |
-| geometry         | point     | Location of barrier, `barrier_offset_m` upstream of the measured vertex (see [Barrier Placement](#barrier-placement)).                                                                                                                                                         |
-| workunit         | varchar[] | The workunit the barrier point (`geometry`) falls in (if on the boundary of work units, record both). Used by the FishPass engine to select barriers for a model run.                                                                                                             |
-| downstream_geometry | point  | Location of the measured (downstream) vertex the gradient was computed from.                                                                                                                                                                                                      |
-| downstream_workunit | varchar[] | The workunit the measured vertex (`downstream_geometry`) falls in (if on the boundary of work units, record both). Used by AOI-scoped reprocessing to select the rows to replace.                                                                                           |
-| gradient         | double    | Computed gradient value.                                                                                                                                                                                                                                                          |
-| computed_species | string[]  | List of fish species/lifestage that this barrier applies to. These are encoded as \<species\>\_\<lifestage\> (ex. as_rear, as_spawn).                                                                                                                                              |
-| actual_species   | string[]  | Used for modelling, this is a copy of the computed_species but allows users to overwrite.  Further details are in the FishPass Process input description. For the purposes of the barrier computation, this is always populated with the same value as the computed_species. |
-| comments         | varchar   | Placeholder for user comments. |
+| Column | Type | Description |
+| :---- | :---- | :---- |
+| id | uuid | Unique system generated id |
+| geometry | point | Location of barrier, `barrier_offset_m` upstream of the measured vertex (see [Barrier Placement](#barrier-placement)). |
+| workunit | varchar[] | The workunit the barrier point (`geometry`) falls in (if on the boundary of work units, record both). Used by the FishPass engine to select barriers for a model run. |
+| downstream_geometry | point | Location of the measured (downstream) vertex the gradient was computed from. |
+| downstream_workunit | varchar[] | The workunit the measured vertex (`downstream_geometry`) falls in (if on the boundary of work units, record both). Used by AOI-scoped reprocessing to select the rows to replace. |
+| gradient | double | Computed gradient value. |
+| computed_species | string[] | List of fish species/lifestage that this barrier applies to. These are encoded as \<species\>\_\<lifestage\> (ex. as_rear, as_spawn). |
+| actual_species | string[] | Used for modelling, this is a copy of the computed_species but allows users to overwrite.  Further details are in the FishPass Process input description. For the purposes of the barrier computation, this is always populated with the same value as the computed_species. |
+| comments | varchar | Placeholder for user comments. |
 
 **Table: support.gradient_barriers_metadata**
 
@@ -56,14 +56,13 @@ On a full (unscoped) run, any existing table is archived to `support.gradient_ba
 
 On an AOI-scoped run, no archiving happens -- a row is simply appended identifying the AOI(s) being reprocessed, so metadata history from prior runs is preserved.
 
-
-| Column           | Type      | Description                                                                                      |
-| ---------------- | --------- | ------------------------------------------------------------------------------------------------ |
-| id               | uuid      | Unique system generated id                                                                       |
-| aoi              | varchar[] | {all} for a full (unscoped) run, or the reprocessed chyf_raw.aoi short_name(s) for a scoped run. |
-| species_params   | jsonb     | Snapshot of the fish species/lifestage gradient parameters in effect for this run.               |
-| barrier_offset_m | double    | Distance (m) upstream of the measured vertex at which barriers were placed for this run (see [Barrier Placement](#barrier-placement)). |
-| run_at           | timestamp | When this run completed.                                                                         |
+| Column | Type | Description |
+| :---- | :---- | :---- |
+| id | uuid | Unique system generated id |
+| aoi | varchar[] | {all} for a full (unscoped) run, or the reprocessed chyf_raw.aoi short_name(s) for a scoped run. |
+| species_params | jsonb | Snapshot of the fish species/lifestage gradient parameters in effect for this run. |
+| barrier_offset_m | double | Distance (m) upstream of the measured vertex at which barriers were placed for this run (see [Barrier Placement](#barrier-placement)). |
+| run_at | timestamp | When this run completed. |
 
 ## Process
 
@@ -79,9 +78,9 @@ Vertices with a missing smoothed elevation -- the `-9999` no-data sentinel used 
 
 A vertex whose gradient doesn't exceed *any* species/lifestage threshold produces no row at all in support.gradient_barriers -- it is not written with an empty computed_species.
 
-For the purposes of this script, the actual_species output field is the same as the computed_species.
+For the purposes of this script, the `actual_species` output field is the same as the `computed_species`.
 
-The workunit and downstream_workunit record the short_name from the chyf_raw.aoi table (linked to the chyf_raw.flowpath table via the aoi_id), assigned as a post-processing spatial join (`geometry` and `downstream_geometry` respectively vs. `chyf_raw.aoi` polygons) after barrier points are inserted, rather than trusting a single flowpath edge's `aoi_id` — this correctly captures points that fall on/near a boundary between workunits.
+The `workunit` and `downstream_workunit` fields record the short_name from the chyf_raw.aoi table (linked to the chyf_raw.flowpath table via the aoi_id), assigned as a post-processing spatial join (`geometry` and `downstream_geometry` respectively vs. `chyf_raw.aoi` polygons) after barrier points are inserted, rather than trusting a single flowpath edge's `aoi_id` — this correctly captures points that fall on/near a boundary between workunits.
 
 Two workunit columns are needed because the barrier point can be up to `barrier_offset_m` upstream of the measured vertex, and so can fall in a different workunit. `workunit` describes where the barrier is, which is what a model run needs. `downstream_workunit` describes which workunit's scoped run produces the barrier, which is what AOI-scoped reprocessing needs (see below).
 
@@ -165,4 +164,3 @@ The decision was to move the gradient barriers upstream from the downstream vert
 * With the default of 100 m, the barrier sits at the top of the steep 100 m stretch, so the model treats that steep stretch as accessible. A smaller offset is possible by adjusting the `barrier_offset_m` in the configuration.
 
 **Alternative Option (considered & rejected)** - The other option explored was to associate each barrier with an edge as well as a vertex. The fishpass engine would use both the edge and the vertex to determine what flowpaths act as barriers. This would require more substantial changes to the software and would require barriers to be regenerated/remapped if flowpath edge ids changed.
-
