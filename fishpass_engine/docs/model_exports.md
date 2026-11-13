@@ -491,9 +491,9 @@ SELECT
     disconnected_rear_km,
     connected_spawnrear_km,
     disconnected_spawnrear_km,
-    pct_disconnected_spawn,
-    pct_disconnected_rear,
-    pct_disconnected_spawnrear
+    pct_connected_spawn,
+    pct_connected_rear,
+    pct_connected_spawnrear
 FROM <output_schema>.watershed_summary_stats
 ```
 

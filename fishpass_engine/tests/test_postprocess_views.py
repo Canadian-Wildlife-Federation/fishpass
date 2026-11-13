@@ -357,9 +357,9 @@ class CreateWatershedSummaryStatisticsTests(unittest.TestCase):
 		self.assertIn("disconnected_spawn_km", sql)
 		self.assertIn("connected_spawnrear_km", sql)
 		self.assertIn("disconnected_spawnrear_km", sql)
-		self.assertIn("pct_disconnected_spawn", sql)
-		self.assertIn("pct_disconnected_rear", sql)
-		self.assertIn("pct_disconnected_spawnrear", sql)
+		self.assertIn("pct_connected_spawn", sql)
+		self.assertIn("pct_connected_rear", sql)
+		self.assertIn("pct_connected_spawnrear", sql)
 
 	def test_rejects_unsafe_species_code(self):
 		cursor = FakeCursor()
