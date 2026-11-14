@@ -59,7 +59,6 @@ def create_structures_table(cursor, output_schema, srid):
 			structure_type varchar CHECK (structure_type IN ('natural', 'anthropogenic')),
 			geometry geometry(point, {srid}) NOT NULL,
 			snapped_geometry geometry(point, {SNAPPED_GEOMETRY_SRID}),
-			upstream_edge_id uuid,
 			downstream_edge_id uuid,
 			network_vertex_x double precision,
 			network_vertex_y double precision,

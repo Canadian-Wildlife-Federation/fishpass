@@ -26,6 +26,7 @@ from habitat_access import apply_habitat_access_overrides, derive_spawnrear_habi
 from length_stats import (
 	compute_barrier_upstream_downstream_stats,
 	compute_length_stats,
+	sum_inflowing,
 )
 from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
 
@@ -102,7 +103,7 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(
 		f"""
-		SELECT e.graph_id, s.id, s.feature_id, s.downstream_edge_id, s.upstream_edge_id,
+		SELECT e.graph_id, s.id, s.feature_id, s.downstream_edge_id,
 			s.species_passability_value, s.structure_type
 		FROM {schema_ident}.all_barriers s
 		JOIN {schema_ident}.streams e ON e.id = s.downstream_edge_id
@@ -117,9 +118,8 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 				"id": row[0],
 				"feature_id": row[1],
 				"edge_id": row[2],
-				"upstream_edge_id": row[3],
-				"species_passability_value": row[4],
-				"structure_type": row[5],
+				"species_passability_value": row[3],
+				"structure_type": row[4],
 			}
 		)
 	return by_graph
@@ -302,12 +302,8 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 		{
 			**b,
 			"stats": barrier_stats_by_id[b["id"]],
-			# A barrier sits at the start of its downstream edge (edge_id), so everything upstream of
-			# it is the running totals of the edges flowing into that point: one edge normally,
-			# several at a confluence, none (0.0) at a headwater.
-			"upstream_stream_length": sum(
-				(upstream_stream_length_by_edge[p] for p in predecessors.get(b["edge_id"], [])), 0.0
-			),
+			# Same rule as the per-species upstream lengths (see length_stats.sum_inflowing).
+			"upstream_stream_length": sum_inflowing(predecessors, b["edge_id"], upstream_stream_length_by_edge),
 		}
 		for b in barriers
 	]

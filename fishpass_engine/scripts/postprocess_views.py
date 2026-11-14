@@ -84,11 +84,11 @@ def create_natural_anthropogenic_views(cursor, output_schema, plan):
 
 		cursor.execute(f"""
 			CREATE VIEW {schema_ident}.{table} AS
-			SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,{upstream_stream_length_column}
+			SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.downstream_edge_id,{upstream_stream_length_column}
 			ab.species_passability_value, ab.geometry, ab.snapped_geometry, ab.species_stats{waterfall_columns}
 			FROM {schema_ident}.all_barriers ab
 			LEFT JOIN {schema_ident}.streams s
-				ON s.id = ab.upstream_edge_id
+				ON s.id = ab.downstream_edge_id
 			{waterfall_join}
 			WHERE ab.structure_type = '{structure_type}' AND ab.species_stats IS NOT NULL
 		""")
@@ -145,14 +145,14 @@ def create_species_barrier_views(cursor, output_schema, reporting_species_lifecy
 			view_ident = quote_ident(f"{table_prefix}_{species}")
 			cursor.execute(f"""
 				CREATE VIEW {schema_ident}.{view_ident} AS
-				SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,{upstream_stream_length_column}
+				SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.downstream_edge_id,{upstream_stream_length_column}
 				(ab.species_passability_value->>'{species}_{SPAWN}')::double precision AS passability_status_{SPAWN},
 				(ab.species_passability_value->>'{species}_{REAR}')::double precision AS passability_status_{REAR},
 				ab.geometry, ab.snapped_geometry,
 				{column_sql}
 				FROM {schema_ident}.all_barriers ab
 				LEFT JOIN {schema_ident}.streams s
-					ON s.id = ab.upstream_edge_id
+					ON s.id = ab.downstream_edge_id
 				WHERE ab.structure_type = '{structure_type}' AND ab.species_stats IS NOT NULL
 			""")
 
@@ -192,7 +192,8 @@ STREAM_WEIGHTED_FIELDS = ("weighted_length", "weighted_connected_length", "weigh
 
 def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 	"""One <output_schema>.streams_<species> view per reporting species -- stream attributes
-	plus that species' species_stats fields exploded to columns."""
+	plus that species' species_stats fields exploded to columns. Sink edges
+	(is_sink_barrier_edge, see network_break.py) are left out."""
 
 	schema_ident = quote_ident(output_schema)
 	species_lifecycles = _species_by_lifecycle_map(reporting_species_lifecycles)
@@ -222,13 +223,13 @@ def create_species_views(cursor, output_schema, reporting_species_lifecycles):
 			SELECT {STREAM_COLUMNS},
 			{column_sql}
 			FROM {schema_ident}.streams
-			WHERE {stats} IS NOT NULL
+			WHERE {stats} IS NOT NULL AND NOT is_sink_barrier_edge
 		""")
 
 
 def create_watershed_summary_statistics(cursor, output_schema, reporting_species_lifecycles):
 	"""Creates <output_schema>.watershed_summary_stats view in a single pass over streams
-	by unnesting species_stats keys laterally.
+	by unnesting species_stats keys laterally. Sink edges (is_sink_barrier_edge) are left out.
 	"""
 	schema_ident = quote_ident(output_schema)
 	species_lifecycles = _species_by_lifecycle_map(reporting_species_lifecycles)
@@ -254,7 +255,7 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
             sp.value AS stats
         FROM {schema_ident}.streams s,
         LATERAL jsonb_each(s.species_stats) sp
-        WHERE sp.key IN ({species_list_sql})
+        WHERE sp.key IN ({species_list_sql}) AND NOT s.is_sink_barrier_edge
     ),
     aggregated AS (
 		SELECT
@@ -318,8 +319,8 @@ def create_watershed_summary_statistics(cursor, output_schema, reporting_species
 # =================================================================================
 #  AZURE EXPORTS (fishpass_engine/docs/azure_exports.md -- Data Exports)
 # =================================================================================
-# Column lists are hard-coded to match azure_exports.md. upstream_edge_id/downstream_edge_id
-# are never exported: edge ids are internal to a run and change every model run.
+# Column lists are hard-coded to match azure_exports.md. downstream_edge_id is
+# never exported: edge ids are internal to a run and change every model run.
 
 # Lifecycle order of the columns in the export files.
 EXPORT_LIFECYCLE_ORDER = (SPAWN, REAR, SPAWNREAR)

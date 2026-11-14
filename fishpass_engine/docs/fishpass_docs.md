@@ -179,6 +179,7 @@ Outputs:  `<output_schema>.streams`, `<output_schema>.aoi`
 | segment_gradient | double precision |
 | downstream_route_measure | double precision |
 | upstream_route_measure | double precision |
+| is_sink_barrier_edge | boolean |
 | species_stats | jsonb |
 | geometry | LineStringZM (4617) |
 
@@ -189,7 +190,7 @@ Edges where `is_isolated = true` are excluded from Compute Statistics entirely -
 `strahler_order` is copied as-is from `chyf_raw.flowpath` (via `chyf2.eflowpath_properties`,
 same source as `graph_id`) -- it is required by Compute Statistics' habitat assignment (`strahler_order >= min_<lc>_strahler_order` test) and was missing from this field list.
 
-`effective_length` and `segment_gradient` are populated by Compute Statistics.
+`effective_length` and `segment_gradient` are populated by Compute Statistics, which also recomputes `length` for every edge (see Compute Statistics step 2).
 
 `downstream_route_measure` and `upstream_route_measure` are populated by Compute Statistics'
 per-component processing, alongside `species_stats`. They are a per-`mainstem_id` linear-referencing measure, in `length` units (not `effective_length`): 0 at the mouth of the edge's `mainstem_id` chain (the edge with no successor, i.e. a network outlet, or whose successor belongs to a *different* `mainstem_id`, i.e. it joins a larger mainstem), increasing upstream to the chain's headwater. `downstream_route_measure` is the distance from the chain's mouth to this edge's downstream end; `upstream_route_measure` is that plus this edge's own `length` (its distance to the edge's upstream end). Each mainstem's measure resets to 0 at its own mouth -- it is not a single measure running continuously from the network outlet. Edges with `mainstem_id IS NULL` are left NULL for both columns (there is no chain to measure them along).
@@ -232,7 +233,7 @@ Builds `<output_schema>.all_barriers` (see Outputs) and its `cabd_<feature_type>
 
 ### Snap Structures
 
-Snaps every `all_barriers` point onto the stream network, writing `snapped_geometry` and `downstream_edge_id` (Compute Statistics' network-breaking step later derives `upstream_edge_id` for the other side of the split). For each structure: find the nearest streams edge within `structure_snap_edge_distance_m` (default 100m); if an existing vertex on that edge is within `structure_snap_vertex_distance_m` (default 50m), snap to it; otherwise insert a new vertex at the snapped point, interpolating its elevation.
+Snaps every `all_barriers` point onto the stream network, writing `snapped_geometry` and `downstream_edge_id` (Compute Statistics' network-breaking step later moves it to the segment that starts at the structure). For each structure: find the nearest streams edge within `structure_snap_edge_distance_m` (default 100m), breaking ties by edge id so every run picks the same edge; if an existing vertex on that edge is within `structure_snap_vertex_distance_m` (default 50m), snap to it; otherwise insert a new vertex at the snapped point, interpolating its elevation.
 
 ### Process Habitat
 
@@ -247,9 +248,9 @@ Loads and snaps habitat update points the same way structures are snapped, so th
 
 The core numerical phase. It runs once at network scale (breaking, effective length, gradient), then partitions the rest of the work by `graph_id` (see Load Stream Network) so each connected group of edges is processed independently -- this bounds memory/compute to one river system at a time instead of the whole network. Components are packed largest-first into edge-count-bounded bundles for bulk fetch/write, and any `graph_id` group made up of `is_isolated = true` edges is skipped entirely.
 
-1. **Break the network** at every vertex a structure or habitat point snapped onto (structure/habitat snapping already ensured a real vertex exists there): each affected edge is split into segments at those vertices, and the corresponding `all_barriers`/`habitat_updates` edge-id references are corrected to point at the resulting segments. Edges with no snapped point are left untouched.
+1. **Break the network** at every vertex a structure or habitat point snapped onto (structure/habitat snapping already ensured a real vertex exists there): each affected edge is split into segments at those vertices, and the corresponding `all_barriers`/`habitat_updates` edge-id references are corrected to point at the resulting segments. A barrier's `downstream_edge_id` ends up as the segment that starts at the barrier; a barrier snapped to the last vertex of an edge is moved to the edge that starts there, so the result doesn't depend on which edge it was snapped to. A barrier on the last vertex of an outlet edge has no edge to move to, so a zero-length sink edge (`is_sink_barrier_edge = true`) is added below the outlet and the barrier is placed at its start; sink edges stay in `streams` but are left out of every view. Edges with no snapped point are left untouched.
 
-2. **Compute `effective_length` and `segment_gradient`** for every edge in one pass: per `ecatchment_id`, only the longest mainstem's edges keep their geometric length as `effective_length` (others get 0); `segment_gradient` is the elevation drop between an edge's endpoints divided by its length, or NULL if the length is 0 or either endpoint's smoothed elevation is missing.
+2. **Compute `length`, `effective_length` and `segment_gradient`** for every edge in one pass. `length` is first recomputed for every edge as `ST_Length(geometry::geography)` from its final geometry, replacing the CHyF length, so split and unsplit edges use the same measure; the other two use this length. Per `ecatchment_id`, only the longest mainstem's edges keep their geometric length as `effective_length` (others get 0); `segment_gradient` is the elevation drop between an edge's endpoints divided by its length, or NULL if the length is 0 or either endpoint's smoothed elevation is missing.
 
 3. **Per connected component**, compute every species/lifecycle's statistics together in a handful of linear passes over the component's edges in topological order (rather than walking the graph separately from every edge, which wouldn't finish at network scale), in this order:
 

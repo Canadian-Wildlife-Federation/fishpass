@@ -249,6 +249,8 @@ def sql_derive_stream_id_up(c):
         FROM {c.streams} a, {c.work} b
         WHERE st_dwithin(a.{STREAM_GEOM_COL}, b.{BARRIER_GEOM_COL}, 0.01)
           AND st_dwithin(st_endpoint(a.{STREAM_GEOM_COL}), b.{BARRIER_GEOM_COL}, 0.01)
+          -- a sink edge ends where its outlet edge ends; keep matching the outlet edge
+          AND NOT a.is_sink_barrier_edge
     )
     UPDATE {c.work}
         SET stream_id_up = a.stream_id

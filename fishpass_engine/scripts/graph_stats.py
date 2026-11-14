@@ -13,6 +13,15 @@ import species_params as sp_mod
 from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
 
 
+def successor_edge_at_nexus(edge_ids):
+	"""The one edge treated as continuing downstream from a nexus, given every edge id starting
+	there. Normally there is only one; at a distributary/braid this picks the smallest id, so the
+	choice doesn't depend on the order edges were fetched in. Shared by build_graph and
+	network_break.find_downstream_edge_ids, so a barrier moved onto "the" downstream edge always
+	lands on the edge the graph treats as downstream."""
+	return min(edge_ids)
+
+
 def build_graph(edges):
 	"""edges: iterable of dicts with at least "id", "from_nexus_id", "to_nexus_id".
 
@@ -24,13 +33,14 @@ def build_graph(edges):
 	  roots -> every edge_id with no successor.
 
 	Assumes the normal dendritic case: at most one edge starts at any given nexus. If two edges
-	share a from_nexus_id (a distributary/braid), one is picked arbitrarily as that nexus's
-	"successor" edge and a warning-worthy edge case is silently resolved rather than erroring --
-	true distributaries are not expected in this network.
+	share a from_nexus_id (a distributary/braid), successor_edge_at_nexus picks one as that
+	nexus's "successor" edge and the edge case is silently resolved rather than erroring -- true
+	distributaries are not expected in this network.
 	"""
-	edge_at_from_nexus = {}
+	edges_at_from_nexus = {}
 	for e in edges:
-		edge_at_from_nexus.setdefault(e["from_nexus_id"], e["id"])
+		edges_at_from_nexus.setdefault(e["from_nexus_id"], []).append(e["id"])
+	edge_at_from_nexus = {nexus: successor_edge_at_nexus(ids) for nexus, ids in edges_at_from_nexus.items()}
 
 	predecessors = {e["id"]: [] for e in edges}
 	successor = {}

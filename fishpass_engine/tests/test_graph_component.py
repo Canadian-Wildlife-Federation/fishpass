@@ -119,7 +119,7 @@ class FetchBundleEdgesTests(unittest.TestCase):
 
 class FetchBundleBarriersTests(unittest.TestCase):
 	def test_groups_by_graph_id(self):
-		cursor = FakeCursor(fetch_results=[[(5, "internal-b1", "feature-b1", "e1", "e0", {"es_rear": 0}, "natural")]])
+		cursor = FakeCursor(fetch_results=[[(5, "internal-b1", "feature-b1", "e1", {"es_rear": 0}, "natural")]])
 		result = gc.fetch_bundle_barriers(cursor, "model_test", [5, 6])
 		self.assertEqual(
 			result,
@@ -129,7 +129,6 @@ class FetchBundleBarriersTests(unittest.TestCase):
 						"id": "internal-b1",
 						"feature_id": "feature-b1",
 						"edge_id": "e1",
-						"upstream_edge_id": "e0",
 						"species_passability_value": {"es_rear": 0},
 						"structure_type": "natural",
 					}
@@ -137,7 +136,7 @@ class FetchBundleBarriersTests(unittest.TestCase):
 			},
 		)
 		sql, params = cursor.executed[0]
-		self.assertIn("s.upstream_edge_id", sql)
+		self.assertNotIn("upstream_edge_id", sql)
 		self.assertIn("s.feature_id", sql)
 		self.assertIn("WHERE e.graph_id = ANY(%s)", sql)
 		self.assertEqual(params, ([5, 6],))
@@ -376,7 +375,6 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 				"id": "b1",
 				"feature_id": "feature-b1",
 				"edge_id": "E3",
-				"upstream_edge_id": None,  # confluence
 				"species_passability_value": {"es_rear": 1, "es_spawn": 1},
 				"structure_type": "natural",
 			}
@@ -389,19 +387,85 @@ class ProcessComponentEndToEndTests(unittest.TestCase):
 		# No accessibility thresholds in these params -> no limit.
 		self.assertEqual(row["stats"]["es"]["spawn_upstream_below_gradient_threshold_length"], 30.0)
 		self.assertEqual(row["stats"]["es"]["rear_upstream_below_gradient_threshold_length"], 30.0)
-		# The existing length fields still use effective_length (and are None at a confluence).
-		self.assertIsNone(row["stats"]["es"]["rear_upstream_length"])
+		# The existing length fields still use effective_length, summed over both inflowing
+		# edges: E1 (10) + E2 (zeroed).
+		self.assertEqual(row["stats"]["es"]["rear_upstream_length"], 10.0)
+
+	def _sink_edge_network(self):
+		# A zero-length sink edge F below the outlet E4, as network_break adds for a barrier on
+		# E4's last vertex (its gradient is NULL because its length is 0).
+		edges = self._edges()
+		edges.append(
+			{
+				"id": "F",
+				"from_nexus_id": "N5",
+				"to_nexus_id": "N6",
+				"mainstem_id": "M1",
+				"length": 0.0,
+				"effective_length": 0.0,
+				"segment_gradient": None,
+				"strahler_order": 2,
+			}
+		)
+		return edges
+
+	def test_sink_barrier_includes_its_outlet_edge(self):
+		plan, species_params = self._plan_and_species_params()
+		barriers = [
+			{
+				"id": "b1",
+				"feature_id": "feature-b1",
+				"edge_id": "F",
+				# Impassable anthropogenic, so the functional reset at F is exercised too.
+				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
+				"structure_type": "anthropogenic",
+			}
+		]
+
+		edge_stats, barrier_rows, _route_measures = gc.process_component(
+			1, self._sink_edge_network(), barriers, [], plan, species_params
+		)
+		species_stats = dict(edge_stats)
+
+		stats = barrier_rows[0]["stats"]["es"]
+		everything = 10.0 + 20.0 + 5.0 + 3.0  # E1 + E2 + E3 + E4, including the outlet edge E4
+		self.assertEqual(barrier_rows[0]["upstream_stream_length"], everything)
+		self.assertEqual(stats["rear_upstream_length"], everything)
+		self.assertEqual(stats["rear_functional_upstream_length"], everything)
+		self.assertEqual(stats["upstream_anthro_rear_count"], 0)
+		self.assertEqual(stats["downstream_anthro_rear_count"], 0)
+		# The outlet edge E4 is upstream of the barrier.
+		self.assertEqual(species_stats["E4"]["es"]["downstream_anthro_rear_count"], 1)
+		self.assertEqual(species_stats["E4"]["es"]["upstream_anthro_rear_count"], 0)
+
+	def test_natural_sink_barrier_makes_outlet_edge_inaccessible(self):
+		plan, species_params = self._plan_and_species_params()
+		barriers = [
+			{
+				"id": "b1",
+				"feature_id": "feature-b1",
+				"edge_id": "F",
+				"species_passability_value": {"es_rear": 0, "es_spawn": 0},
+				"structure_type": "natural",
+			}
+		]
+
+		edge_stats, _barrier_rows, _route_measures = gc.process_component(
+			1, self._sink_edge_network(), barriers, [], plan, species_params
+		)
+		species_stats = dict(edge_stats)
+
+		self.assertEqual(species_stats["E4"]["es"]["rear_accessibility"], "naturally_inaccessible")
+		self.assertEqual(species_stats["F"]["es"]["rear_accessibility"], "naturally_accessible")
 
 	def test_natural_spawn_barrier_blocks_upstream_spawn_accessibility_only(self):
 		plan, species_params = self._plan_and_species_params()
-		# edge_id="E3" sits at the E1/E2 confluence, so upstream_edge_id is ambiguous/None here
-		# (see network_break.py's marker-attachment convention).
+		# edge_id="E3" sits at the E1/E2 confluence.
 		barriers = [
 			{
 				"id": "b1",
 				"feature_id": "feature-b1",
 				"edge_id": "E3",
-				"upstream_edge_id": None,
 				"species_passability_value": {"es_rear": 1, "es_spawn": 0},
 				"structure_type": "natural",
 			}
@@ -460,8 +524,8 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 	"""Branching network: (E1,E2)->E5, (E3,E4)->E6, (E5,E6)->E7->E8->E9 (outlet). E1/E2 are order-1
 	tributary pairs, E5/E6 order-2, E7/E8/E9 an order-3 mainstem chain. E1's gradient is too steep
 	for both rear and spawn habitat; E2's is too steep for rear only. Two anthropogenic dams: B1 at
-	the E7/E8 boundary (edge_id="E8", upstream_edge_id="E7"), B2 at the E8/E9 boundary
-	(edge_id="E9", upstream_edge_id="E8"). Exercises gradient-driven habitat exclusion, order 1/2
+	the E7/E8 boundary (edge_id="E8"), B2 at the E8/E9 boundary
+	(edge_id="E9"). Exercises gradient-driven habitat exclusion, order 1/2
 	downweighting, and downstream-first-barrier degradation together in one component."""
 
 	def _edges(self):
@@ -494,7 +558,6 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 				"id": "b1",
 				"feature_id": "feature-b1",
 				"edge_id": "E8",
-				"upstream_edge_id": "E7",
 				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0},
 				"structure_type": "anthropogenic",
 			},
@@ -502,7 +565,6 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 				"id": "b2",
 				"feature_id": "feature-b2",
 				"edge_id": "E9",
-				"upstream_edge_id": "E8",
 				"species_passability_value": {"es_spawn": 0.5, "es_rear": 0.25},
 				"structure_type": "anthropogenic",
 			},
@@ -655,7 +717,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		self.assertEqual(stats["spawnrear_functional_upstream_length"], 600.0)
 
 		# b1's own passability: rear=0, spawn=0.5, spawnrear=min(0,0.5)=0. Base weighted length
-		# summed over E1..E7 (upstream_edge_id=E7, no anthro barrier sits within that range so the
+		# summed over E1..E7 (E8's only inflowing edge is E7, no anthro barrier sits within that range so the
 		# functional/reset sum equals the plain sum here): rear base sum = 350, spawn base sum = 225,
 		# spawnrear base sum (per-edge max of rear/spawn base) = 375.
 		self.assertAlmostEqual(stats["rear_weighted_connected_upstream_length"], 350.0 * 0.0)
@@ -713,7 +775,7 @@ class BranchingNetworkGradientOrderAndBarrierTests(unittest.TestCase):
 		self.assertEqual(stats["spawnrear_functional_upstream_length"], 100.0)
 
 		# b2's own passability: rear=0.25, spawn=0.5, spawnrear=min(0.5,0.25)=0.25. Base weighted
-		# length summed over E1..E8 (upstream_edge_id=E8): rear base sum = 450, spawn base sum = 325,
+		# length summed over E1..E8 (E9's only inflowing edge is E8): rear base sum = 450, spawn base sum = 325,
 		# spawnrear base sum = 475. b1 sits at E8 (an anthro barrier "at" E8's own start), so the
 		# functional/reset sum resets there -- it's just E8's own base local value: rear=100,
 		# spawn=100, spawnrear=max(100,100)=100.

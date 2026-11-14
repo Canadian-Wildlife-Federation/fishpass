@@ -275,5 +275,13 @@ class SQLBuildersTests(unittest.TestCase):
 		self.assertIn("finalize slim output table", stage_names)
 
 
+class DeriveStreamIdUpTests(unittest.TestCase):
+	def test_ignores_sink_edges(self):
+		# A sink edge ends where its outlet edge ends, so it would match the same barrier.
+		c = types.SimpleNamespace(work='"s"."w"', streams='"s"."streams"')
+		sql = rb.sql_derive_stream_id_up(c)
+		self.assertIn("AND NOT a.is_sink_barrier_edge", sql)
+
+
 if __name__ == "__main__":
 	unittest.main()

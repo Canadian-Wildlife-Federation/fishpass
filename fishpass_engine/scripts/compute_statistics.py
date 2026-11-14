@@ -43,6 +43,10 @@ def compute_effective_length_and_gradient(cursor, output_schema):
 	"""Compute Statistics steps 3-4, combined into a single UPDATE so each streams row is
 	rewritten only once.
 
+	length: every edge's length is first recomputed as ST_Length(geometry::geography) from its
+	final (post-break) geometry, replacing the CHyF length copied at load. Every edge then uses the
+	same measure, whether or not network breaking touched it, and steps 3-4 below use this length.
+
 	Step 3 (effective_length): for each ecatchment_id, the mainstem_id with the greatest total
 	length gets effective_length = length on its own edges; every other edge in that
 	ecatchment_id (including edges on other mainstems, or with no mainstem_id at all) gets
@@ -59,9 +63,13 @@ def compute_effective_length_and_gradient(cursor, output_schema):
 	schema_ident = quote_ident(output_schema)
 
 	cursor.execute(f"""
-		WITH mainstem_lengths AS (
-			SELECT ecatchment_id, mainstem_id, SUM(length) AS total_length
+		WITH new_length AS (
+			SELECT id, ecatchment_id, mainstem_id, ST_Length(geometry::geography) AS length
 			FROM {schema_ident}.streams
+		),
+		mainstem_lengths AS (
+			SELECT ecatchment_id, mainstem_id, SUM(length) AS total_length
+			FROM new_length
 			WHERE ecatchment_id IS NOT NULL AND mainstem_id IS NOT NULL
 			GROUP BY ecatchment_id, mainstem_id
 		),
@@ -71,23 +79,24 @@ def compute_effective_length_and_gradient(cursor, output_schema):
 			ORDER BY ecatchment_id, total_length DESC, mainstem_id
 		),
 		best_mainstem_by_row AS (
-			SELECT st.id, bm.mainstem_id AS best_mainstem_id
-			FROM {schema_ident}.streams st
-			LEFT JOIN best_mainstem bm ON st.ecatchment_id = bm.ecatchment_id
+			SELECT nl.id, nl.length, bm.mainstem_id AS best_mainstem_id
+			FROM new_length nl
+			LEFT JOIN best_mainstem bm ON nl.ecatchment_id = bm.ecatchment_id
 		)
 		UPDATE {schema_ident}.streams s
 		SET
+			length = r.length,
 			effective_length = CASE
-				WHEN s.ecatchment_id IS NULL OR s.mainstem_id IS NULL THEN s.length
-				WHEN s.mainstem_id = r.best_mainstem_id THEN s.length
+				WHEN s.ecatchment_id IS NULL OR s.mainstem_id IS NULL THEN r.length
+				WHEN s.mainstem_id = r.best_mainstem_id THEN r.length
 				ELSE 0
 			END,
 			segment_gradient = CASE
-				WHEN s.length > 0
+				WHEN r.length > 0
 				THEN (
 					NULLIF(ST_M(ST_StartPoint(s.geometry)), {NO_DATA})
 					- NULLIF(ST_M(ST_EndPoint(s.geometry)), {NO_DATA})
-				) / s.length
+				) / r.length
 				ELSE NULL
 			END
 		FROM best_mainstem_by_row r

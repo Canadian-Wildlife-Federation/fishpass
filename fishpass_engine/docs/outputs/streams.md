@@ -9,7 +9,7 @@
 | ef\_type | int | Flowpath type |
 | ef\_subtype | int | Flowpath subtype |
 | rank | int | Rank (primary/secondary) |
-| length | double | Raw 2d length of flowpath |
+| length | double | Length (m) of the edge, computed with PostGIS `ST_Length(geometry::geography)` from its final geometry after network breaking. Every edge is recomputed this way, split or not, so this replaces the CHyF flowpath length. |
 | rivernameid1 | uuid | CHyF primary river name identifier (`chyf_raw.flowpath.rivernameid1`). |
 | stream\_name\_en | text | English name for `rivernameid1`, from `chyf_raw.names`. NULL when the edge has no name. Segments created by network breaking keep the name of the edge they were split from. |
 | from\_nexus\_id | uuid | |
@@ -22,6 +22,7 @@
 | upstream\_route\_measure | double precision | |
 | segment\_gradient | double precision | |
 | effective\_length | double | The raw length for edges, except for the non-core mainstem in flowpaths. This removes the length of skeleton connectors from the analysis. |
+| is\_sink\_barrier\_edge | boolean | True for a zero-length "sink edge" that network breaking adds below an outlet edge when a barrier sits on that outlet edge's very last vertex. The barrier is placed at the start of the sink edge, like every other barrier, so the outlet edge counts as upstream of it. Sink edges are only in this table: the `streams_<species>` views, the stream exports and `watershed_summary_stats` leave them out. False for every other edge. |
 | species\_statistics** | jsonb | This is a jsonb column containing all species statistics. We will use views to convert these into user-friendly columns.  Each field is described in the next table. |
 | geometry | LineStringZM | |
 

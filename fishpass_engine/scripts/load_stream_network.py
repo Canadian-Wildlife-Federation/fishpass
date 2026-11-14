@@ -149,6 +149,7 @@ def create_streams_table(cursor, output_schema, srid):
 			downstream_route_measure double precision,
 			upstream_route_measure double precision,
 			species_stats jsonb,
+			is_sink_barrier_edge boolean NOT NULL DEFAULT false,
 			geometry geometry(LineStringZM, {srid}) NOT NULL
 		);
 	""")

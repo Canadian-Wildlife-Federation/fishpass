@@ -40,6 +40,23 @@ class BuildGraphTests(unittest.TestCase):
 		self.assertEqual(predecessors["E1"], [])
 		self.assertEqual(roots, ["E4"])
 
+	def test_braid_successor_is_smallest_id_whatever_the_edge_order(self):
+		# E1 ends at N2, where two edges start (a braid): "Db" and "Da".
+		edges = [
+			{"id": "E1", "from_nexus_id": "N1", "to_nexus_id": "N2"},
+			{"id": "Db", "from_nexus_id": "N2", "to_nexus_id": "N3"},
+			{"id": "Da", "from_nexus_id": "N2", "to_nexus_id": "N4"},
+		]
+		for ordering in (edges, list(reversed(edges))):
+			successor, predecessors, _roots = gs.build_graph(ordering)
+			self.assertEqual(successor["E1"], "Da")
+			self.assertEqual(predecessors["Da"], ["E1"])
+			self.assertEqual(predecessors["Db"], [])
+
+	def test_successor_edge_at_nexus_single_and_braid(self):
+		self.assertEqual(gs.successor_edge_at_nexus(["D"]), "D")
+		self.assertEqual(gs.successor_edge_at_nexus(["Db", "Da", "Dc"]), "Da")
+
 
 class OrderingTests(unittest.TestCase):
 	def test_upstream_order_respects_predecessors(self):

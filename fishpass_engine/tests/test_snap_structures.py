@@ -76,6 +76,8 @@ class FetchCandidateMatchesTests(unittest.TestCase):
 		self.assertIn("ST_LineLocatePoint", sql)
 		self.assertIn("ST_LineInterpolatePoint", sql)
 		self.assertIn("s.snapped_geometry IS NULL", sql)
+		# Ties (a structure exactly on a nexus is 0 m from several edges) resolve the same way every run.
+		self.assertIn("ORDER BY s.geometry::geography <-> e.geometry::geography, e.id", " ".join(sql.split()))
 		self.assertEqual(params, (100,))
 
 

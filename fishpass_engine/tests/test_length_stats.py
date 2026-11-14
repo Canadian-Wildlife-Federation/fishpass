@@ -527,17 +527,16 @@ class UpstreamStreamLengthAndGradientThresholdLengthTests(unittest.TestCase):
 		)
 		# Same lookup graph_component.process_component does for each barrier row.
 		upstream_by_barrier = {
-			b["id"]: sum((upstream_by_edge[p] for p in self.predecessors.get(b["edge_id"], [])), 0.0) for b in barriers
+			b["id"]: ls.sum_inflowing(self.predecessors, b["edge_id"], upstream_by_edge) for b in barriers
 		}
 		return species_result, upstream_by_edge, by_barrier, upstream_by_barrier
 
 	@staticmethod
-	def _barrier(bid, edge_id, upstream_edge_id):
+	def _barrier(bid, edge_id):
 		return {
 			"id": bid,
 			"feature_id": f"feature-{bid}",
 			"edge_id": edge_id,
-			"upstream_edge_id": upstream_edge_id,
 			"species_passability_value": {"es_spawn": 0, "es_rear": 0},
 			"structure_type": "anthropogenic",
 		}
@@ -550,33 +549,32 @@ class UpstreamStreamLengthAndGradientThresholdLengthTests(unittest.TestCase):
 
 	def test_uses_raw_stream_length_not_effective_length(self):
 		# effective_length would give 10+20+5 = 35 upstream of E4's start.
-		_, _, _, upstream_by_barrier = self._run([self._barrier("b", "E4", "E3")])
+		_, _, _, upstream_by_barrier = self._run([self._barrier("b", "E4")])
 		self.assertEqual(upstream_by_barrier["b"], 11.0 + 22.0 + 7.0)
 
 	def test_barrier_mid_stem(self):
-		_, _, by_barrier, upstream_by_barrier = self._run([self._barrier("b", "E4", "E3")])
+		_, _, by_barrier, upstream_by_barrier = self._run([self._barrier("b", "E4")])
 		self.assertEqual(upstream_by_barrier["b"], 40.0)
 		self.assertEqual(by_barrier["b"]["es"]["spawn_upstream_below_gradient_threshold_length"], 33.0)
 		self.assertEqual(by_barrier["b"]["es"]["rear_upstream_below_gradient_threshold_length"], 11.0)
 
 	def test_barrier_at_confluence_adds_every_inflowing_edge(self):
-		# upstream_edge_id is None at a confluence; the other length fields are None there, but
-		# these two still get a value from both inflowing edges (E1 and E2).
-		_, _, by_barrier, upstream_by_barrier = self._run([self._barrier("b", "E3", None)])
+		# Every length field adds the totals of both inflowing edges (E1 and E2).
+		_, _, by_barrier, upstream_by_barrier = self._run([self._barrier("b", "E3")])
 		self.assertEqual(upstream_by_barrier["b"], 11.0 + 22.0)
 		self.assertEqual(by_barrier["b"]["es"]["spawn_upstream_below_gradient_threshold_length"], 33.0)
 		self.assertEqual(by_barrier["b"]["es"]["rear_upstream_below_gradient_threshold_length"], 11.0)
-		self.assertIsNone(by_barrier["b"]["es"]["rear_upstream_length"])
+		self.assertEqual(by_barrier["b"]["es"]["rear_upstream_length"], 10.0 + 20.0)
 
 	def test_headwater_barrier_is_zero(self):
-		_, _, by_barrier, upstream_by_barrier = self._run([self._barrier("b", "E1", None)])
+		_, _, by_barrier, upstream_by_barrier = self._run([self._barrier("b", "E1")])
 		self.assertEqual(upstream_by_barrier["b"], 0.0)
 		self.assertEqual(by_barrier["b"]["es"]["spawn_upstream_below_gradient_threshold_length"], 0.0)
 		self.assertEqual(by_barrier["b"]["es"]["rear_upstream_below_gradient_threshold_length"], 0.0)
 
 	def test_two_barriers_on_the_same_edge_get_the_same_values(self):
 		_, _, by_barrier, upstream_by_barrier = self._run(
-			[self._barrier("b1", "E4", "E3"), self._barrier("b2", "E4", "E3")]
+			[self._barrier("b1", "E4"), self._barrier("b2", "E4")]
 		)
 		self.assertEqual(upstream_by_barrier["b1"], 40.0)
 		self.assertEqual(upstream_by_barrier["b2"], 40.0)
@@ -588,9 +586,9 @@ class UpstreamStreamLengthAndGradientThresholdLengthTests(unittest.TestCase):
 	def test_barriers_upstream_do_not_stop_the_sum(self):
 		# Impassable anthropogenic barriers at E3 and at E1 sit upstream of the E4 barrier.
 		barriers = [
-			self._barrier("up1", "E3", None),
-			self._barrier("up2", "E1", None),
-			self._barrier("b", "E4", "E3"),
+			self._barrier("up1", "E3"),
+			self._barrier("up2", "E1"),
+			self._barrier("b", "E4"),
 		]
 		_, _, by_barrier, upstream_by_barrier = self._run(barriers)
 		self.assertEqual(upstream_by_barrier["b"], 40.0)
@@ -629,6 +627,20 @@ class UpstreamStreamLengthAndGradientThresholdLengthTests(unittest.TestCase):
 		)
 		self.assertEqual(species_result, {})
 		self.assertEqual(upstream_by_edge["E4"], 44.0)
+
+
+class SumInflowingTests(unittest.TestCase):
+	TOTALS = {"E1": 10.0, "E2": 20.0, "E3": 35.0}
+
+	def test_single_inflowing_edge_gives_its_total(self):
+		self.assertEqual(ls.sum_inflowing({"E4": ["E3"]}, "E4", self.TOTALS), 35.0)
+
+	def test_confluence_adds_every_branch(self):
+		self.assertEqual(ls.sum_inflowing({"E3": ["E1", "E2"]}, "E3", self.TOTALS), 30.0)
+
+	def test_headwater_is_zero(self):
+		self.assertEqual(ls.sum_inflowing({"E1": []}, "E1", self.TOTALS), 0.0)
+		self.assertEqual(ls.sum_inflowing({}, "E1", self.TOTALS), 0.0)
 
 
 class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
@@ -713,13 +725,12 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		self.assertEqual(result["b1"]["es"]["upstream_natural_rear_count"], 0)
 		self.assertEqual(result["b1"]["es"]["downstream_natural_spawn_count"], 0)
 
-	def test_length_fields_taken_as_is_at_upstream_edge(self):
+	def test_length_fields_summed_over_inflowing_edges(self):
 		barriers = [
 			{
 				"id": "b1",
 				"feature_id": "b1",
 				"edge_id": "E3",
-				"upstream_edge_id": "E2",
 				"structure_type": "natural",
 				"species_passability_value": {"es_spawn": 0.4, "es_rear": 0.4},
 			}
@@ -750,7 +761,7 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			},
 		}
 		result = ls.compute_barrier_upstream_downstream_stats(
-			barriers, barrier_stats, barrier_here_by_species, species_length_stats, {}
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats, {"E3": ["E2"]}
 		)
 		self.assertEqual(result["b1"]["es"]["spawn_upstream_accessible_length"], 30.0)
 		self.assertEqual(result["b1"]["es"]["rear_upstream_accessible_length"], 35.0)
@@ -771,7 +782,6 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 				"id": "b1",
 				"feature_id": "b1",
 				"edge_id": "E3",
-				"upstream_edge_id": "E2",
 				"structure_type": "anthropogenic",
 				"species_passability_value": {"es_spawn": 0.7, "es_rear": 0.3},
 			}
@@ -798,7 +808,7 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			},
 		}
 		result = ls.compute_barrier_upstream_downstream_stats(
-			barriers, barrier_stats, barrier_here_by_species, species_length_stats, {}
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats, {"E3": ["E2"]}
 		)
 		# min(0.7, 0.3) = 0.3
 		self.assertAlmostEqual(result["b1"]["es"]["spawnrear_weighted_connected_upstream_length"], 20.0 * 0.3)
@@ -818,7 +828,6 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 				"id": "b1",
 				"feature_id": "b1",
 				"edge_id": "E3",
-				"upstream_edge_id": "E2",
 				"structure_type": "anthropogenic",
 				"species_passability_value": {},
 			}
@@ -845,18 +854,17 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 			},
 		}
 		result = ls.compute_barrier_upstream_downstream_stats(
-			barriers, barrier_stats, barrier_here_by_species, species_length_stats, {}
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats, {"E3": ["E2"]}
 		)
 		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_connected_upstream_length"], 0.0)
 		self.assertAlmostEqual(result["b1"]["es"]["rear_weighted_disconnected_upstream_length"], 19.0)
 
-	def test_length_fields_none_when_upstream_edge_id_missing(self):
+	def _confluence_result(self, predecessors):
 		barriers = [
 			{
 				"id": "b1",
 				"feature_id": "b1",
 				"edge_id": "E3",
-				"upstream_edge_id": None,
 				"structure_type": "natural",
 				"species_passability_value": {"es_rear": 0.4},
 			}
@@ -878,19 +886,39 @@ class ComputeBarrierUpstreamDownstreamStatsTests(unittest.TestCase):
 		}
 		species_length_stats = {
 			"es": {
-				"rear_upstream_length": {"E1": 5.0, "E2": 5.0},
-				"rear_weighted_upstream_length_base": {"E1": 5.0, "E2": 5.0},
-				"rear_functional_weighted_upstream_length_base": {"E1": 5.0, "E2": 5.0},
+				"rear_upstream_length": {"E1": 5.0, "E2": 7.0},
+				"rear_functional_upstream_length": {"E1": 2.0, "E2": 3.0},
+				"rear_weighted_upstream_length_base": {"E1": 5.0, "E2": 7.0},
+				"rear_functional_weighted_upstream_length_base": {"E1": 2.0, "E2": 3.0},
 			},
 		}
 		result = ls.compute_barrier_upstream_downstream_stats(
-			barriers, barrier_stats, barrier_here_by_species, species_length_stats, {}
+			barriers, barrier_stats, barrier_here_by_species, species_length_stats, predecessors
 		)
-		self.assertIsNone(result["b1"]["es"]["rear_upstream_length"])
-		self.assertIsNone(result["b1"]["es"]["rear_weighted_connected_upstream_length"])
-		self.assertIsNone(result["b1"]["es"]["rear_weighted_disconnected_upstream_length"])
-		self.assertIsNone(result["b1"]["es"]["rear_functional_weighted_connected_upstream_length"])
-		self.assertIsNone(result["b1"]["es"]["rear_functional_weighted_disconnected_upstream_length"])
+		return result["b1"]["es"]
+
+	def test_length_fields_at_confluence_sum_every_inflowing_edge(self):
+		# E1 and E2 both flow into E3, where the barrier sits.
+		stats = self._confluence_result({"E3": ["E1", "E2"]})
+		self.assertEqual(stats["rear_upstream_length"], 12.0)
+		self.assertEqual(stats["rear_functional_upstream_length"], 5.0)
+		self.assertAlmostEqual(stats["rear_weighted_connected_upstream_length"], 12.0 * 0.4)
+		self.assertAlmostEqual(stats["rear_weighted_disconnected_upstream_length"], 12.0 * 0.6)
+		self.assertAlmostEqual(stats["rear_functional_weighted_connected_upstream_length"], 5.0 * 0.4)
+		self.assertAlmostEqual(stats["rear_functional_weighted_disconnected_upstream_length"], 5.0 * 0.6)
+
+	def test_length_fields_zero_at_headwater(self):
+		# Nothing flows into E3.
+		stats = self._confluence_result({})
+		for field in (
+			"rear_upstream_length",
+			"rear_functional_upstream_length",
+			"rear_weighted_connected_upstream_length",
+			"rear_weighted_disconnected_upstream_length",
+			"rear_functional_weighted_connected_upstream_length",
+			"rear_functional_weighted_disconnected_upstream_length",
+		):
+			self.assertEqual(stats[field], 0.0, field)
 
 
 if __name__ == "__main__":
