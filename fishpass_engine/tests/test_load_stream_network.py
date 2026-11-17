@@ -193,14 +193,29 @@ if __name__ == "__main__":
 
 class StreamsBulkWriteIndexTests(unittest.TestCase):
 	INDEX_NAMES = ("streams_geometry_idx", "streams_geometry_geog_idx", "streams_aoi_id_idx")
+	# Only Process Habitat uses these, so they are dropped and not recreated.
+	NEXUS_INDEX_NAMES = ("streams_from_nexus_id_idx", "streams_to_nexus_id_idx")
 
 	def test_drop_targets_snapping_only_indexes(self):
 		cursor = FakeCursor()
 		lsn.drop_streams_bulk_write_indexes(cursor, "model_test")
 		self.assertEqual(
 			[sql for sql, _ in cursor.executed],
-			[f'DROP INDEX IF EXISTS "model_test".{name};' for name in self.INDEX_NAMES],
+			[f'DROP INDEX IF EXISTS "model_test".{name};' for name in self.INDEX_NAMES + self.NEXUS_INDEX_NAMES],
 		)
+
+	def test_create_indexes_includes_nexus_id_indexes(self):
+		cursor = FakeCursor()
+		lsn.create_indexes(cursor, "model_test")
+		statements = [sql for sql, _ in cursor.executed]
+		self.assertIn('CREATE INDEX streams_from_nexus_id_idx ON "model_test".streams (from_nexus_id);', statements)
+		self.assertIn('CREATE INDEX streams_to_nexus_id_idx ON "model_test".streams (to_nexus_id);', statements)
+
+	def test_create_does_not_rebuild_nexus_id_indexes(self):
+		cursor = FakeCursor()
+		lsn.create_streams_bulk_write_indexes(cursor, "model_test")
+		for name in self.NEXUS_INDEX_NAMES:
+			self.assertFalse(any(name in sql for sql, _ in cursor.executed), name)
 
 	def test_drop_keeps_graph_id_index(self):
 		# streams_graph_id_idx is what the steps 5-9 bundle fetches filter on.

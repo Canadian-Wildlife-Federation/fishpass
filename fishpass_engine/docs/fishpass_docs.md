@@ -28,7 +28,7 @@ The database must be configured before the first model run. See [Database Setup]
 | Fish Species Parameters | [fish_species_parameter_file.md](../../docs/fish_species_parameter_file.md) |
 | Stream Network | [inputs/stream_network.md](./inputs/chyf_stream_network.md) |
 | CABD Barriers | [inputs/cabd_barriers.md](./inputs/cabd_barriers.md) |
-| Gradient Barriers | [inputs/gradient_barriers.md](./inputs/gradient_barriers.md)|
+| Gradient Barriers | [inputs/gradient_barriers.md](./inputs/gradient_barriers.md) |
 | Habitat Updates | [inputs/habitat_updates_dataset.md](./inputs/habitat_updates_dataset.md) |
 | Structure Updates | [inputs/structure_updates_dataset.md](./inputs/structure_updates_dataset.md) |
 | New Structures | [inputs/structure_new_dataset.md](./structure_new_dataset/cabd_barriers.md) |
@@ -244,11 +244,63 @@ Loads and snaps habitat update points the same way structures are snapped, so th
 
 2. Snap each row's point(s) (upstream, downstream, or both for `location_type = between`) onto the network: if a `chyf_upstream_edge_id` or `chyf_downstream_edge_id` is given, snap to that specific edge within `habitat_point_snap_edge_distance_m` or fail the run; otherwise snap to the nearest edge within that tolerance, or silently skip the point if none is in range. Once an edge is chosen, snap to an existing vertex within `habitat_point_snap_vertex_distance_m`, or insert a new one, interpolating elevation. Points on the same edge share a single working copy of that edge so their inserted vertices are visible to each other.
 
+3. Settle which edge each *bottom point* belongs to (see below).
+
+#### Top points and bottom points
+
+A habitat point marks one end of a stretch of habitat:
+
+* A **top point** marks the upstream end: the point of a `location_type = downstream` row ("everything downstream of here"), or the upstream point of a `between` row.
+* A **bottom point** marks the downstream end: the point of a `location_type = upstream` row ("everything upstream of here"), or the downstream point of a `between` row.
+
+Compute Statistics breaks the network at every habitat point, then attaches a top point to the segment that *starts* at it and a bottom point to the segment that *ends* at it, so the habitat covers exactly the stretch between the two and nothing beyond either point.
+
+A bottom point therefore has to be recorded on the edge above it. In the middle of an edge it already is. When it snaps onto a nexus (the first or last vertex of an edge), several edges meet at the point, and the edge it is recorded on also decides which river (`mainstem_id`) the habitat follows. Step 3 resolves each such point with the table below and records it as the last vertex of the chosen edge. An *input edge* is an edge flowing into the nexus; the *outflow edge* is the edge leaving it. "Edge id given" means the row has a `chyf_upstream_edge_id` (for an `upstream` row's point) or `chyf_downstream_edge_id` (for a `between` row's downstream point).
+
+| # | Edge id given? | Where the bottom point snaps | Result |
+| --- | --- | --- | --- |
+| 1 | Yes | Middle of the given edge | Stays on the given edge. The edge is broken at the point and the point is attached to the part above it. |
+| 2 | No | Middle of the nearest edge | Same as 1. |
+| 3 | Yes | Last vertex of the given edge | Stays on the given edge. |
+| 4 | No | A nexus with one input edge | Moved to that input edge. |
+| 5a | Yes | First vertex of the given edge | Moved to the input edge with the same `mainstem_id` as the given edge. |
+| 5b | Yes | First vertex of the given edge, and no edge flows into it (a headwater) | Ignored: nothing is upstream of the point, so its snapped edge id is NULL and the row applies to no edges. |
+| 5c | Yes | First vertex of the given edge, and none of the input edges has the given edge's `mainstem_id` | The run stops with an error. This should never happen: a mainstem with edges above it continues up one of them. |
+| 6a-i | No | A confluence (two or more input edges), and one input edge is closer than any other edge to the point as entered | Moved to that input edge. |
+| 6a-ii | No | A confluence, and the outflow edge is closer than any other edge to the point as entered | For a `between` row, moved to the input edge with the same `mainstem_id` as the upstream point, if there is one. Otherwise moved to the input edge with the outflow edge's `mainstem_id` (as in 5a; the run stops if there is none, as in 5c). |
+| 6b | No | A confluence, and two or more edges are equally close to the point as entered | For a `between` row, moved to the input edge with the same `mainstem_id` as the upstream point, if there is one, with no warning. Otherwise moved to the input edge with the outflow edge's `mainstem_id`, and a warning is logged naming the row and the tied edges (the run stops if there is none, as in 5c). |
+| 7 | No | First vertex of a headwater edge | Ignored, as in 5b. |
+| 8 | No | A network outlet where two or more edges end, and two or more of them are equally close to the point as entered | For a `between` row, moved to the input edge with the same `mainstem_id` as the upstream point, if there is one. Otherwise **the run stops with an error** asking for an edge id, because there is no outflow edge to take a `mainstem_id` from. |
+
+Two edges are "equally close" when their distances to the point as entered differ by no more than 0.000001 m (a fixed value). In practice this means the point was placed exactly on the confluence. **In case 6b the model guesses that the habitat is on the main river**, i.e. the river that continues below the confluence. If the habitat is on the tributary, set the row's edge id (`chyf_upstream_edge_id` or `chyf_downstream_edge_id`) to the tributary edge so that case 3 applies. Setting the edge id is also how to fix the case 8 error.
+
+In cases 6a-ii, 6b and 8 the downstream point of a `between` row doesn't say by itself which input edge it is on, but the row's upstream point says which river the habitat is on. The upstream point's `mainstem_id` is the `mainstem_id` of the edge it snapped to. There is no matching input edge if none has that `mainstem_id`, or if that edge has no `mainstem_id`.
+
+A NULL `mainstem_id` never matches when comparing edges, and stops the run as in 5c. In practice this can't happen: the only edges with a NULL `mainstem_id` are the sink edges added at outlets with a barrier, which are created after Process Habitat runs.
+
+Top points need none of this: at a nexus a top point always belongs to the single edge leaving it.
+
+A `between` row whose two points end up at the same place on the network has no stream between them. This happens when both points are within `habitat_point_snap_vertex_distance_m` of the same vertex. A warning is logged, both of the row's snapped edge ids are left NULL, and the row applies to no edges.
+
+#### Snapped edge ids
+
+Which snapped edge ids a `habitat_updates` row ends up with depends on its `location_type` (after Compute Statistics step 1 has broken the network):
+
+| `location_type` | `upstream_snapped_edge_id` | `downstream_snapped_edge_id` |
+| --- | --- | --- |
+| `upstream` | NULL if the point didn't snap, or if it sits at the top of the network (cases 5b and 7) | always NULL (there's no downstream point) |
+| `between` | NULL if the point didn't snap, or if both points snap to the same place | NULL if the point didn't snap, if it sits at the top of the network (cases 5b and 7), or if both points snap to the same place |
+| `downstream` | always NULL (there's no upstream point) | NULL if the point didn't snap, or if it sits on a network outlet (the last vertex of an edge with nothing downstream) |
+
+"Didn't snap" means no edge was within `habitat_point_snap_edge_distance_m` and no `chyf_*_edge_id` was given (step 2 skips the point). A top point's edge id names the segment starting at the point; a bottom point's names the segment ending at it. A row with a NULL edge id it needs applies to no edges.
+
+Each edge id has a matching snapped point column (`upstream_snapped_point`, `downstream_snapped_point`). When a point is ignored during Process Habitat (it didn't snap, it is at the top of the network, or a `between` row's points snap to the same place), both columns are NULL. When a `downstream` row's point is cleared at a network outlet during Compute Statistics, only `downstream_snapped_edge_id` is set to NULL; `downstream_snapped_point` is kept, to show where the point was placed. Use the edge id, not the point, to tell whether a point was applied.
+
 ### Compute Statistics
 
 The core numerical phase. It runs once at network scale (breaking, effective length, gradient), then partitions the rest of the work by `graph_id` (see Load Stream Network) so each connected group of edges is processed independently -- this bounds memory/compute to one river system at a time instead of the whole network. Components are packed largest-first into edge-count-bounded bundles for bulk fetch/write, and any `graph_id` group made up of `is_isolated = true` edges is skipped entirely.
 
-1. **Break the network** at every vertex a structure or habitat point snapped onto (structure/habitat snapping already ensured a real vertex exists there): each affected edge is split into segments at those vertices, and the corresponding `all_barriers`/`habitat_updates` edge-id references are corrected to point at the resulting segments. A barrier's `downstream_edge_id` ends up as the segment that starts at the barrier; a barrier snapped to the last vertex of an edge is moved to the edge that starts there, so the result doesn't depend on which edge it was snapped to. A barrier on the last vertex of an outlet edge has no edge to move to, so a zero-length sink edge (`is_sink_barrier_edge = true`) is added below the outlet and the barrier is placed at its start; sink edges stay in `streams` but are left out of every view. Edges with no snapped point are left untouched.
+1. **Break the network** at every vertex a structure or habitat point snapped onto (structure/habitat snapping already ensured a real vertex exists there): each affected edge is split into segments at those vertices, and the corresponding `all_barriers`/`habitat_updates` edge-id references are corrected to point at the resulting segments. A barrier's `downstream_edge_id` ends up as the segment that starts at the barrier; a barrier snapped to the last vertex of an edge is moved to the edge that starts there, so the result doesn't depend on which edge it was snapped to. A barrier on the last vertex of an outlet edge has no edge to move to, so a zero-length sink edge (`is_sink_barrier_edge = true`) is added below the outlet and the barrier is placed at its start; sink edges stay in `streams` but are left out of every view. Barriers at the same outlet point share one sink edge, which has a NULL `mainstem_id`, `stream_name_en` and `rivernameid1` (more than one river can end there); if those barriers were snapped via outlet edges with different `graph_id`s, the run stops. A habitat point is attached according to which end of the habitat it marks (see "Top points and bottom points" in Process Habitat). A top point follows the same rule as a barrier: it ends up on the segment that starts at it, and from the last vertex of an edge it is moved to the edge that starts there. A bottom point ends up on the segment that ends at it, and is never moved to another edge, so it keeps following the `mainstem_id` of the edge Process Habitat recorded it on. Habitat points are never moved to a sink edge: on the last vertex of an outlet edge, a `location_type = downstream` row's point has its `downstream_snapped_edge_id` set to NULL because nothing is downstream of an outlet, and a `between` row's upstream point stays on the last segment of the outlet edge. Edges with no snapped point are left untouched.
 
 2. **Compute `length`, `effective_length` and `segment_gradient`** for every edge in one pass. `length` is first recomputed for every edge as `ST_Length(geometry::geography)` from its final geometry, replacing the CHyF length, so split and unsplit edges use the same measure; the other two use this length. Per `ecatchment_id`, only the longest mainstem's edges keep their geometric length as `effective_length` (others get 0); `segment_gradient` is the elevation drop between an edge's endpoints divided by its length, or NULL if the length is 0 or either endpoint's smoothed elevation is missing.
 

@@ -9,6 +9,14 @@ what happens when the point is farther than habitat_point_snap_edge_distance_m f
 specific-edge-id case stops the whole run with an error, while the nearest-edge case just ignores
 that point.
 
+A habitat "bottom" point -- the point of an "upstream" update, or the downstream point of a
+"between" update -- marks the downstream end of the habitat, so Compute Statistics attaches it to
+the stream segment ending at it (see network_break). When such a point snaps onto a nexus (the
+first or last vertex of an edge), which edge it was snapped to decides which river the habitat
+follows, so resolve_bottom_point_at_nexus picks the edge above the nexus it belongs to and
+records the point as that edge's last vertex. The case table is in fishpass_docs.md (Process
+Habitat).
+
 A per-run in-memory cache of edge_id -> vertex list is threaded through snap_habitat_points so
 that multiple habitat points landing on the same edge in one run see each other's inserted
 vertices, and each edge's geometry is only written back to the database once.
@@ -20,6 +28,7 @@ import sys
 import shapely
 
 from db import quote_ident, quote_qualified_ident
+from utils import is_bottom_point
 from network_snap import (
 	edge_vertices,
 	linestring_zm_wkb,
@@ -29,6 +38,10 @@ from network_snap import (
 )
 
 LOCATION_TYPES = {"upstream", "downstream", "between"}
+
+# A habitat point whose distances to two edges at a nexus differ by no more than this is equally
+# close to both (in practice: it sits exactly on the nexus).
+TIE_TOLERANCE_M = 0.000001
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +109,7 @@ def find_nearest_edge(cursor, output_schema, xy, srid, edge_distance_m):
 			))
 		FROM {schema_ident}.streams
 		WHERE ST_DWithin(geometry::geography, ST_SetSRID(ST_MakePoint(%s, %s), %s)::geography, %s)
-		ORDER BY ST_Distance(geometry::geography, ST_SetSRID(ST_MakePoint(%s, %s), %s)::geography)
+		ORDER BY ST_Distance(geometry::geography, ST_SetSRID(ST_MakePoint(%s, %s), %s)::geography), id
 		LIMIT 1
 		""",
 		(xy[0], xy[1], srid, xy[0], xy[1], srid, edge_distance_m, xy[0], xy[1], srid),
@@ -168,8 +181,192 @@ def snap_to_edge(cursor, output_schema, edge_cache, edge_id, edge_wkb, closest_p
 	return edge_id, (x, y, z, m)
 
 
+def fetch_nexus_edges(cursor, output_schema, edge_id, at_last_vertex, xy, srid):
+	"""Return every streams edge touching the nexus at edge_id's last vertex (at_last_vertex) or
+	first vertex, as a list of {"id", "mainstem_id", "is_input", "distance_m", "wkb"} ordered by
+	id. is_input is True for an edge that ends at the nexus (flows into it) and False for the edge
+	that starts there. distance_m is from the edge to xy, the habitat point as it was entered.
+	Edges are matched on nexus id only (indexed; see load_stream_network.create_indexes)."""
+
+	schema_ident = quote_ident(output_schema)
+	nexus_column = "to_nexus_id" if at_last_vertex else "from_nexus_id"
+	cursor.execute(
+		f"""
+		SELECT e.id, e.mainstem_id, e.to_nexus_id = n.nexus_id,
+			ST_Distance(e.geometry::geography, ST_SetSRID(ST_MakePoint(%s, %s), %s)::geography),
+			ST_AsBinary(e.geometry)
+		FROM {schema_ident}.streams e
+		JOIN (SELECT {nexus_column} AS nexus_id FROM {schema_ident}.streams WHERE id = %s) n
+			ON e.to_nexus_id = n.nexus_id OR e.from_nexus_id = n.nexus_id
+		ORDER BY e.id
+		""",
+		(xy[0], xy[1], srid, edge_id),
+	)
+	return [
+		{"id": row[0], "mainstem_id": row[1], "is_input": row[2], "distance_m": row[3], "wkb": bytes(row[4])}
+		for row in cursor.fetchall()
+	]
+
+
+def same_mainstem_input(inputs, below_edge, end, habitat_id):
+	"""Return the edge in `inputs` (the edges flowing into a nexus) with the same mainstem_id as
+	below_edge, the edge leaving the nexus. A NULL mainstem_id matches nothing, not even another
+	NULL. Exits if there is no match: a mainstem that has edges above it always continues up one
+	of them, and an edge with no mainstem_id can't say which river to follow."""
+
+	mainstem_id = below_edge["mainstem_id"]
+	if mainstem_id is not None:
+		for edge in inputs:
+			if edge["mainstem_id"] == mainstem_id:
+				return edge
+	reason = "has no mainstem_id" if mainstem_id is None else f"has mainstem_id {mainstem_id}, which none of them share"
+	sys.exit(
+		f"Habitat {end} point {habitat_id} is at the start of streams edge {below_edge['id']}, so it belongs "
+		f"to one of the edges flowing into it ({', '.join(str(e['id']) for e in inputs)}), but which one "
+		f"can't be determined: edge {below_edge['id']} {reason}. Set chyf_{end}_edge_id on the habitat "
+		f"update to one of those edges.\n***STOPPING***"
+	)
+
+
+def fetch_mainstem_id(cursor, output_schema, edge_id):
+	"""Return the mainstem_id of streams edge edge_id (None if it has none, or isn't found).
+
+	Used only for a "between" row's downstream point on an ambiguous nexus, to look up the edge
+	its upstream point snapped to. That edge's row was already read when the upstream point
+	snapped (find_edge_by_id / find_nearest_edge), so this query could be avoided. It runs rarely,
+	so it was left as is. Options if it ever matters:
+	- Select mainstem_id in those two queries and keep it in the edge cache next to the vertices
+	  (smaller change; every path that adds to the cache would need to supply it).
+	- Return mainstem_id from snap_to_edge / resolve_point alongside (edge_id, (x, y, z, m))
+	  (touches every caller and many tests).
+	"""
+
+	cursor.execute(f"SELECT mainstem_id FROM {quote_ident(output_schema)}.streams WHERE id = %s", (edge_id,))
+	row = cursor.fetchone()
+	return row[0] if row else None
+
+
+def choose_input_edge(nexus_edges, specific_edge_id, end, habitat_id, top_mainstem_id=None):
+	"""Pick which of the edges flowing into a nexus a habitat bottom point sitting on that nexus
+	belongs to. nexus_edges is fetch_nexus_edges' list. specific_edge_id is the row's
+	chyf_<end>_edge_id, given only when the point is on that edge's first vertex. top_mainstem_id
+	is, for a "between" row, the mainstem_id of the edge its upstream point snapped to. Returns
+	the chosen edge's dict, or None if no edge flows into the nexus (a headwater: nothing is
+	upstream, so the point applies to nothing).
+
+	- specific_edge_id given: the input edge with that edge's mainstem_id (error if none).
+	- One input edge: that edge.
+	- Several input edges, and one of them is clearly closest to the point as entered: that edge.
+	- Several input edges otherwise (the outflow edge is clearly closest, or two or more edges
+	  are equally close, within TIE_TOLERANCE_M): the point alone doesn't say which input edge it
+	  is on.
+	  - If an input edge has top_mainstem_id, that edge: the row's upstream point is on that river.
+	  - Otherwise the input edge with the outflow edge's mainstem_id, with a warning if it was a
+	    tie. If the nexus is a network outlet there is no outflow edge to go by, so the run stops.
+	"""
+
+	inputs = [edge for edge in nexus_edges if edge["is_input"]]
+	outflows = [edge for edge in nexus_edges if not edge["is_input"]]
+	if not inputs:
+		return None
+
+	if specific_edge_id is not None:
+		named_edge = next(edge for edge in outflows if edge["id"] == specific_edge_id)
+		return same_mainstem_input(inputs, named_edge, end, habitat_id)
+
+	if len(inputs) == 1:
+		return inputs[0]
+
+	ranked = sorted(nexus_edges, key=lambda edge: edge["distance_m"])
+	closest = [edge for edge in ranked if edge["distance_m"] - ranked[0]["distance_m"] <= TIE_TOLERANCE_M]
+	tied = len(closest) > 1
+	if not tied and closest[0]["is_input"]:
+		return closest[0]
+
+	if top_mainstem_id is not None:
+		for edge in inputs:
+			if edge["mainstem_id"] == top_mainstem_id:
+				return edge
+
+	tied_ids = ", ".join(str(edge["id"]) for edge in closest)
+	if not outflows:
+		# Only reached on a tie: with no outflow edge, a single closest edge is an input edge.
+		sys.exit(
+			f"Habitat {end} point {habitat_id} is equally close to streams edges {tied_ids}, which end at "
+			f"the same network outlet, so the edge it belongs to can't be determined. Set "
+			f"chyf_{end}_edge_id on the habitat update.\n***STOPPING***"
+		)
+
+	# More than one outflow edge is a braid, which stops the run in Compute Statistics.
+	chosen = same_mainstem_input(inputs, outflows[0], end, habitat_id)
+	if tied:
+		logger.warning(
+			"Habitat %s point %s is equally close to streams edges %s at a confluence; using edge %s, "
+			"which is on the same mainstem as the edge below the confluence (%s). "
+			"Set chyf_%s_edge_id on the habitat update to choose the edge.",
+			end,
+			habitat_id,
+			tied_ids,
+			chosen["id"],
+			outflows[0]["id"],
+			end,
+		)
+	return chosen
+
+
+def resolve_bottom_point_at_nexus(
+	cursor, output_schema, edge_cache, srid, xy, snapped, specific_edge_id, end, habitat_id, top_edge_id=None
+):
+	"""Settle which edge a snapped habitat bottom point belongs to. `snapped` is snap_to_edge's
+	(edge_id, (x, y, z, m)). Returns the same shape, or None if the point applies to nothing.
+
+	A bottom point is attached to the segment ending at it, so it has to be on the edge above it.
+	In the middle of an edge, or on the last vertex of the edge named by chyf_<end>_edge_id, it
+	already is, and `snapped` is returned unchanged. Otherwise it is on a nexus, and is moved to
+	the last vertex of the input edge choose_input_edge picks (no vertex is inserted).
+	top_edge_id is, for a "between" row, the edge its upstream point snapped to; where the point
+	alone doesn't settle the choice, that edge's river does."""
+
+	edge_id, (x, y, _z, _m) = snapped
+	vertices = edge_cache[edge_id]["vertices"]
+	at_last_vertex = (x, y) == tuple(vertices[-1][:2])
+	at_first_vertex = (x, y) == tuple(vertices[0][:2])
+	if not (at_last_vertex or at_first_vertex):
+		return snapped
+	if at_last_vertex and specific_edge_id is not None:
+		return snapped
+
+	nexus_edges = fetch_nexus_edges(cursor, output_schema, edge_id, at_last_vertex, xy, srid)
+	top_mainstem_id = None
+	if top_edge_id is not None and specific_edge_id is None:
+		top_mainstem_id = fetch_mainstem_id(cursor, output_schema, top_edge_id)
+	chosen = choose_input_edge(nexus_edges, specific_edge_id, end, habitat_id, top_mainstem_id)
+	if chosen is None:
+		logger.info(
+			"Habitat %s point %s is at the top of the stream network (no edge flows into it); "
+			"nothing is upstream of it, so it is ignored.",
+			end,
+			habitat_id,
+		)
+		return None
+
+	entry = get_cached_edge(cursor, output_schema, edge_cache, chosen["id"], edge_wkb=chosen["wkb"])
+	return chosen["id"], tuple(entry["vertices"][-1])
+
+
 def resolve_point(
-	cursor, output_schema, edge_cache, srid, xy, edge_distance_m, vertex_distance_m, specific_edge_id, end, habitat_id
+	cursor,
+	output_schema,
+	edge_cache,
+	srid,
+	xy,
+	edge_distance_m,
+	vertex_distance_m,
+	specific_edge_id,
+	end,
+	habitat_id,
+	is_bottom=False,
+	top_edge_id=None,
 ):
 	"""Resolve one habitat point (upstream or downstream role, `end`) to (edge_id, (x, y, z, m)).
 
@@ -182,6 +379,11 @@ def resolve_point(
 
 	Either way, once an edge and a projected point on it are known, the point snaps to an
 	existing vertex on that edge (within vertex_distance_m) or a new vertex is inserted.
+
+	A bottom point (is_bottom, see is_bottom_point) that lands on a nexus is then moved to the
+	edge above the nexus that it belongs to, or ignored (None) if there is none -- see
+	resolve_bottom_point_at_nexus, which also uses top_edge_id (the edge a "between" row's
+	upstream point snapped to).
 	"""
 
 	if specific_edge_id is not None:
@@ -195,16 +397,24 @@ def resolve_point(
 				f"exceeding habitat_point_snap_edge_distance_m ({edge_distance_m}m)."
 				f"\n***STOPPING***"
 			)
-		return snap_to_edge(
+		snapped = snap_to_edge(
 			cursor, output_schema, edge_cache, specific_edge_id, edge_wkb, closest_point_wkb, vertex_distance_m
 		)
+	else:
+		nearest = find_nearest_edge(cursor, output_schema, xy, srid, edge_distance_m)
+		if nearest is None:
+			return None
 
-	nearest = find_nearest_edge(cursor, output_schema, xy, srid, edge_distance_m)
-	if nearest is None:
-		return None
+		edge_id, edge_wkb, closest_point_wkb = nearest
+		snapped = snap_to_edge(
+			cursor, output_schema, edge_cache, edge_id, edge_wkb, closest_point_wkb, vertex_distance_m
+		)
 
-	edge_id, edge_wkb, closest_point_wkb = nearest
-	return snap_to_edge(cursor, output_schema, edge_cache, edge_id, edge_wkb, closest_point_wkb, vertex_distance_m)
+	if is_bottom:
+		return resolve_bottom_point_at_nexus(
+			cursor, output_schema, edge_cache, srid, xy, snapped, specific_edge_id, end, habitat_id, top_edge_id
+		)
+	return snapped
 
 
 def points_for_role(location_type, coords, habitat_id):
@@ -228,6 +438,12 @@ def points_for_role(location_type, coords, habitat_id):
 
 
 def process_habitat_row(cursor, output_schema, edge_cache, srid, row, edge_distance_m, vertex_distance_m):
+	"""Resolve one habitat_updates row's point(s). Returns (habitat_id, upstream, downstream),
+	each point as resolve_point's (edge_id, (x, y, z, m)) or None.
+
+	A "between" row whose two points resolve to the same place has no stream between them, so
+	both are returned as None (the row then applies to no edges) and a warning is logged."""
+
 	habitat_id, location_type, points_wkb, up_edge_id, down_edge_id = row
 	geom = shapely.from_wkb(bytes(points_wkb))
 	coords = [(p.x, p.y) for p in geom.geoms]
@@ -235,6 +451,8 @@ def process_habitat_row(cursor, output_schema, edge_cache, srid, row, edge_dista
 	specific_edge_id = {"upstream": up_edge_id, "downstream": down_edge_id}
 	result = {}
 	for end, xy in points_for_role(location_type, coords, habitat_id):
+		# A "between" row's upstream point is resolved first, so its edge is known here.
+		top = result.get("upstream") if location_type == "between" and end == "downstream" else None
 		result[end] = resolve_point(
 			cursor,
 			output_schema,
@@ -246,8 +464,22 @@ def process_habitat_row(cursor, output_schema, edge_cache, srid, row, edge_dista
 			specific_edge_id[end],
 			end,
 			habitat_id,
+			is_bottom=is_bottom_point(location_type, end),
+			top_edge_id=top[0] if top else None,
 		)
-	return habitat_id, result.get("upstream"), result.get("downstream")
+
+	up, down = result.get("upstream"), result.get("downstream")
+	if location_type == "between" and up is not None and down is not None and up[1][:2] == down[1][:2]:
+		logger.warning(
+			"Habitat update %s: its upstream and downstream points both snap to (%s, %s) on the stream "
+			"network, so there is no stream between them and the update is ignored. Points within "
+			"habitat_point_snap_vertex_distance_m of the same vertex snap to that vertex.",
+			habitat_id,
+			up[1][0],
+			up[1][1],
+		)
+		up = down = None
+	return habitat_id, up, down
 
 
 def write_habitat_snap_results(cursor, output_schema, srid, snap_results):
@@ -286,7 +518,10 @@ def write_habitat_snap_results(cursor, output_schema, srid, snap_results):
 
 
 def snap_habitat_points(conn, cursor, plan, srid):
-	"""Process Habitat step 2. Returns (total_rows, rows_with_an_ignored_point)."""
+	"""Process Habitat steps 2-3. Returns (total_rows, unapplied_rows), where unapplied_rows is
+	the number of rows left without a point they need -- it didn't snap, or was ignored (a bottom
+	point at the top of the network, or a "between" row with no stream between its points) -- and
+	which therefore apply to no edges."""
 
 	output_schema = plan["output_schema"]
 	edge_distance_m = plan["habitat_point_snap_edge_distance_m"]
@@ -300,15 +535,16 @@ def snap_habitat_points(conn, cursor, plan, srid):
 
 	edge_cache = {}
 	snap_results = []
-	ignored_count = 0
+	unapplied_count = 0
 	for row in rows:
 		habitat_id, up, down = process_habitat_row(
 			cursor, output_schema, edge_cache, srid, row, edge_distance_m, vertex_distance_m
 		)
-		if (row[3] is None and up is None and row[1] in ("upstream", "between")) or (
-			row[4] is None and down is None and row[1] in ("downstream", "between")
+		location_type = row[1]
+		if (up is None and location_type in ("upstream", "between")) or (
+			down is None and location_type in ("downstream", "between")
 		):
-			ignored_count += 1
+			unapplied_count += 1
 		snap_results.append((habitat_id, up, down))
 
 	for edge_id, entry in edge_cache.items():
@@ -328,12 +564,13 @@ def snap_habitat_points(conn, cursor, plan, srid):
 
 	conn.commit()
 	logger.info(
-		"Snapped %d/%d habitat update row(s) (%d had an unresolvable point and were left partially unsnapped).",
-		len(rows) - ignored_count,
+		"Snapped %d/%d habitat update row(s); %d have a point that didn't snap or was ignored, "
+		"so they apply to no edges.",
+		len(rows) - unapplied_count,
 		len(rows),
-		ignored_count,
+		unapplied_count,
 	)
-	return len(rows), ignored_count
+	return len(rows), unapplied_count
 
 
 def load_habitat(conn, cursor, plan, srid):

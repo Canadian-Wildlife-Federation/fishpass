@@ -304,7 +304,7 @@ Notes on the example:
 - Only the four anthropogenic barrier id lists are exported. The view's natural barrier id lists (`downstream_natural_spawn_ids`, `downstream_natural_rear_ids`) are left out; the natural barrier counts are still exported.
 - The anthropogenic id lists hold `feature_id` values, which can be looked up in the structures export.
 - The view only holds natural barriers that snapped to the stream network.
-- `stream_name_en` is the name of the stream edge immediately upstream of the barrier (see [barriers.md](./outputs/barriers.md)).
+- `stream_name_en` is the name of the stream edge that starts at the barrier (`downstream_edge_id`); it is NULL for a barrier at a network outlet (see [barriers.md](./outputs/barriers.md)).
 - `upstream_stream_length` and the two `*_upstream_below_gradient_threshold_length` columns are only in the natural barriers export, not in any anthropogenic barrier output (see [barriers.md](./outputs/barriers.md)).
 
 #### Streams

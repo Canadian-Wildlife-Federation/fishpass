@@ -67,6 +67,16 @@ class NaturalFeatureTypesTests(unittest.TestCase):
 				utils.natural_feature_types(self.NO_OVERRIDE, path)
 
 
+class IsBottomPointTests(unittest.TestCase):
+	def test_bottom_points_mark_the_downstream_end_of_the_habitat(self):
+		self.assertTrue(utils.is_bottom_point("upstream", "upstream"))
+		self.assertTrue(utils.is_bottom_point("between", "downstream"))
+
+	def test_top_points_mark_the_upstream_end_of_the_habitat(self):
+		self.assertFalse(utils.is_bottom_point("downstream", "downstream"))
+		self.assertFalse(utils.is_bottom_point("between", "upstream"))
+
+
 class SharedRegexTests(unittest.TestCase):
 	def test_identifier(self):
 		self.assertTrue(utils.IDENTIFIER_RE.match("model_ab1"))

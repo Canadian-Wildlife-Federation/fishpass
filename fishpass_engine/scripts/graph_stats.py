@@ -9,17 +9,10 @@ module's logic is fully unit-testable on small synthetic graphs with no database
 
 """
 
+import sys
+
 import species_params as sp_mod
 from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
-
-
-def successor_edge_at_nexus(edge_ids):
-	"""The one edge treated as continuing downstream from a nexus, given every edge id starting
-	there. Normally there is only one; at a distributary/braid this picks the smallest id, so the
-	choice doesn't depend on the order edges were fetched in. Shared by build_graph and
-	network_break.find_downstream_edge_ids, so a barrier moved onto "the" downstream edge always
-	lands on the edge the graph treats as downstream."""
-	return min(edge_ids)
 
 
 def build_graph(edges):
@@ -32,15 +25,26 @@ def build_graph(edges):
 	    ending at this edge's from_nexus_id).
 	  roots -> every edge_id with no successor.
 
-	Assumes the normal dendritic case: at most one edge starts at any given nexus. If two edges
-	share a from_nexus_id (a distributary/braid), successor_edge_at_nexus picks one as that
-	nexus's "successor" edge and the edge case is silently resolved rather than erroring -- true
-	distributaries are not expected in this network.
+	Requires the dendritic case: at most one edge starts at any given nexus. If two or more edges
+	share a from_nexus_id (a distributary/braid), the run is stopped -- the graph can only give
+	each edge one successor, so a braid's other branches would silently get no upstream network.
 	"""
 	edges_at_from_nexus = {}
 	for e in edges:
 		edges_at_from_nexus.setdefault(e["from_nexus_id"], []).append(e["id"])
-	edge_at_from_nexus = {nexus: successor_edge_at_nexus(ids) for nexus, ids in edges_at_from_nexus.items()}
+
+	braids = {nexus: ids for nexus, ids in edges_at_from_nexus.items() if len(ids) > 1}
+	if braids:
+		shown = "; ".join(
+			f"nexus {nexus}: edges {', '.join(str(i) for i in sorted(ids, key=str))}"
+			for nexus, ids in list(braids.items())[:10]
+		)
+		more = f" (and {len(braids) - 10} more)" if len(braids) > 10 else ""
+		sys.exit(
+			f"Stream network has {len(braids)} nexus(es) where more than one edge starts "
+			f"(a braid/distributary), which isn't supported: {shown}{more}"
+		)
+	edge_at_from_nexus = {nexus: ids[0] for nexus, ids in edges_at_from_nexus.items()}
 
 	predecessors = {e["id"]: [] for e in edges}
 	successor = {}

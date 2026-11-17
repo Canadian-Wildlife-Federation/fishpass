@@ -19,6 +19,22 @@
 
 Because each `species_lifestage` entry already carries its own species and lifecycle, a single row's array can mix species with different lifestages (e.g. `["as_spawn", "ae"]`) — a separate row per species is only needed if the habitat points/scope/source differ.
 
+#### Points at confluences and outlets
+
+Habitat is applied along a single river (`mainstem_id`), so a point that marks the downstream end of the habitat (the point of an `upstream` row, or the downstream point of a `between` row) has to be tied to one of the rivers that meet at a confluence. When such a point is placed at or near a confluence without an edge id, the model uses the edge the point is closest to. If the point is exactly on the confluence, so that two or more edges are equally close (within 0.000001 m), the model assumes the habitat is on the main river (the river that continues below the confluence) and logs a warning.
+
+To put the habitat on a tributary, either place the point clearly on the tributary or, more reliably, set the edge id (`chyf_upstream_edge_id` for an `upstream` row, `chyf_downstream_edge_id` for a `between` row's downstream point) to the tributary's edge.
+
+For a `between` row the model first looks at the row's upstream point: if that point is on one of the rivers meeting at the confluence, the downstream point is put on the same river and no warning is logged.
+
+The same applies where two or more edges end at the same network outlet. There the model has no river below to go by, so a point exactly on the outlet stops the run with an error until an edge id is set (unless a `between` row's upstream point settles it).
+
+#### Short `between` reaches
+
+Each point snaps to an existing stream vertex if one is within `habitat_point_snap_vertex_distance_m` of it. If both points of a `between` row snap to the same vertex, there is no stream between them: the model logs a warning and the row applies to no edges. Move the points further apart, or lower `habitat_point_snap_vertex_distance_m` in the model plan.
+
+The full set of rules is in the "Top points and bottom points" table in [fishpass_docs.md](../fishpass_docs.md) (Process Habitat).
+
 #### CWF Requirements
 
 There are two outcomes for habitat updates:

@@ -48,6 +48,15 @@ SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 SNAPPED_GEOMETRY_SRID = 4617
 
 
+def is_bottom_point(location_type, end):
+	"""True if a habitat_updates point marks the downstream end of the habitat: the point of an
+	"upstream" update, or the downstream point of a "between" update. `end` is "upstream" or
+	"downstream", the point's role in the row. Process Habitat (load_habitat) and network breaking
+	(network_break) both attach such a point to the segment ending at it."""
+
+	return location_type == "upstream" or (location_type == "between" and end == "downstream")
+
+
 def setup_logging():
 	"""Log INFO and above to the console with timestamps -- shared by the command-line scripts."""
 	logging.basicConfig(

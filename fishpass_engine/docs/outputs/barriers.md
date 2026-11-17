@@ -75,7 +75,7 @@ The `all_barriers` rows for each structure type that snapped onto a processed st
 | :---- | :---- | :---- |
 | feature\_id | uuid | `all_barriers.feature_id`. |
 | feature\_type | varchar | Barrier feature type. |
-| stream\_name\_en | text | English name of the stream edge that starts at the barrier (`downstream_edge_id`), from `streams.stream_name_en`. NULL when that edge has no CHyF name. |
+| stream\_name\_en | text | English name of the stream edge that starts at the barrier (`downstream_edge_id`), from `streams.stream_name_en`. NULL when that edge has no CHyF name, and always NULL for a barrier on the last vertex of an outlet edge, since that barrier is on a sink edge (`streams.is_sink_barrier_edge`), which has no name. |
 | downstream\_edge\_id | uuid | The id of the streams edge that starts at the barrier. |
 | upstream\_stream\_length | double | `natural_barriers` only. `all_barriers.upstream_stream_length`. |
 | species\_passability\_value | jsonb | Passability values for each species, lifestage. |
