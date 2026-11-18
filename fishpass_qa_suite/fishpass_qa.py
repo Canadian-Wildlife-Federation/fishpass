@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Automated QA suite for ASF Phase 1 FishPass model outputs.
 
-Runs read-only SQL checks, prints a concise PASS/FAIL/SKIP report, and writes
-CSV and JSON reports. A check passes when its query returns zero failing rows,
-unless it is explicitly a summary check.
+Runs read-only SQL checks, prints a concise PASS/FAIL/SKIP report, and writes:
+  * a summary CSV (one row per check), and
+  * one <check_id>_failures.csv per FAILED check containing every failing row.
+
+Every check query returns its failing rows; a check passes when it returns zero rows.
+Failure CSVs put the record's primary geometry in a "wkt" column (with its SRID in
+"srid") so they can be loaded directly in QGIS via Layer > Add Delimited Text Layer
+(Geometry definition: Well known text (WKT), Geometry field: wkt). Any additional
+geometry columns are written as <name>_wkt text columns.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import json
+import importlib
 import os
 import sys
 import time
@@ -47,14 +53,17 @@ def load_db_driver():
 TOL = "0.000001"
 NODE_TOL = "1e-9"  # node-matching tolerance in degrees (~0.1 mm); streams are split at barriers
 
+# Preferred geometry column (in order) to use as the QGIS "wkt" column in failure CSVs.
+GEOM_PREFERENCE = ("snapped_geometry", "geometry", "barrier_geometry")
+FETCH_BATCH = 5000
+
 
 @dataclass(frozen=True)
 class Check:
 	check_id: str
 	name: str
-	sql: str
+	sql: str  # must return the failing rows (zero rows = PASS)
 	category: str
-	mode: str = "zero_count"  # zero_count, zero_rows, summary
 	enabled: Callable[[argparse.Namespace], bool] = lambda _: True
 	skip_reason: str = "Required configuration was not provided."
 
@@ -68,6 +77,7 @@ def load_yaml(path: str) -> dict[str, Any]:
 
 
 LIFESTAGES = ("spawn", "rear", "spawnrear")
+
 THRESHOLD_KEYS = {
 	"spawn": {
 		"min_gradient": "spawn_gradient_min",
@@ -82,6 +92,7 @@ THRESHOLD_KEYS = {
 		"max_strahler": "strahler_order_rearing_max",
 	},
 }
+
 CATEGORY_ORDER = [
 	"Accessibility",
 	"Stream lengths",
@@ -90,7 +101,6 @@ CATEGORY_ORDER = [
 	"Barrier IDs",
 	"Habitat parameters",
 	"Rankings",
-	"Satellite propagation",
 ]
 
 
@@ -116,24 +126,20 @@ def apply_yaml_config(args: argparse.Namespace) -> argparse.Namespace:
 	"""Populate plan/species settings from runtime-selected YAML files."""
 	plan = load_yaml(args.model_plan)
 	species_doc = load_yaml(args.species_parameters)
-
 	target_species = [str(sp) for sp in (plan.get("target_species") or [])]
 	if not target_species:
 		raise ValueError("Model plan must define at least one target_species value.")
 	if args.species_code and args.species_code not in target_species:
 		raise ValueError(f"--species-code {args.species_code!r} is not in the plan's target_species {target_species}.")
 	selected = [args.species_code] if args.species_code else target_species
-
 	reporting_values = plan.get("reporting_values") or []
 	if not reporting_values:
 		raise ValueError("Model plan must define reporting_values.")
 	lifestages = parse_reporting_values(reporting_values, target_species)
-
 	plan_code = str(plan.get("code") or "").strip()
 	output_schema = str(plan.get("output_schema") or "").strip()
 	if not plan_code or not output_schema:
 		raise ValueError("Model plan must define non-empty code and output_schema values.")
-
 	species_rows = species_doc.get("species") or []
 	args.species = {}
 	for code in selected:
@@ -146,7 +152,6 @@ def apply_yaml_config(args: argparse.Namespace) -> argparse.Namespace:
 			if stage in lifestages[code]
 		}
 		args.species[code] = {"name": row.get("name"), "lifestages": lifestages[code], "thresholds": thresholds}
-
 	# View/table names are templates; {species}, {lifestage} and {plan_code} are substituted per check.
 	args.plan_code = plan_code
 	args.output_schema = args.output_schema or output_schema
@@ -154,18 +159,35 @@ def apply_yaml_config(args: argparse.Namespace) -> argparse.Namespace:
 	args.barriers_view = args.barriers_view or "anthropogenic_barriers_{species}"
 	args.wcrp_schema = args.wcrp_schema or f"{plan_code}_wcrp"
 	args.ranked_table = args.ranked_table or "ranked_barriers_{species}_{lifestage}_{plan_code}"
-
-	args.loaded_config = {
-		"model_plan": args.model_plan,
-		"species_parameters": args.species_parameters,
-		"plan_code": plan_code,
-		"output_schema": args.output_schema,
-		"target_species": target_species,
-		"checked_species": selected,
-		"reporting_values": reporting_values,
-		"species": args.species,
-	}
 	return args
+
+
+DEFAULT_ENGINE_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "fishpass_engine" / "scripts"
+
+
+def load_accessibility_values(scripts_dir: str) -> tuple[str, str]:
+	"""Import the accessibility strings the engine writes from graph_stats, so the QA suite cannot
+	drift from the engine. Returns (accessible, inaccessible). No hardcoded fallback: if graph_stats
+	can't be imported, the run stops rather than silently checking against stale values."""
+	path = Path(scripts_dir).resolve()
+	if not (path / "graph_stats.py").is_file():
+		raise RuntimeError(
+			f"graph_stats.py not found in {path}. Pass --engine-scripts-dir (or set FISHPASS_ENGINE_SCRIPTS_DIR) "
+			"to the fishpass_engine/scripts folder."
+		)
+	# graph_stats imports sibling modules (species_params, utils), so the folder itself must be on sys.path.
+	if str(path) not in sys.path:
+		sys.path.insert(0, str(path))
+	try:
+		graph_stats = importlib.import_module("graph_stats")
+	except ImportError as exc:
+		raise RuntimeError(f"Could not import graph_stats from {path}: {exc}") from exc
+	return graph_stats.ACCESSIBILITY_ACCESSIBLE, graph_stats.ACCESSIBILITY_INACCESSIBLE
+
+
+def qliteral(value: str) -> str:
+	"""Quote a Python string as a SQL string literal."""
+	return "'" + str(value).replace("'", "''") + "'"
 
 
 def qident(name: str) -> str:
@@ -177,29 +199,51 @@ def relation(schema: str, table: str) -> str:
 	return f"{qident(schema)}.{qident(table)}"
 
 
+def rows_sql(rel: str, where: str) -> str:
+	"""Return every column (including geometry) of rows in rel matching where."""
+	return f"SELECT t.* FROM {rel} t WHERE {where}"
+
+
 def id_count_sql(streams: str, combined: str, columns: list[tuple[str, str, str]]) -> str:
-	"""Count/ID mismatches not explained by coincident final barrier locations.
-	columns = [(test_id, count_column, ids_column), ...]"""
+	"""Stream segments with count/ID mismatches not explained by coincident final barrier locations.
+	columns = [(test_id, count_column, ids_column), ...]
+
+	Performance notes:
+	  * barrier_locations / mismatches are MATERIALIZED so the combined view is scanned once,
+	    not re-evaluated per mismatched segment inside a LATERAL subquery.
+	  * Locations are compared as ST_AsBinary bytea (exact equality, same semantics as before)
+	    instead of COUNT(DISTINCT geometry).
+	  * One grouped join replaces the per-row LATERAL lookup."""
 	values = ",\n                    ".join(f"('{t}', s.{cnt}, s.{ids})" for t, cnt, ids in columns)
-	return f"""WITH barrier_locations AS (
-                SELECT DISTINCT feature_id, snapped_geometry FROM {combined} WHERE feature_id IS NOT NULL AND snapped_geometry IS NOT NULL
-            ), mismatches AS (
-                SELECT s.id, v.test_id, v.reported_count, v.barrier_ids
+	return f"""WITH barrier_locations AS MATERIALIZED (
+                SELECT DISTINCT feature_id, ST_AsBinary(snapped_geometry) AS loc
+                FROM {combined}
+                WHERE feature_id IS NOT NULL AND snapped_geometry IS NOT NULL
+            ), mismatches AS MATERIALIZED (
+                SELECT s.id, v.test_id, v.reported_count, v.barrier_ids, s.geometry
                 FROM {streams} s
                 CROSS JOIN LATERAL (VALUES
                     {values}
                 ) AS v(test_id, reported_count, barrier_ids)
                 WHERE v.reported_count <> COALESCE(cardinality(v.barrier_ids), 0)
+            ), loc_counts AS (
+                SELECT m.id, m.test_id, COUNT(DISTINCT bl.loc) AS distinct_barrier_locations
+                FROM mismatches m
+                CROSS JOIN LATERAL unnest(m.barrier_ids) AS u(barrier_id)
+                JOIN barrier_locations bl ON bl.feature_id = u.barrier_id
+                GROUP BY m.id, m.test_id
             )
-            SELECT COUNT(*) FROM mismatches m
-            WHERE m.reported_count <> (
-                SELECT COUNT(DISTINCT bl.snapped_geometry) FROM unnest(m.barrier_ids) AS barrier_id
-                JOIN barrier_locations bl ON bl.feature_id = barrier_id
-            )"""
+            SELECT m.id, m.test_id, m.reported_count,
+                   COALESCE(lc.distinct_barrier_locations, 0) AS distinct_barrier_locations,
+                   m.barrier_ids, m.geometry
+            FROM mismatches m
+            LEFT JOIN loc_counts lc ON lc.id = m.id AND lc.test_id = m.test_id
+            WHERE m.reported_count <> COALESCE(lc.distinct_barrier_locations, 0)"""
 
 
 def ranking_checks(args: argparse.Namespace, sp: str, st: str, barriers: str) -> list[Check]:
-	"""R01-R10 for one ranked table: ranked_barriers_<species>_<lifestage>_<plan_code>."""
+	"""R01-R10 for one ranked table: ranked_barriers_<species>_<lifestage>_<plan_code>.
+	Ranked rows are joined to the model barriers view to pick up barrier geometry."""
 	ranked = relation(args.wcrp_schema, args.ranked_table.format(species=sp, lifestage=st, plan_code=args.plan_code))
 	# spawnrear is passable/impassable through both component lifestages.
 	parts = ["spawn", "rear"] if st == "spawnrear" else [st]
@@ -210,78 +254,92 @@ def ranking_checks(args: argparse.Namespace, sp: str, st: str, barriers: str) ->
 	def label(text):
 		return f"{text} [{sp} {st}]"
 
+	def ranked_rows(where: str) -> str:
+		return (
+			f"SELECT r.*, b.snapped_geometry AS barrier_geometry FROM {ranked} r "
+			f"LEFT JOIN {barriers} b ON b.feature_id=r.feature_id WHERE {where}"
+		)
+
 	r01 = " OR ".join(f"r.{sp}_{p}_passability IS DISTINCT FROM b.passability_status_{p}" for p in parts)
-	r10 = " AND ".join(f"{sp}_{p}_passability=1" for p in parts)
+	r10 = " AND ".join(f"r.{sp}_{p}_passability=1" for p in parts)
 	return [
 		Check(
 			cid("R01"),
 			label("Ranked passability differs from source model"),
-			f"SELECT r.feature_id FROM {ranked} r JOIN {barriers} b ON b.feature_id=r.feature_id WHERE {r01}",
+			f"SELECT r.*, b.snapped_geometry AS barrier_geometry FROM {ranked} r JOIN {barriers} b ON b.feature_id=r.feature_id WHERE {r01}",
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R02"),
 			label("Ranked barrier missing from model output"),
-			f"SELECT r.feature_id FROM {ranked} r LEFT JOIN {barriers} b ON b.feature_id=r.feature_id WHERE b.feature_id IS NULL",
+			# No model barrier exists, so only geometry stored on the ranked table (if any) is available.
+			f"SELECT r.* FROM {ranked} r LEFT JOIN {barriers} b ON b.feature_id=r.feature_id WHERE b.feature_id IS NULL",
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R03"),
 			label(f"Ranked {st} barrier has no upstream {st} habitat"),
-			f"SELECT r.feature_id FROM {ranked} r JOIN {barriers} b ON b.feature_id=r.feature_id WHERE COALESCE(b.{st}_upstream_length,0)<=0",
+			f"SELECT r.*, b.snapped_geometry AS barrier_geometry FROM {ranked} r JOIN {barriers} b ON b.feature_id=r.feature_id WHERE COALESCE(b.{st}_upstream_length,0)<=0",
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R04"),
 			label("Negative ranking gain"),
-			f"SELECT feature_id FROM {ranked} WHERE total_{st}_hab_gain_group_km<0 OR w_total_hab_gain_group_km<0 OR avg_gain_per_barrier_km<0 OR w_avg_gain_per_barrier_km<0",
+			ranked_rows(
+				f"r.total_{st}_hab_gain_group_km<0 OR r.w_total_hab_gain_group_km<0 OR r.avg_gain_per_barrier_km<0 OR r.w_avg_gain_per_barrier_km<0"
+			),
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R05"),
 			label("Reported group size differs from actual membership"),
-			f"WITH actual AS (SELECT group_id,COUNT(*) n FROM {ranked} GROUP BY group_id) SELECT r.group_id FROM {ranked} r JOIN actual a USING(group_id) GROUP BY r.group_id,a.n HAVING MIN(r.num_barriers_group)<>a.n OR MIN(r.num_barriers_group)<>MAX(r.num_barriers_group)",
+			# Returns every barrier in each mismatched group.
+			f"""WITH actual AS (SELECT group_id, COUNT(*) n FROM {ranked} GROUP BY group_id),
+            bad AS (
+                SELECT r.group_id FROM {ranked} r JOIN actual a USING(group_id)
+                GROUP BY r.group_id, a.n
+                HAVING MIN(r.num_barriers_group)<>a.n OR MIN(r.num_barriers_group)<>MAX(r.num_barriers_group)
+            )
+            SELECT r.*, b.snapped_geometry AS barrier_geometry
+            FROM {ranked} r
+            JOIN bad ON bad.group_id=r.group_id
+            LEFT JOIN {barriers} b ON b.feature_id=r.feature_id
+            ORDER BY r.group_id""",
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R06"),
 			label("Average gain math mismatch"),
-			f"SELECT feature_id FROM {ranked} WHERE ABS(avg_gain_per_barrier_km-total_{st}_hab_gain_group_km/NULLIF(num_barriers_group,0))>{TOL}",
+			ranked_rows(
+				f"ABS(r.avg_gain_per_barrier_km-r.total_{st}_hab_gain_group_km/NULLIF(r.num_barriers_group,0))>{TOL}"
+			),
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R07"),
 			label("Weighted average gain math mismatch"),
-			f"SELECT feature_id FROM {ranked} WHERE ABS(w_avg_gain_per_barrier_km-w_total_hab_gain_group_km/NULLIF(num_barriers_group,0))>{TOL}",
+			ranked_rows(
+				f"ABS(r.w_avg_gain_per_barrier_km-r.w_total_hab_gain_group_km/NULLIF(r.num_barriers_group,0))>{TOL}"
+			),
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R08"),
 			label("Positive weighted average gain is missing tiered rank"),
-			f"SELECT feature_id FROM {ranked} WHERE w_avg_gain_per_barrier_km > 0 AND rank_w_avg_gain_tiered IS NULL",
+			ranked_rows("r.w_avg_gain_per_barrier_km > 0 AND r.rank_w_avg_gain_tiered IS NULL"),
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R09"),
 			label("Any required ranking fields are null"),
-			f"SELECT feature_id FROM {ranked} WHERE group_id IS NULL OR rank_w_total_upstr_{st}_hab IS NULL OR rank_combined IS NULL",
+			ranked_rows(f"r.group_id IS NULL OR r.rank_w_total_upstr_{st}_hab IS NULL OR r.rank_combined IS NULL"),
 			"Rankings",
-			mode="zero_rows",
 		),
 		Check(
 			cid("R10"),
 			label(f"Fully passable {st} barrier appears in ranking (review exceptions)"),
-			f"SELECT feature_id FROM {ranked} WHERE {r10}",
+			ranked_rows(r10),
 			"Rankings",
-			mode="zero_rows",
 		),
 	]
 
@@ -299,6 +357,9 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
 	model_streams = relation(args.output_schema, args.model_streams_table)
 	stages = cfg["lifestages"]
 	staged = [st for st in ("spawn", "rear") if st in stages]
+	# Accessibility values come from graph_stats (see load_accessibility_values), never hardcoded.
+	accessible = qliteral(args.accessibility_accessible)
+	inaccessible = qliteral(args.accessibility_inaccessible)
 
 	def cid(base: str) -> str:
 		return f"{base}_{sp}"
@@ -322,7 +383,6 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
 		"H": ("H01", "H02"),
 	}
 	c: list[Check] = []
-
 	for st in staged:
 		i = 0 if st == "spawn" else 1
 		S = st.capitalize()
@@ -330,55 +390,67 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
 			Check(
 				cid(ids["A_ninc"][i]),
 				label(f"{S} inaccessible with zero downstream natural barriers"),
-				f"SELECT COUNT(*) FROM {streams} WHERE {st}_accessibility='not accessible' AND downstream_natural_{st}_count=0",
+				rows_sql(streams, f"{st}_accessibility={inaccessible} AND downstream_natural_{st}_count=0"),
 				"Accessibility",
 			),
 			Check(
 				cid(ids["A_acc"][i]),
 				label(f"{S} accessible with downstream natural barriers"),
-				f"SELECT COUNT(*) FROM {streams} WHERE {st}_accessibility='accessible' AND downstream_natural_{st}_count>0",
+				rows_sql(streams, f"{st}_accessibility={accessible} AND downstream_natural_{st}_count>0"),
 				"Accessibility",
 			),
 			Check(
 				cid(ids["A_hab"][i]),
 				label(f"Inaccessible {st}ing segments marked as habitat"),
-				f"SELECT COUNT(*) FROM {streams} WHERE {st}_accessibility='not accessible' AND {st}_habitat IS TRUE",
+				rows_sql(streams, f"{st}_accessibility={inaccessible} AND {st}_habitat IS TRUE"),
 				"Accessibility",
 			),
 			Check(
 				cid(ids["L_nonhab"][i]),
 				label(f"{S} non-habitat has non-zero weighted length"),
-				f"SELECT COUNT(*) FROM {streams} WHERE {st}_habitat IS FALSE AND ABS(COALESCE({st}_weighted_length,0))>{TOL}",
+				rows_sql(streams, f"{st}_habitat IS FALSE AND ABS(COALESCE({st}_weighted_length,0))>{TOL}"),
 				"Stream lengths",
 			),
 			Check(
 				cid(ids["L_sum"][i]),
 				label(f"{S} connected + disconnected differs from weighted length"),
-				f"SELECT COUNT(*) FROM {streams} WHERE ABS(COALESCE({st}_weighted_connected_length,0)+COALESCE({st}_weighted_disconnected_length,0)-COALESCE({st}_weighted_length,0))>{TOL}",
+				rows_sql(
+					streams,
+					f"ABS(COALESCE({st}_weighted_connected_length,0)+COALESCE({st}_weighted_disconnected_length,0)-COALESCE({st}_weighted_length,0))>{TOL}",
+				),
 				"Stream lengths",
 			),
 			Check(
 				cid(ids["L_inv"][i]),
 				label(f"Invalid {st} connected/disconnected weighted lengths"),
-				f"SELECT COUNT(*) FROM {streams} WHERE {st}_weighted_length<-{TOL} OR {st}_weighted_connected_length<-{TOL} OR {st}_weighted_disconnected_length<-{TOL} OR {st}_weighted_connected_length>{st}_weighted_length+{TOL} OR {st}_weighted_disconnected_length>{st}_weighted_length+{TOL}",
+				rows_sql(
+					streams,
+					f"{st}_weighted_length<-{TOL} OR {st}_weighted_connected_length<-{TOL} OR {st}_weighted_disconnected_length<-{TOL} OR {st}_weighted_connected_length>{st}_weighted_length+{TOL} OR {st}_weighted_disconnected_length>{st}_weighted_length+{TOL}",
+				),
 				"Stream lengths",
 			),
 			Check(
 				cid(ids["B_func"][i]),
 				label(f"{S} functional upstream exceeds total upstream"),
-				f"SELECT COUNT(*) FROM {barriers} WHERE {st}_functional_upstream_length>{st}_upstream_length+{TOL}",
+				rows_sql(barriers, f"{st}_functional_upstream_length>{st}_upstream_length+{TOL}"),
 				"Barrier calculations",
 			),
 			Check(
 				cid(ids["B_pass"][i]),
 				label(f"Fully passable {st} barrier has disconnected upstream habitat"),
-				f"SELECT COUNT(*) FROM {barriers} WHERE passability_status_{st}=1 AND ABS(COALESCE({st}_weighted_disconnected_upstream_length,0))>{TOL}",
+				rows_sql(
+					barriers,
+					f"passability_status_{st}=1 AND ABS(COALESCE({st}_weighted_disconnected_upstream_length,0))>{TOL}",
+				),
 				"Barrier calculations",
 			),
 			Check(
 				cid(ids["B_imp"][i]),
 				label(f"Fully impassable {st} barrier has connected upstream habitat"),
-				f"SELECT COUNT(*) FROM {barriers} WHERE passability_status_{st}=0 AND ABS(COALESCE({st}_weighted_connected_upstream_length,0))>{TOL}",
+				rows_sql(
+					barriers,
+					f"passability_status_{st}=0 AND ABS(COALESCE({st}_weighted_connected_upstream_length,0))>{TOL}",
+				),
 				"Barrier calculations",
 			),
 			Check(
@@ -407,7 +479,10 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
 			Check(
 				cid(ids["H"][i]),
 				label(f"{S} habitat violates configured gradient/Strahler limits"),
-				f"SELECT COUNT(*) FROM {streams} WHERE {st}_habitat IS TRUE AND (segment_gradient<{t['min_gradient']} OR segment_gradient>={t['max_gradient']} OR strahler_order<{t['min_strahler']} OR strahler_order>={t['max_strahler']})"
+				rows_sql(
+					streams,
+					f"{st}_habitat IS TRUE AND (segment_gradient<{t['min_gradient']} OR segment_gradient>={t['max_gradient']} OR strahler_order<{t['min_strahler']} OR strahler_order>={t['max_strahler']})",
+				)
 				if t_ok
 				else "",
 				"Habitat parameters",
@@ -415,24 +490,22 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
 				skip_reason=f"Species {sp!r} is missing one or more {st} gradient/Strahler parameters.",
 			)
 		)
-
 	if "spawnrear" in stages:
 		c.append(
 			Check(
 				cid("B03"),
 				label("Spawnrear functional upstream exceeds total upstream"),
-				f"SELECT COUNT(*) FROM {barriers} WHERE spawnrear_functional_upstream_length>spawnrear_upstream_length+{TOL}",
+				rows_sql(barriers, f"spawnrear_functional_upstream_length>spawnrear_upstream_length+{TOL}"),
 				"Barrier calculations",
 			)
 		)
-
 	if staged:
 		out_of_range = " OR ".join(f"passability_status_{st}<0 OR passability_status_{st}>1" for st in staged)
 		c.append(
 			Check(
 				cid("B08"),
 				label("Passability value outside 0 to 1"),
-				f"SELECT COUNT(*) FROM {barriers} WHERE {out_of_range}",
+				rows_sql(barriers, out_of_range),
 				"Barrier calculations",
 			)
 		)
@@ -456,24 +529,23 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
 				"Barrier IDs",
 			)
 		)
-
 	c += [
 		Check(
 			cid("L07"),
 			label("Effective length negative or greater than raw length"),
-			f"SELECT COUNT(*) FROM {streams} WHERE effective_length<-{TOL} OR effective_length>length+{TOL}",
+			rows_sql(streams, f"effective_length<-{TOL} OR effective_length>length+{TOL}"),
 			"Stream lengths",
 		),
 		Check(
 			cid("L08"),
 			label("Effective length is neither zero nor raw length"),
-			f"SELECT COUNT(*) FROM {streams} WHERE ABS(effective_length)>{TOL} AND ABS(effective_length-length)>{TOL}",
+			rows_sql(streams, f"ABS(effective_length)>{TOL} AND ABS(effective_length-length)>{TOL}"),
 			"Stream lengths",
 		),
 		Check(
 			cid("L09"),
 			label("Negative raw stream length"),
-			f"SELECT COUNT(*) FROM {streams} WHERE length<0",
+			rows_sql(streams, "length<0"),
 			"Stream lengths",
 		),
 		Check(
@@ -496,8 +568,8 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
                      round(ST_Distance(bd.geometry::geography, bd.snapped_geometry::geography)::numeric, 3) AS snap_shift_m,
                      e.edge_id AS original_nearest_edge,
                      round(e.dist_m::numeric, 3) AS original_dist_to_edge_m,
-                     ST_AsText(bd.geometry) AS original_geometry_wkt,
-                     ST_AsText(bd.snapped_geometry) AS snapped_geometry_wkt
+                     bd.snapped_geometry,
+                     bd.geometry AS original_geometry
               FROM barrier_degree bd
               LEFT JOIN LATERAL (
                   SELECT s.id AS edge_id,
@@ -510,28 +582,12 @@ def species_checks(args: argparse.Namespace, sp: str, cfg: dict[str, Any]) -> li
               WHERE bd.n_in + bd.n_out >= 3
               ORDER BY snap_shift_m DESC""",
 			"Gradient barriers",
-			mode="zero_rows",
 		),
 	]
-
 	# One set of ranking checks per reported lifestage: ranked_barriers_<species>_<lifestage>_<plan_code>.
 	if not args.skip_rankings:
 		for st in stages:
 			c += ranking_checks(args, sp, st, barriers)
-
-	# Requires the user to load the latest processed-review export into fishpass_dev.
-	if not args.skip_satellite:
-		fdw = relation(args.cabd_fdw_schema, args.cabd_fdw_table)
-		staging = relation(args.satellite_schema, args.satellite_table)
-		c.append(
-			Check(
-				cid("S03"),
-				label("Processed CABD crossing missing from FishPass"),
-				f"WITH f AS (SELECT DISTINCT cabd_id FROM {fdw}) SELECT r.cabd_id FROM {staging} r JOIN f ON f.cabd_id=r.cabd_id LEFT JOIN {barriers} b ON b.feature_id=r.cabd_id WHERE b.feature_id IS NULL",
-				"Satellite propagation",
-				mode="zero_rows",
-			)
-		)
 	return c
 
 
@@ -539,64 +595,81 @@ def checks(args: argparse.Namespace) -> list[Check]:
 	c: list[Check] = []
 	for sp, cfg in args.species.items():
 		c += species_checks(args, sp, cfg)
-
-	# Satellite checks S01/S02 are not species-specific, so they run once.
-	if not args.skip_satellite:
-		fdw = relation(args.cabd_fdw_schema, args.cabd_fdw_table)
-		staging = relation(args.satellite_schema, args.satellite_table)
-		c += [
-			Check(
-				"S01",
-				"Satellite-review crossing type differs from CABD FDW",
-				f"WITH f AS (SELECT DISTINCT cabd_id,crossing_type_code FROM {fdw}) SELECT r.cabd_id FROM {staging} r JOIN f ON f.cabd_id=r.cabd_id WHERE r.crossing_type_code IS DISTINCT FROM f.crossing_type_code",
-				"Satellite propagation",
-				mode="zero_rows",
-			),
-			Check(
-				"S02",
-				"Satellite-review record missing from CABD FDW",
-				f"WITH f AS (SELECT DISTINCT cabd_id FROM {fdw}) SELECT r.cabd_id FROM {staging} r LEFT JOIN f ON f.cabd_id=r.cabd_id WHERE f.cabd_id IS NULL",
-				"Satellite propagation",
-				mode="zero_rows",
-			),
-		]
-
-	# Report in category order, then check ID (e.g. A01_as, A01_ae, A02_as ...).
 	return sorted(c, key=lambda ch: (CATEGORY_ORDER.index(ch.category), ch.check_id.split("_", 1)[0], ch.check_id))
 
 
 def connect(args: argparse.Namespace):
 	load_db_driver()
 	params = dict(host=args.host, port=args.port, dbname=args.dbname, user=args.user, password=args.password)
-	if DRIVER == "psycopg":
-		return psycopg.connect(**params, connect_timeout=args.connect_timeout)
 	return psycopg.connect(**params, connect_timeout=args.connect_timeout)
 
 
-def execute(conn, check: Check, sample_limit: int) -> tuple[str, int, list[Any], float, str]:
+def geometry_type_oids(conn) -> set[int]:
+	"""OIDs of the PostGIS geometry/geography types, used to detect spatial columns in check results."""
+	with conn.cursor() as cur:
+		cur.execute("SELECT oid FROM pg_type WHERE typname IN ('geometry', 'geography')")
+		oids = {int(r[0]) for r in cur.fetchall()}
+	conn.commit()
+	return oids
+
+
+def qgis_select(check_sql: str, columns: list[tuple[str, int]], geom_oids: set[int]) -> tuple[str, bool]:
+	"""Wrap a check query so geometry is returned as WKT text QGIS can read.
+	The primary geometry becomes "wkt" + "srid" (first columns); other geometries become <name>_wkt."""
+	geom_cols = [n for n, t in columns if t in geom_oids]
+	primary = next((g for g in GEOM_PREFERENCE if g in geom_cols), geom_cols[0] if geom_cols else None)
+	parts: list[str] = []
+	if primary:
+		parts += [f"ST_AsText(q.{qident(primary)}) AS wkt", f"ST_SRID(q.{qident(primary)}) AS srid"]
+	for n, _ in columns:
+		if n == primary:
+			continue
+		if n in geom_cols:
+			parts.append(f"ST_AsText(q.{qident(n)}) AS {qident(n + '_wkt')}")
+		else:
+			parts.append(f"q.{qident(n)}")
+	return f"SELECT {', '.join(parts)} FROM ({check_sql}) q", primary is not None
+
+
+def execute(conn, check: Check, csv_path: Path, geom_oids: set[int]) -> tuple[str, int, float, str]:
+	"""Run a check; if it returns rows, stream every failing row to csv_path. No file is written on PASS/ERROR."""
 	started = time.perf_counter()
+	failures = 0
+	f = None
+	detail = ""
 	try:
 		with conn.cursor() as cur:
 			cur.execute("SET TRANSACTION READ ONLY")
 			cur.execute(f"SET LOCAL statement_timeout = '{int(args_global.statement_timeout * 1000)}ms'")
-			cur.execute(check.sql)
-			rows = cur.fetchmany(sample_limit + 1)
-			if check.mode == "zero_count":
-				failures = int(rows[0][0]) if rows else 0
-				samples: list[Any] = []
-			elif check.mode == "zero_rows":
-				failures = len(rows)
-				samples = rows[:sample_limit]
-				if len(rows) > sample_limit:
-					failures = sample_limit + 1  # reported as at least sample_limit+1
-			else:
-				failures, samples = 0, rows[:sample_limit]
+			# Describe result columns without running the full query, then wrap with WKT conversion.
+			cur.execute(f"SELECT * FROM ({check.sql}) q LIMIT 0")
+			columns = [(d[0], int(d[1])) for d in cur.description]
+			sql, has_geom = qgis_select(check.sql, columns, geom_oids)
+			if not has_geom:
+				detail = "No geometry column in result; failure CSV is non-spatial."
+			cur.execute(sql)
+			header = [d[0] for d in cur.description]
+			while True:
+				batch = cur.fetchmany(FETCH_BATCH)
+				if not batch:
+					break
+				if f is None:  # only create the file once a failing row exists
+					f = csv_path.open("w", newline="", encoding="utf-8")
+					w = csv.writer(f)
+					w.writerow(header)
+				w.writerows(batch)
+				failures += len(batch)
 		conn.commit()
+		if f is not None:
+			f.close()
 		status = "PASS" if failures == 0 else "FAIL"
-		return status, failures, samples, time.perf_counter() - started, ""
+		return status, failures, time.perf_counter() - started, detail if failures else ""
 	except Exception as exc:
 		conn.rollback()
-		return "ERROR", 0, [], time.perf_counter() - started, str(exc).strip()
+		if f is not None:
+			f.close()
+			csv_path.unlink(missing_ok=True)  # don't leave a partial failure file behind
+		return "ERROR", 0, time.perf_counter() - started, str(exc).strip()
 
 
 def parse_args() -> argparse.Namespace:
@@ -621,8 +694,6 @@ def parse_args() -> argparse.Namespace:
 		"--ranked-table",
 		help="Override ranked table name template (default ranked_barriers_{species}_{lifestage}_{plan_code}).",
 	)
-	p.add_argument("--cabd-fdw-schema", default="cabd_fdw")
-	p.add_argument("--cabd-fdw-table", default="stream_crossings_sites_structures_view_en")
 	p.add_argument(
 		"--natural-barriers-view",
 		default="natural_barriers_{species}",
@@ -638,26 +709,20 @@ def parse_args() -> argparse.Namespace:
 		default="support.gradient_barriers",
 		help="Schema-qualified source gradient barriers table.",
 	)
-	p.add_argument("--satellite-schema", default="public")
-	p.add_argument("--satellite-table", default="satellite_review_processed")
-	p.add_argument("--skip-rankings", action="store_true")
 	p.add_argument(
-		"--skip-satellite",
-		action="store_true",
-		default=True,
-		help="Skip satellite propagation checks (default). Use --include-satellite after staging the table.",
+		"--engine-scripts-dir",
+		default=os.getenv("FISHPASS_ENGINE_SCRIPTS_DIR", str(DEFAULT_ENGINE_SCRIPTS_DIR)),
+		help="Folder containing graph_stats.py (default: ../fishpass_engine/scripts relative to this script).",
 	)
-	p.add_argument("--include-satellite", action="store_true")
+	p.add_argument("--skip-rankings", action="store_true")
 	p.add_argument("--statement-timeout", type=int, default=600, help="Per-check timeout in seconds.")
 	p.add_argument("--connect-timeout", type=int, default=15)
-	p.add_argument("--sample-limit", type=int, default=20)
 	p.add_argument("--report-dir", default="qa_reports")
 	p.add_argument("--list", action="store_true", help="List checks without connecting.")
 	p.add_argument("--fail-on-failure", action="store_true", help="Exit 1 if any check fails/errors; useful in CI.")
 	a = p.parse_args()
 	a = apply_yaml_config(a)
-	if a.include_satellite:
-		a.skip_satellite = False
+	a.accessibility_accessible, a.accessibility_inaccessible = load_accessibility_values(a.engine_scripts_dir)
 	return a
 
 
@@ -675,13 +740,15 @@ def main() -> int:
 		print("ERROR: Missing connection settings: " + ", ".join(missing), file=sys.stderr)
 		print("Set FISHPASS_HOST/DBNAME/USER/PASSWORD or pass command-line arguments.", file=sys.stderr)
 		return 2
-
 	report_dir = Path(args_global.report_dir)
 	report_dir.mkdir(parents=True, exist_ok=True)
 	stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+	# Failure CSVs go in a per-run folder so runs never overwrite each other; created only if something fails.
+	failures_dir = report_dir / f"fishpass_qa_{stamp}_failures"
 	results: list[dict[str, Any]] = []
 	conn = connect(args_global)
 	try:
+		geom_oids = geometry_type_oids(conn)
 		print(
 			f"FishPass QA | database={args_global.dbname} | schema={args_global.output_schema} | species="
 			+ "; ".join(
@@ -692,6 +759,7 @@ def main() -> int:
 		print(f"Species parameters: {args_global.species_parameters}")
 		print("=" * 88)
 		for ch in all_checks:
+			failure_csv = None
 			if not ch.enabled(args_global):
 				result = dict(
 					id=ch.check_id,
@@ -701,10 +769,11 @@ def main() -> int:
 					failures=0,
 					duration_seconds=0,
 					detail=ch.skip_reason,
-					samples=[],
 				)
 			else:
-				status, failures, samples, duration, detail = execute(conn, ch, args_global.sample_limit)
+				failures_dir.mkdir(parents=True, exist_ok=True)
+				failure_csv = failures_dir / f"{ch.check_id}_failures.csv"
+				status, failures, duration, detail = execute(conn, ch, failure_csv, geom_oids)
 				result = dict(
 					id=ch.check_id,
 					category=ch.category,
@@ -713,51 +782,37 @@ def main() -> int:
 					failures=failures,
 					duration_seconds=round(duration, 3),
 					detail=detail,
-					samples=[list(r) if isinstance(r, tuple) else r for r in samples],
 				)
 			results.append(result)
 			count = "" if result["status"] in ("PASS", "SKIP") else f" ({result['failures']} failing row(s))"
 			print(f"[{result['status']:<5}] {ch.check_id} {ch.name}{count}")
 			if result["detail"]:
 				print(f"        {result['detail']}")
+			if result["status"] == "FAIL" and failure_csv is not None:
+				print(f"        rows: {failure_csv}")
 	finally:
 		conn.close()
-
+		# Remove the failures folder if no check failed (it is only created to hold failure CSVs).
+		if failures_dir.exists() and not any(failures_dir.iterdir()):
+			failures_dir.rmdir()
 	counts = {s: sum(r["status"] == s for r in results) for s in ["PASS", "FAIL", "ERROR", "SKIP"]}
-	summary = {
-		"generated_utc": datetime.now(timezone.utc).isoformat(),
-		"database": args_global.dbname,
-		"output_schema": args_global.output_schema,
-		"configuration": args_global.loaded_config,
-		"counts": counts,
-		"manual_follow_up": [
-			"Sample upstream/downstream barrier IDs and network traces.",
-			"Sample weighted-length calculations.",
-			"Verify first qualifying downstream anthropogenic barrier selection.",
-			"Verify functional reset behavior.",
-			"Visually review sampled gradient barriers against DEM/hillshade.",
-			"Investigate legitimate ranking and satellite-propagation exceptions returned by automated checks.",
-		],
-		"results": results,
-	}
-	json_path = report_dir / f"fishpass_qa_{stamp}.json"
 	csv_path = report_dir / f"fishpass_qa_{stamp}.csv"
-	json_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
 	with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
 		w = csv.DictWriter(f, fieldnames=["id", "category", "name", "status", "failures", "duration_seconds", "detail"])
 		w.writeheader()
 		for row in results:
 			w.writerow({k: row[k] for k in w.fieldnames})
-
 	print("=" * 88)
 	print("Summary: " + ", ".join(f"{k}={v}" for k, v in counts.items()))
-	print(f"JSON report: {json_path}")
-	print(f"CSV report:  {csv_path}")
+	print(f"CSV report:   {csv_path}")
+	if failures_dir.exists():
+		print(f"Failure CSVs: {failures_dir}")
 	if args_global.fail_on_failure and (counts["FAIL"] or counts["ERROR"]):
 		return 1
 	return 0
 
 
 args_global: argparse.Namespace
+
 if __name__ == "__main__":
 	raise SystemExit(main())
