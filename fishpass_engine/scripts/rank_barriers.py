@@ -519,35 +519,44 @@ def sql_finalize_output_table(c):
 
 def report_unassigned_mainstems(cursor, c):
 	"""Log barriers left without a mainstem_id (they get no group and stay
-	unranked), split by reason, so shared-outlet cases stay visible until a rule
-	is decided for them."""
+	unranked), split by reason and listed by feature_id, so shared-outlet cases
+	stay visible until a rule is decided for them."""
 	cursor.execute(
 		f"""
         SELECT
-            count(*) FILTER (WHERE d.id IS NULL)                         AS no_downstream_edge,
-            count(*) FILTER (WHERE d.id IS NOT NULL
-                               AND (SELECT count(*) FROM {c.streams} u
-                                    WHERE u.to_nexus_id = d.from_nexus_id) > 1) AS shared_outlet,
-            count(*)                                                     AS total
+            w.feature_id,
+            CASE
+                WHEN d.id IS NULL THEN 'no_downstream_edge'
+                WHEN (SELECT count(*) FROM {c.streams} u
+                      WHERE u.to_nexus_id = d.from_nexus_id) > 1 THEN 'shared_outlet'
+                ELSE 'other'
+            END AS reason
         FROM {c.work} w
         LEFT JOIN {c.streams} d ON d.id = w.{BARRIER_DOWNSTREAM_EDGE_COL}
-        WHERE w.mainstem_id IS NULL;
+        WHERE w.mainstem_id IS NULL
+        ORDER BY reason, w.feature_id;
         """
 	)
-	no_edge, shared, total = cursor.fetchone()
-	if total:
-		logger.warning(
-			"%s: %d barrier(s) have no mainstem_id and will be left unranked "
-			"(%d with no matching downstream edge, %d on a sink edge with a shared outlet, "
-			"%d other -- e.g. a sink edge with no single input edge).",
-			c.work,
-			total,
-			no_edge,
-			shared,
-			total - no_edge - shared,
-		)
-	else:
+	rows = cursor.fetchall()
+	if not rows:
 		logger.info("%s: every barrier was assigned a mainstem_id", c.work)
+		return
+	by_reason = {"no_downstream_edge": [], "shared_outlet": [], "other": []}
+	for feature_id, reason in rows:
+		by_reason[reason].append(str(feature_id))
+	logger.warning(
+		"%s: %d barrier(s) have no mainstem_id and will be left unranked "
+		"(%d with no matching downstream edge, %d on a sink edge with a shared outlet, "
+		"%d other -- e.g. a sink edge with no single input edge).",
+		c.work,
+		len(rows),
+		len(by_reason["no_downstream_edge"]),
+		len(by_reason["shared_outlet"]),
+		len(by_reason["other"]),
+	)
+	for reason, ids in by_reason.items():
+		if ids:
+			logger.warning("  %s feature_id(s): %s", reason, ", ".join(ids))
 
 
 # Stages run in order; each is committed independently so a failure is easy to locate.
