@@ -83,6 +83,39 @@ def run_export(conn, plan, export_location, export_type, version, local_export_d
 		sys.exit(1)
 
 
+UNASSIGNED_REASON_LABELS = {
+	"no_downstream_edge": "No matching downstream edge",
+	"shared_outlet": "Sink edge with shared outlet",
+	"other": "Other (sink edge with no single input edge)",
+}
+
+
+def unassigned_mainstems_summary(unassigned):
+	"""Job-summary markdown for barriers left without a mainstem_id (unranked).
+	`unassigned` is run_ranking()'s return: {(species, lifecycle): {reason: [feature_id, ...]}}."""
+	rows = [
+		(species, lifecycle, reason, fid)
+		for (species, lifecycle), by_reason in unassigned.items()
+		for reason, ids in by_reason.items()
+		for fid in ids
+	]
+	if not rows:
+		return "### Mainstem assignment\n:white_check_mark: Every ranked barrier was assigned a `mainstem_id`."
+	lines = [
+		"### Mainstem assignment",
+		f":warning: {len(rows)} barrier(s) have no `mainstem_id` and were left unranked "
+		f"(listed once per species/lifecycle they were ranked for).",
+		"",
+		"| Species | Lifecycle | Reason | feature_id |",
+		"|---|---|---|---|",
+	]
+	lines += [
+		f"| {species} | {lifecycle} | {UNASSIGNED_REASON_LABELS[reason]} | `{fid}` |"
+		for species, lifecycle, reason, fid in rows
+	]
+	return "\n".join(lines)
+
+
 def main():
 	start = time.monotonic()
 	run_started = datetime.now(timezone.utc)
@@ -152,7 +185,8 @@ def main():
 			create_barrier_views(conn, cursor, plan)
 
 			logger.info("Ranking Barriers")
-			run_ranking(conn, cursor, plan)
+			unassigned = run_ranking(conn, cursor, plan)
+			write_job_summary(unassigned_mainstems_summary(unassigned))
 
 			logger.info("Creating Combined Output View")
 			create_combined_view(conn, cursor, plan)

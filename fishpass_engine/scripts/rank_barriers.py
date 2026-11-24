@@ -540,7 +540,7 @@ def report_unassigned_mainstems(cursor, c):
 	rows = cursor.fetchall()
 	if not rows:
 		logger.info("%s: every barrier was assigned a mainstem_id", c.work)
-		return
+		return {}
 	by_reason = {"no_downstream_edge": [], "shared_outlet": [], "other": []}
 	for feature_id, reason in rows:
 		by_reason[reason].append(str(feature_id))
@@ -557,6 +557,7 @@ def report_unassigned_mainstems(cursor, c):
 	for reason, ids in by_reason.items():
 		if ids:
 			logger.warning("  %s feature_id(s): %s", reason, ", ".join(ids))
+	return by_reason
 
 
 # Stages run in order; each is committed independently so a failure is easy to locate.
@@ -619,6 +620,7 @@ def run_ranking(conn, cursor, plan):
 	owner = get_db_roles()["owner"]
 
 	configs = []
+	unassigned = {}
 	with as_role(conn, cursor, owner):
 		probe = RankingConfig(plan, *pairs[0])
 		validate_tracking_feature_ids(cursor, probe)
@@ -639,6 +641,7 @@ def run_ranking(conn, cursor, plan):
 			cursor, c.schema, f"ranked_barriers_{c.species}_{c.lifecycle}", ranked_barriers_export_sql(c), "csv"
 		)
 	conn.commit()
+	return unassigned
 
 
 def ranked_barriers_export_sql(c):
