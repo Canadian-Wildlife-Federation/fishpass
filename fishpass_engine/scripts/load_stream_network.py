@@ -161,19 +161,18 @@ def create_indexes(cursor, output_schema):
 	cursor.execute(f"CREATE INDEX streams_graph_id_idx ON {schema_ident}.streams (graph_id);")
 	cursor.execute(f"CREATE INDEX streams_aoi_id_idx ON {schema_ident}.streams (aoi_id);")
 	# For Process Habitat's lookup of the edges meeting at a nexus (load_habitat.fetch_nexus_edges).
-	# Dropped before Compute Statistics and not recreated; see drop_streams_bulk_write_indexes.
+	# Recreated after Compute Statistics because mainstem assignment also looks up edges by nexus.
 	cursor.execute(f"CREATE INDEX streams_from_nexus_id_idx ON {schema_ident}.streams (from_nexus_id);")
 	cursor.execute(f"CREATE INDEX streams_to_nexus_id_idx ON {schema_ident}.streams (to_nexus_id);")
 
 
 def drop_streams_bulk_write_indexes(cursor, output_schema):
 	"""Drop the streams indexes that only snapping needs (the two spatial indexes, the second
-	created by snap_structures, and the two nexus id indexes Process Habitat uses) plus aoi_id,
+	created by snap_structures, and the two nexus id indexes) plus aoi_id,
 	ahead of Compute Statistics' whole-table rewrites -- none of those updates are HOT, so every
 	rewritten row would otherwise get a new entry in each of them. The primary key and
 	streams_graph_id_idx stay: the write-back joins on id and the bundle fetches filter on
-	graph_id. See create_streams_bulk_write_indexes, which recreates all but the nexus id
-	indexes (nothing after Process Habitat uses them)."""
+	graph_id. See create_streams_bulk_write_indexes, which recreates them after the rewrites."""
 
 	schema_ident = quote_ident(output_schema)
 	for index_name in (
@@ -187,8 +186,8 @@ def drop_streams_bulk_write_indexes(cursor, output_schema):
 
 
 def create_streams_bulk_write_indexes(cursor, output_schema):
-	"""Recreate the indexes dropped by drop_streams_bulk_write_indexes, except the two nexus id
-	indexes (only Process Habitat uses them), and refresh planner statistics after the rewrites."""
+	"""Recreate the indexes dropped by drop_streams_bulk_write_indexes and refresh planner
+	statistics after the rewrites."""
 
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(f"CREATE INDEX streams_geometry_idx ON {schema_ident}.streams USING gist (geometry);")
@@ -196,6 +195,8 @@ def create_streams_bulk_write_indexes(cursor, output_schema):
 		f"CREATE INDEX streams_geometry_geog_idx ON {schema_ident}.streams USING gist((geometry::geography))"
 	)
 	cursor.execute(f"CREATE INDEX streams_aoi_id_idx ON {schema_ident}.streams (aoi_id);")
+	cursor.execute(f"CREATE INDEX streams_from_nexus_id_idx ON {schema_ident}.streams (from_nexus_id);")
+	cursor.execute(f"CREATE INDEX streams_to_nexus_id_idx ON {schema_ident}.streams (to_nexus_id);")
 	cursor.execute(f"ANALYZE {schema_ident}.streams;")
 
 

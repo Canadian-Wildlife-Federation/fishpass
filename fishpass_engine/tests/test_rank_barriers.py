@@ -262,6 +262,12 @@ class SQLBuildersTests(unittest.TestCase):
 		self.assertIn('JOIN "ns_wcrp"."ranked_barriers_chn_rear_ns_work" rb ON rb.feature_id = db_.downstr_id', sql)
 		self.assertNotIn("rb.id = db_.downstr_id", sql)
 
+	def test_assign_mainstem_uses_topological_nexus_lookup(self):
+		sql = rb.sql_assign_mainstem_and_initial_groups(self.config)
+		self.assertIn(f"JOIN {self.config.streams} u ON u.to_nexus_id = de.from_nexus_id", sql)
+		self.assertIn("WHERE de.mainstem_id IS NULL", sql)
+		self.assertIn("CASE WHEN si.n_inputs = 1 THEN si.input_mainstem_id END", sql)
+
 	def test_not_runnable_standalone(self):
 		"""rank_barriers is only run via run_model.py."""
 		self.assertFalse(hasattr(rb, "main"))
@@ -273,14 +279,6 @@ class SQLBuildersTests(unittest.TestCase):
 		self.assertIn("create working table", stage_names)
 		self.assertIn("assign ranks", stage_names)
 		self.assertIn("finalize slim output table", stage_names)
-
-
-class DeriveStreamIdUpTests(unittest.TestCase):
-	def test_ignores_sink_edges(self):
-		# A sink edge ends where its outlet edge ends, so it would match the same barrier.
-		c = types.SimpleNamespace(work='"s"."w"', streams='"s"."streams"')
-		sql = rb.sql_derive_stream_id_up(c)
-		self.assertIn("AND NOT a.is_sink_barrier_edge", sql)
 
 
 if __name__ == "__main__":

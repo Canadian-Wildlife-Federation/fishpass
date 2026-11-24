@@ -633,7 +633,7 @@ def run_ranking(conn, cursor, plan):
 				cursor.execute(fn(c))
 				conn.commit()
 				if fn is sql_assign_mainstem_and_initial_groups:
-					report_unassigned_mainstems(cursor, c)
+					unassigned[(c.species, c.lifecycle)] = report_unassigned_mainstems(cursor, c)
 			configs.append(c)
 
 	for c in configs:

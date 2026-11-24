@@ -136,6 +136,7 @@ def apply_yaml_config(args: argparse.Namespace) -> argparse.Namespace:
 	if not reporting_values:
 		raise ValueError("Model plan must define reporting_values.")
 	lifestages = parse_reporting_values(reporting_values, target_species)
+	selected = [code for code in selected if lifestages[code]]
 	plan_code = str(plan.get("code") or "").strip()
 	output_schema = str(plan.get("output_schema") or "").strip()
 	if not plan_code or not output_schema:
@@ -703,11 +704,6 @@ def parse_args() -> argparse.Namespace:
 		"--model-streams-table",
 		default="streams",
 		help="Unsplit-by-species streams table in output_schema used for node degree checks.",
-	)
-	p.add_argument(
-		"--gradient-barriers-table",
-		default="support.gradient_barriers",
-		help="Schema-qualified source gradient barriers table.",
 	)
 	p.add_argument(
 		"--engine-scripts-dir",
