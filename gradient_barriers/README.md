@@ -3,8 +3,8 @@
 Computes gradient barriers per fish species/lifestage from the cached CHyF stream network
 and writes them to `support.gradient_barriers`. Each run also creates (or appends a
 row to) `support.gradient_barriers_metadata`, recording the AOI scope (`{all}` for a full run, or
-the reprocessed AOI short_names for a scoped run), the fish species parameters in effect, and the
-run's timestamp. The metadata table is fully replaced for a full run (all AOI's), and appended to for a AOI scoped run.
+the reprocessed AOI short_names for a scoped run), the fish species parameters in effect, the
+barrier offset, and the run's timestamp. The metadata table is fully replaced for a full run (all AOI's), and appended to for a AOI scoped run.
 
 See [gradient_barriers_doc.md](docs/gradient_barriers_doc.md) for the full requirements and design decisions behind this tool.
 
@@ -22,6 +22,16 @@ This tool reads from `chyf_raw.flowpath`, which must already be populated by the
 **AOI-scoped runs and boundary mainstems.** A scoped run reads across into neighboring AOIs
   where a mainstem crosses a boundary, to keep gradients correct near the edge, but only writes
   barriers for the requested AOI(s).
+
+**Upgrading to the downstream columns.** A `support.gradient_barriers` table created before the
+  `downstream_geometry`/`downstream_workunit` columns were added can't be AOI-scoped reprocessed;
+  the script exits with a message. Do one full (unscoped) run first.
+
+**Barriers measured on a workunit boundary.** A barrier measured from a vertex exactly on the
+  boundary between two workunits belongs to both in `downstream_workunit`, but only one of them
+  recreates it. A scoped run of the other workunit deletes it without recreating it. Reprocess
+  neighbouring workunits together, or do a full run. See
+  [gradient_barriers_doc.md](docs/gradient_barriers_doc.md#aoi-scoped-reprocessing) for details.
 
 **AOI boundary changes.** If `chyf_raw.aoi` polygons are redrawn, an AOI-scoped run won't
   correctly re-clear old boundary-area barriers. Do a full (unscoped) run, or manually fix up the
@@ -52,6 +62,19 @@ workunits:
 Leave `workunit` empty (or delete the file) to recompute the entire network. When one or more `workunit`(s) are set, `compute_barriers.py`
 backs up the existing rows for those AOI(s), recomputes barriers for just those AOI(s), and
 leaves every other AOI's barriers untouched.
+
+### Barrier placement
+
+Gradient is measured from each vertex to the point 100m upstream of it. `barrier_offset_m` in
+[`config/gradient_barriers.yaml`](../config/gradient_barriers.yaml) sets where within that window
+the barrier point is placed, in metres upstream of the vertex (0–100, default 100):
+
+```yaml
+barrier_offset_m: 100
+```
+
+Placing barriers upstream of the vertex stops a barrier measured from a tributary's confluence
+vertex from also sitting on the receiving stream. `0` places barriers at the vertex itself.
 
 
 ## Local Use

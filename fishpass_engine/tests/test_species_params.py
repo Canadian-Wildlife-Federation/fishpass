@@ -74,6 +74,35 @@ class HabitatGradientOkTests(unittest.TestCase):
 		self.assertFalse(sp.habitat_gradient_ok(self.params["noh"], "rear", 1.0))
 
 
+class AccessibilityGradientOkTests(unittest.TestCase):
+	PARAMS = {"accessibility_gradient_spawning_max": 0.2, "accessibility_gradient_rearing_max": 0.1}
+
+	def test_below_threshold(self):
+		self.assertTrue(sp.accessibility_gradient_ok(self.PARAMS, "spawn", 0.05))
+
+	def test_equal_to_threshold_counts(self):
+		# <= matches the gradient barrier rule (a barrier only where gradient > threshold).
+		self.assertTrue(sp.accessibility_gradient_ok(self.PARAMS, "spawn", 0.2))
+
+	def test_above_threshold(self):
+		self.assertFalse(sp.accessibility_gradient_ok(self.PARAMS, "spawn", 0.21))
+
+	def test_spawn_and_rear_use_their_own_threshold(self):
+		self.assertTrue(sp.accessibility_gradient_ok(self.PARAMS, "spawn", 0.15))
+		self.assertFalse(sp.accessibility_gradient_ok(self.PARAMS, "rear", 0.15))
+
+	def test_none_gradient_is_false(self):
+		self.assertFalse(sp.accessibility_gradient_ok(self.PARAMS, "rear", None))
+
+	def test_blank_threshold_means_no_limit(self):
+		params = {"accessibility_gradient_spawning_max": None, "accessibility_gradient_rearing_max": None}
+		self.assertTrue(sp.accessibility_gradient_ok(params, "spawn", 50.0))
+		self.assertTrue(sp.accessibility_gradient_ok(params, "rear", 50.0))
+
+	def test_blank_threshold_still_excludes_none_gradient(self):
+		self.assertFalse(sp.accessibility_gradient_ok({}, "rear", None))
+
+
 class HabitatStrahlerOkTests(unittest.TestCase):
 	def setUp(self):
 		with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

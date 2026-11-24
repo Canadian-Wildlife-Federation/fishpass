@@ -10,21 +10,22 @@ from utils import SNAPPED_GEOMETRY_SRID
 
 
 def write_barrier_stat_tables(cursor, output_schema, barrier_rows):
-	"""Writes each barrier's stats into all_barriers.species_stats -- only structures that
-	successfully snapped onto a processed edge appear here, so species_stats stays NULL for
-	those rows"""
+	"""Writes each barrier's stats into all_barriers.species_stats and
+	all_barriers.upstream_stream_length -- only structures that successfully snapped onto a
+	processed edge appear here, so both stay NULL for the other rows"""
 
 	if not barrier_rows:
 		return
 
 	schema_ident = quote_ident(output_schema)
-	rows = [(json.dumps(b["stats"], default=str), b["id"]) for b in barrier_rows]
+	rows = [(json.dumps(b["stats"], default=str), b["upstream_stream_length"], b["id"]) for b in barrier_rows]
 
 	cursor.executemany(
 		f"""
 		UPDATE {schema_ident}.all_barriers
-		SET species_stats = v.species_stats::jsonb
-		FROM (VALUES (%s::text, %s::uuid)) AS v(species_stats, id)
+		SET species_stats = v.species_stats::jsonb,
+			upstream_stream_length = v.upstream_stream_length
+		FROM (VALUES (%s::text, %s::double precision, %s::uuid)) AS v(species_stats, upstream_stream_length, id)
 		WHERE {schema_ident}.all_barriers.id = v.id
 		""",
 		rows,

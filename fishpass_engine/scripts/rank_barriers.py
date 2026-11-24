@@ -32,10 +32,6 @@ logger = logging.getLogger(__name__)
 # Ranking is driven by the plan's reporting_species_lifecycles -- the cached
 # result of model_plan.expand_reporting_values(). One ranked table is produced
 # per (species, lifecycle) pair (see resolve_ranking_pairs).
-#
-# Shared settings live in config/fishpass.yaml, not here:
-#   * database_roles -- owner + grant roles for the ranked tables (utils.get_db_roles)
-#   * wcrp.min_avg_gain_km -- per-plan overridable (utils.wcrp_setting)
 
 # Rehabilitated-structure match. The tracking table's status column is a
 # controlled enum (support.tt_structure_list_status_type), so this is a strict
@@ -47,14 +43,13 @@ REHABILITATED_STATUS = "Rehabilitated barrier"
 ALL_BARRIERS_TABLE = "all_barriers"
 ALL_BARRIERS_KEY = "feature_id"
 
-# Geometry / mainstem derivation (spatial stream_id_up lookup).
-BARRIER_GEOM_COL = "snapped_geometry"
-STREAM_GEOM_COL = "geometry"
+# Mainstem derivation is topological (see sql_assign_mainstem_and_initial_groups):
+# every barrier carries downstream_edge_id (all_barriers -> barriers view), and
+# after network breaking the barrier sits at that edge's from_nexus_id.
+BARRIER_DOWNSTREAM_EDGE_COL = "downstream_edge_id"
 
 # Every *_length field in the barriers view is in METRES; the km-conversion stage
-# divides each by 1000 and renames it with a _km suffix. The field list is NOT
-# hand-typed here -- it comes from postprocess_views.barrier_length_fields(), the
-# same source that defines the view's columns (see RankingConfig.length_fields).
+# divides each by 1000 and renames it with a _km suffix.
 
 
 # =================================================================================
@@ -63,16 +58,8 @@ STREAM_GEOM_COL = "geometry"
 def resolve_ranking_pairs(plan):
 	"""Return the (species, lifecycle) tuples this run will rank.
 
-	This is simply the cached result of model_plan.expand_reporting_values() --
-	plan['reporting_species_lifecycles']. The expansion of reporting_values
-	('<species>_<lifestage>' parsing, 'all' handling, lifecycle validation,
-	species-in-target_species checks) is NOT re-done here; it lives entirely in
-	model_plan.py. One ranked table is built per pair.
-
-	Two extra guards: a clear error if there is nothing to rank (model_plan
-	already rejects an empty reporting_values, so this is defense in depth), and
-	a SQL-safety check on the species code (it is interpolated into column
-	names, which can't be bound params).
+	Two extra guards: a clear error if there is nothing to rank and
+	a SQL-safety check on the species code.
 	"""
 	pairs = [tuple(pair) for pair in plan.get("reporting_species_lifecycles") or []]
 	if not pairs:
@@ -102,29 +89,18 @@ class RankingConfig:
 		self.view_lifecycles = sorted({lc for sp, lc in plan["reporting_species_lifecycles"] if sp == species_code})
 		self.length_fields = barrier_length_fields(self.view_lifecycles)
 
-		# Per-plan settings (plan override, else config/fishpass.yaml default).
 		self.min_avg_gain_km = wcrp_setting(plan, "min_avg_gain_km")
 		self.roles = get_db_roles()
 
-		# Identifiers. Every schema/table name is quote_ident()-ed: plan['code']
-		# is only held to utils.SAFE_NAME_RE, which allows a leading digit (e.g. '1ns'),
-		# and an unquoted 1ns_wcrp is a SQL syntax error. *_name attributes keep
-		# the RAW names for bound parameters (catalog lookups) and for building
-		# derived names (index names).
-		#
-		# Persistent per-WCRP schema (owned by the owner role) -- holds BOTH the
-		# tracking table and the ranked output/_work tables.
 		self.wcrp_schema_name = f"{self.watershed}_wcrp"
 		self.wcrp_schema = quote_ident(self.wcrp_schema_name)
 
-		# Sources are READ from the ephemeral output_schema.
 		self.schema_q = quote_ident(self.schema)
 		self.barriers_view = f"{self.schema_q}.{quote_ident(f'anthropogenic_barriers_{self.species}')}"
 		self.streams = f"{self.schema_q}.{quote_ident('streams')}"
 		self.all_barriers = f"{self.schema_q}.{quote_ident(ALL_BARRIERS_TABLE)}"
 
-		# Outputs are WRITTEN to the persistent WCRP schema. The lifecycle is part
-		# of the name so a plan reporting multiple lifecycles for a species yields
+		# A plan reporting multiple lifecycles for a species yields
 		# one distinct ranked table per (species, lifecycle) pair.
 		table_stem = f"ranked_barriers_{self.species}_{self.lifecycle}_{self.watershed}"
 		self.ranked_name = table_stem
@@ -132,8 +108,6 @@ class RankingConfig:
 		self.ranked = f"{self.wcrp_schema}.{quote_ident(self.ranked_name)}"
 		self.work = f"{self.wcrp_schema}.{quote_ident(self.work_name)}"
 
-		# Tracking table (create_wcrp_tracking_table.py). Status column is
-		# species-suffixed (lifecycle-agnostic).
 		self.tracking_table_name = f"tracking_table_{self.watershed}"
 		self.tracking_table = f"{self.wcrp_schema}.{quote_ident(self.tracking_table_name)}"
 		self.col_tracking_status = f"structure_list_status_{self.species}"
@@ -237,42 +211,64 @@ def sql_convert_lengths_to_km(c):
 	return "\n".join(lines) + "\n"
 
 
-def sql_derive_stream_id_up(c):
-	"""Derive stream_id_up spatially: a barrier belongs to the stream edge whose
-	downstream end (st_endpoint) it sits on, within a 0.01 tolerance."""
-	return f"""
-    ALTER TABLE {c.work} DROP COLUMN IF EXISTS stream_id;
-    ALTER TABLE {c.work} ADD COLUMN IF NOT EXISTS stream_id_up uuid;
-    UPDATE {c.work} SET stream_id_up = NULL;
-    WITH ids AS (
-        SELECT a.id AS stream_id, b.id AS work_id
-        FROM {c.streams} a, {c.work} b
-        WHERE st_dwithin(a.{STREAM_GEOM_COL}, b.{BARRIER_GEOM_COL}, 0.01)
-          AND st_dwithin(st_endpoint(a.{STREAM_GEOM_COL}), b.{BARRIER_GEOM_COL}, 0.01)
-    )
-    UPDATE {c.work}
-        SET stream_id_up = a.stream_id
-        FROM ids a
-        WHERE a.work_id = {c.work}.id;
-    """
-
-
 def sql_assign_mainstem_and_initial_groups(c):
-	"""Add mainstem_id from the stream network and seed one group per mainstem."""
+	"""Add mainstem_id from the stream network topology and seed one group per mainstem.
+
+	Replaces the old distance-based stream_id_up lookup (0.01 degree tolerance),
+	which could match edges on other rivers and picked arbitrarily at confluences.
+
+	After network breaking each barrier sits at the from_nexus_id of its
+	downstream_edge_id, so the edges flowing into it are exactly those with
+	to_nexus_id = that from_nexus_id. No distance tolerance is used.
+
+	  1. Downstream edge has a mainstem_id: use it. This is the same as taking the
+	     input edge with the same mainstem_id as the downstream edge (the main
+	     river continues -- Process Habitat case 6b), and also covers headwater
+	     barriers with no input edge. Confluences are no longer arbitrary.
+	  2. Downstream edge is a sink edge (mainstem_id NULL): use the mainstem_id of
+	     the input (outlet) edge if exactly one edge ends there.
+	  3. Shared outlet (sink edge with 2+ input edges) or no usable input:
+	     mainstem_id stays NULL, so the barrier gets no group and is left
+	     unranked. This still needs a decision if encountered; see report_unassigned_mainstems.
+		 Most likely outcome is that all barriers will get a mainstem assigned."""
+
 	idx_mainstem = quote_ident(f"{c.work_name}_idx_mainstem")
 	idx_group_id = quote_ident(f"{c.work_name}_idx_group_id")
 	idx_id = quote_ident(f"{c.work_name}_idx_id")
 	return f"""
     --TO FIX: some group_ids need to get combined - e.g., multiple branches of river
     ALTER TABLE {c.work} ADD COLUMN IF NOT EXISTS mainstem_id uuid;
-    UPDATE {c.work} SET mainstem_id = t.mainstem_id
-        FROM {c.streams} t WHERE t.id = stream_id_up;
+    UPDATE {c.work} SET mainstem_id = NULL;
+    WITH down_edge AS (
+        SELECT w.id AS work_id, d.mainstem_id, d.from_nexus_id
+        FROM {c.work} w
+        JOIN {c.streams} d ON d.id = w.{BARRIER_DOWNSTREAM_EDGE_COL}
+    ), sink_inputs AS (
+        -- only barriers on sink edges (mainstem_id NULL) need the input edge
+        SELECT de.work_id,
+               count(*) AS n_inputs,
+               (array_agg(u.mainstem_id))[1] AS input_mainstem_id
+        FROM down_edge de
+        JOIN {c.streams} u ON u.to_nexus_id = de.from_nexus_id
+        WHERE de.mainstem_id IS NULL
+        GROUP BY de.work_id
+    ), resolved AS (
+        SELECT de.work_id,
+               COALESCE(de.mainstem_id,
+                        CASE WHEN si.n_inputs = 1 THEN si.input_mainstem_id END) AS mainstem_id
+        FROM down_edge de
+        LEFT JOIN sink_inputs si ON si.work_id = de.work_id
+    )
+    UPDATE {c.work} w
+        SET mainstem_id = r.mainstem_id
+        FROM resolved r
+        WHERE w.id = r.work_id;
     CREATE INDEX IF NOT EXISTS {idx_mainstem} ON {c.work} (mainstem_id);
     CREATE INDEX IF NOT EXISTS {idx_group_id} ON {c.work} (group_id);
     CREATE INDEX IF NOT EXISTS {idx_id}       ON {c.work} (id);
     WITH mainstems AS (
-        SELECT DISTINCT mainstem_id, row_number() OVER () AS group_id
-        FROM {c.work}
+        SELECT mainstem_id, row_number() OVER (ORDER BY mainstem_id) AS group_id
+        FROM (SELECT DISTINCT mainstem_id FROM {c.work} WHERE mainstem_id IS NOT NULL) d
     )
     -- Start by assigning all barriers on the same mainstem_id to a group
     UPDATE {c.work} a SET group_id = m.group_id
@@ -368,7 +364,7 @@ def sql_group_gains(c):
 def sql_downstream_group_ids(c):
 	"""Record, for each barrier, the group_ids of the barriers immediately
 	downstream -- the deduplicated UNION of the spawn and rear downstream id
-	arrays (native uuid[], concatenated with || and expanded with unnest())."""
+	arrays."""
 	return f"""
     ---------------GET DOWNSTREAM GROUP IDs----------------------------
     ALTER TABLE {c.work} ADD downstr_group_ids varchar[];
@@ -402,7 +398,7 @@ def sql_downstream_group_ids(c):
 
 
 def sql_assign_ranks(c):
-	"""Immediate, potential, and combined ranks (thresholds in km). Unranked-able
+	"""Immediate, potential, and combined ranks (thresholds in km). Unrankable
 	barriers (no group, or zero weighted gain/habitat) are deliberately left NULL."""
 	return f"""
     ----------------- ASSIGN RANK ID  -------------------------
@@ -489,9 +485,7 @@ def sql_assign_ranks(c):
 
 def sql_finalize_output_table(c):
 	"""Write the slim output table: feature_id + ONLY the ranking fields generated
-	by this script, then drop the working table. Ownership/grants match the
-	tracking-table convention. The barriers, tracking, and ranked tables are
-	joined into a single export view downstream, so no source columns are copied.
+	by this script, then drop the working table.
 	"""
 	owner = quote_ident(c.roles["owner"])
 	grants = "".join(
@@ -523,11 +517,53 @@ def sql_finalize_output_table(c):
     """
 
 
+def report_unassigned_mainstems(cursor, c):
+	"""Log barriers left without a mainstem_id (they get no group and stay
+	unranked), split by reason and listed by feature_id, so shared-outlet cases
+	stay visible until a rule is decided for them."""
+	cursor.execute(
+		f"""
+        SELECT
+            w.feature_id,
+            CASE
+                WHEN d.id IS NULL THEN 'no_downstream_edge'
+                WHEN (SELECT count(*) FROM {c.streams} u
+                      WHERE u.to_nexus_id = d.from_nexus_id) > 1 THEN 'shared_outlet'
+                ELSE 'other'
+            END AS reason
+        FROM {c.work} w
+        LEFT JOIN {c.streams} d ON d.id = w.{BARRIER_DOWNSTREAM_EDGE_COL}
+        WHERE w.mainstem_id IS NULL
+        ORDER BY reason, w.feature_id;
+        """
+	)
+	rows = cursor.fetchall()
+	if not rows:
+		logger.info("%s: every barrier was assigned a mainstem_id", c.work)
+		return {}
+	by_reason = {"no_downstream_edge": [], "shared_outlet": [], "other": []}
+	for feature_id, reason in rows:
+		by_reason[reason].append(str(feature_id))
+	logger.warning(
+		"%s: %d barrier(s) have no mainstem_id and will be left unranked "
+		"(%d with no matching downstream edge, %d on a sink edge with a shared outlet, "
+		"%d other -- e.g. a sink edge with no single input edge).",
+		c.work,
+		len(rows),
+		len(by_reason["no_downstream_edge"]),
+		len(by_reason["shared_outlet"]),
+		len(by_reason["other"]),
+	)
+	for reason, ids in by_reason.items():
+		if ids:
+			logger.warning("  %s feature_id(s): %s", reason, ", ".join(ids))
+	return by_reason
+
+
 # Stages run in order; each is committed independently so a failure is easy to locate.
 STAGES = [
 	("create working table", sql_create_working_table),
 	("convert lengths m -> km", sql_convert_lengths_to_km),
-	("derive stream_id_up", sql_derive_stream_id_up),
 	("assign mainstem + seed groups", sql_assign_mainstem_and_initial_groups),
 	("group loop (performant)", sql_group_loop),
 	("calculate group gains", sql_group_gains),
@@ -583,12 +619,8 @@ def run_ranking(conn, cursor, plan):
 	pairs = resolve_ranking_pairs(plan)
 	owner = get_db_roles()["owner"]
 
-	# Act as the owner role so the ranked/_work tables (created in the owner-
-	# owned <code>_wcrp schema) and the finalize-stage OWNER TO succeed even when
-	# the connecting user is only a granted member of the role. as_role() rolls
-	# back + RESETs afterwards (even on error) because run_model.py shares this
-	# connection across phases, so the role change must not leak past ranking.
 	configs = []
+	unassigned = {}
 	with as_role(conn, cursor, owner):
 		probe = RankingConfig(plan, *pairs[0])
 		validate_tracking_feature_ids(cursor, probe)
@@ -600,14 +632,16 @@ def run_ranking(conn, cursor, plan):
 				logger.info("  -> %s", label)
 				cursor.execute(fn(c))
 				conn.commit()
+				if fn is sql_assign_mainstem_and_initial_groups:
+					unassigned[(c.species, c.lifecycle)] = report_unassigned_mainstems(cursor, c)
 			configs.append(c)
 
-	# Added as the connecting user (after as_role), who owns the output schema's azure_exports.
 	for c in configs:
 		azure_export.add_export(
 			cursor, c.schema, f"ranked_barriers_{c.species}_{c.lifecycle}", ranked_barriers_export_sql(c), "csv"
 		)
 	conn.commit()
+	return unassigned
 
 
 def ranked_barriers_export_sql(c):

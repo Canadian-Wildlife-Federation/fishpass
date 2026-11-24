@@ -25,7 +25,8 @@ from graph_stats import (
 from habitat_access import apply_habitat_access_overrides, derive_spawnrear_habitat
 from length_stats import (
 	compute_barrier_upstream_downstream_stats,
-	compute_species_length_stats,
+	compute_length_stats,
+	sum_inflowing,
 )
 from utils import LIFESTAGES, LIFESTAGES_ALL, REAR, SPAWN, SPAWNREAR
 
@@ -102,7 +103,7 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 	schema_ident = quote_ident(output_schema)
 	cursor.execute(
 		f"""
-		SELECT e.graph_id, s.id, s.feature_id, s.downstream_edge_id, s.upstream_edge_id,
+		SELECT e.graph_id, s.id, s.feature_id, s.downstream_edge_id,
 			s.species_passability_value, s.structure_type
 		FROM {schema_ident}.all_barriers s
 		JOIN {schema_ident}.streams e ON e.id = s.downstream_edge_id
@@ -117,9 +118,8 @@ def fetch_bundle_barriers(cursor, output_schema, graph_ids):
 				"id": row[0],
 				"feature_id": row[1],
 				"edge_id": row[2],
-				"upstream_edge_id": row[3],
-				"species_passability_value": row[4],
-				"structure_type": row[5],
+				"species_passability_value": row[3],
+				"structure_type": row[4],
 			}
 		)
 	return by_graph
@@ -241,7 +241,8 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 	fetch_bundle_habitat_updates). Returns (edge_stats, barrier_rows, route_measures):
 	edge_stats (an iter_edge_json generator -- consume it once) and route_measures are both
 	ready for iter_stats_write_rows, and barrier_rows is barriers annotated with "stats"
-	including each barrier's upstream length figures (for write_barrier_stat_tables to use)."""
+	including each barrier's upstream length figures, plus "upstream_stream_length" (not per
+	species) -- both for write_barrier_stat_tables to use."""
 
 	edges_by_id = {e["id"]: e for e in edges}
 	edge_ids = list(edges_by_id.keys())
@@ -276,7 +277,10 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 		barriers,
 		species_list,
 	)
-	species_length_stats = compute_species_length_stats(
+	# Raw length, used only for upstream_stream_length and <lc>_upstream_below_gradient_threshold_length
+	# (see length_stats.UPSTREAM_STREAM_LENGTH_COLUMN). Every other length stat uses effective_length.
+	raw_stream_length = {eid: edges_by_id[eid]["length"] or 0.0 for eid in edge_ids}
+	species_length_stats, upstream_stream_length_by_edge = compute_length_stats(
 		order_up,
 		predecessors,
 		edge_ids,
@@ -288,11 +292,21 @@ def process_component(graph_id, edges, barriers, habitat_rows, plan, species_par
 		species_params_by_code,
 		reporting_species_lifecycles,
 		downstream_first_barrier_passability,
+		raw_stream_length,
+		edge_gradient,
 	)
 	barrier_stats_by_id = compute_barrier_upstream_downstream_stats(
-		barriers, barrier_stats, barrier_here, species_length_stats
+		barriers, barrier_stats, barrier_here, species_length_stats, predecessors
 	)
-	barrier_rows = [{**b, "stats": barrier_stats_by_id[b["id"]]} for b in barriers]
+	barrier_rows = [
+		{
+			**b,
+			"stats": barrier_stats_by_id[b["id"]],
+			# Same rule as the per-species upstream lengths (see length_stats.sum_inflowing).
+			"upstream_stream_length": sum_inflowing(predecessors, b["edge_id"], upstream_stream_length_by_edge),
+		}
+		for b in barriers
+	]
 
 	# Built last and left unconsumed: it holds only the per-edge results it reads from, so the
 	# graph and the other intermediates above are released as soon as this returns.

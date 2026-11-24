@@ -262,6 +262,12 @@ class SQLBuildersTests(unittest.TestCase):
 		self.assertIn('JOIN "ns_wcrp"."ranked_barriers_chn_rear_ns_work" rb ON rb.feature_id = db_.downstr_id', sql)
 		self.assertNotIn("rb.id = db_.downstr_id", sql)
 
+	def test_assign_mainstem_uses_topological_nexus_lookup(self):
+		sql = rb.sql_assign_mainstem_and_initial_groups(self.config)
+		self.assertIn(f"JOIN {self.config.streams} u ON u.to_nexus_id = de.from_nexus_id", sql)
+		self.assertIn("WHERE de.mainstem_id IS NULL", sql)
+		self.assertIn("CASE WHEN si.n_inputs = 1 THEN si.input_mainstem_id END", sql)
+
 	def test_not_runnable_standalone(self):
 		"""rank_barriers is only run via run_model.py."""
 		self.assertFalse(hasattr(rb, "main"))

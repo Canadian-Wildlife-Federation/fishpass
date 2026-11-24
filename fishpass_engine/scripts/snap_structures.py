@@ -39,7 +39,7 @@ def fetch_candidate_matches(cursor, output_schema, edge_distance_m):
     		SELECT id, geometry
     		FROM {schema_ident}.streams e
 			WHERE ST_DWithin(s.geometry::geography, e.geometry::geography, %s)
-    		ORDER BY s.geometry::geography <-> e.geometry::geography
+    		ORDER BY s.geometry::geography <-> e.geometry::geography, e.id
     		LIMIT 1
 		) e ON true
 		WHERE e.id IS NOT NULL
@@ -66,7 +66,7 @@ def write_snapped_geometries(cursor, output_schema, srid, all_results):
 	location in the streams table's native SRID (no reprojection), so Compute Statistics'
 	network-breaking step can match it against streams vertices exactly. downstream_edge_id
 	records which streams edge the structure landed on (network_break.py later splits that
-	edge and derives upstream_edge_id for the other side of the split)."""
+	edge, and reassigns downstream_edge_id to the segment starting at the structure)."""
 
 	schema_ident = quote_ident(output_schema)
 	rows = [(x, y, edge_id, structure_id) for structure_id, edge_id, x, y, _z, _m in all_results]
@@ -158,9 +158,6 @@ def snap_structures(conn, cursor, plan, srid):
 	# create after the data is loaded so data loading isn't affected
 	cursor.execute(
 		f"CREATE INDEX all_barriers_downstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (downstream_edge_id);"
-	)
-	cursor.execute(
-		f"CREATE INDEX all_barriers_upstream_edge_id_idx ON {quote_ident(output_schema)}.all_barriers (upstream_edge_id);"
 	)
 
 	conn.commit()

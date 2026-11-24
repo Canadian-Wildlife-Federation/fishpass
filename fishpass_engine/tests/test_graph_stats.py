@@ -40,6 +40,19 @@ class BuildGraphTests(unittest.TestCase):
 		self.assertEqual(predecessors["E1"], [])
 		self.assertEqual(roots, ["E4"])
 
+	def test_braid_stops_the_run(self):
+		# E1 ends at N2, where two edges start (a braid): "Db" and "Da".
+		edges = [
+			{"id": "E1", "from_nexus_id": "N1", "to_nexus_id": "N2"},
+			{"id": "Db", "from_nexus_id": "N2", "to_nexus_id": "N3"},
+			{"id": "Da", "from_nexus_id": "N2", "to_nexus_id": "N4"},
+		]
+		with self.assertRaises(SystemExit) as ctx:
+			gs.build_graph(edges)
+		message = str(ctx.exception)
+		self.assertIn("N2", message)
+		self.assertIn("Da, Db", message)
+
 
 class OrderingTests(unittest.TestCase):
 	def test_upstream_order_respects_predecessors(self):

@@ -39,19 +39,29 @@ class ComputeEffectiveLengthAndGradientTests(unittest.TestCase):
 		cs.compute_effective_length_and_gradient(cursor, "model_test")
 		self.assertEqual(len(cursor.executed), 1)
 
+	def test_recomputes_every_length_from_geometry(self):
+		cursor = FakeCursor()
+		cs.compute_effective_length_and_gradient(cursor, "model_test")
+		sql, _ = cursor.executed[0]
+		flat = " ".join(sql.split())
+		self.assertIn("length = r.length,", flat)
+		# No WHERE on the recompute: every edge, split or not, gets the same measure.
+		self.assertIn('ST_Length(geometry::geography) AS length FROM "model_test".streams ),', flat)
+
 	def test_null_ecatchment_or_mainstem_keeps_own_length(self):
 		cursor = FakeCursor()
 		cs.compute_effective_length_and_gradient(cursor, "model_test")
 		sql, _ = cursor.executed[0]
-		self.assertIn("WHEN s.ecatchment_id IS NULL OR s.mainstem_id IS NULL THEN s.length", sql)
+		self.assertIn("WHEN s.ecatchment_id IS NULL OR s.mainstem_id IS NULL THEN r.length", sql)
 
 	def test_defaults_everything_else_to_zero_then_restores_best_mainstem(self):
 		cursor = FakeCursor()
 		cs.compute_effective_length_and_gradient(cursor, "model_test")
 		sql, _ = cursor.executed[0]
-		self.assertIn("SUM(length) AS total_length", sql)
+		# Mainstem totals use the recomputed length, not the stored one.
+		self.assertIn("SUM(length) AS total_length FROM new_length", " ".join(sql.split()))
 		self.assertIn("ORDER BY ecatchment_id, total_length DESC, mainstem_id", sql)
-		self.assertIn("WHEN s.mainstem_id = r.best_mainstem_id THEN s.length", sql)
+		self.assertIn("WHEN s.mainstem_id = r.best_mainstem_id THEN r.length", sql)
 		self.assertIn("ELSE 0", sql)
 
 	def test_gradient_query_shape(self):
@@ -60,8 +70,8 @@ class ComputeEffectiveLengthAndGradientTests(unittest.TestCase):
 		sql, _ = cursor.executed[0]
 		self.assertIn(f"NULLIF(ST_M(ST_StartPoint(s.geometry)), {cs.NO_DATA})", sql)
 		self.assertIn(f"NULLIF(ST_M(ST_EndPoint(s.geometry)), {cs.NO_DATA})", sql)
-		self.assertIn("WHEN s.length > 0", sql)
-		self.assertIn("/ s.length", sql)
+		self.assertIn("WHEN r.length > 0", sql)
+		self.assertIn("/ r.length", sql)
 		self.assertIn("SET", sql)
 		self.assertIn("segment_gradient = CASE", sql)
 

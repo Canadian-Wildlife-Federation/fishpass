@@ -67,6 +67,23 @@ def habitat_gradient_ok(params, lifecycle, segment_gradient):
 LIFECYCLE_STRAHLER_FIELD = {REAR: "rearing", SPAWN: "spawning"}
 
 
+def accessibility_gradient_ok(params, lifecycle, segment_gradient):
+	"""True if segment_gradient is within the species' accessibility gradient threshold for
+	lifecycle ("spawn" or "rear"): segment_gradient <= accessibility_gradient_<spawning|rearing>_max.
+
+	<= matches the gradient barrier rule, which flags a barrier only where gradient > threshold
+	(gradient_barriers/scripts/compute_barriers.py flag_species). A blank threshold (None) means
+	no gradient limit, so any known gradient passes. An edge with no known gradient (None --
+	zero length or a missing endpoint elevation) never passes."""
+
+	if segment_gradient is None:
+		return False
+	max_v = params.get(f"accessibility_gradient_{LIFECYCLE_STRAHLER_FIELD[lifecycle]}_max")
+	if max_v is None:
+		return True
+	return segment_gradient <= max_v
+
+
 def habitat_strahler_ok(params, lifecycle, strahler_order):
 	"""Unsed in compute statistics: min_<lc>_strahler_order <= strahler_order <
 	max_<lc>_strahler_order. False if strahler_order is None, or either bound is missing/max<min."""

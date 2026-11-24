@@ -46,7 +46,7 @@ class CreateNaturalAnthropogenicViewsTests(unittest.TestCase):
 		sql_anthro, _ = cursor.executed[1]
 		self.assertIn('CREATE VIEW "model_test".natural_barriers', sql_natural)
 		self.assertIn("SELECT ab.feature_id, ab.feature_type, s.stream_name_en", sql_natural)
-		self.assertIn('LEFT JOIN "model_test".streams s ON s.id = ab.upstream_edge_id', sql_natural)
+		self.assertIn('LEFT JOIN "model_test".streams s ON s.id = ab.downstream_edge_id', sql_natural)
 		self.assertNotIn("SELECT id, feature_id", sql_natural)
 		self.assertIn("WHERE ab.structure_type = 'natural' AND ab.species_stats IS NOT NULL", sql_natural)
 		self.assertIn('LEFT JOIN "model_test".cabd_waterfalls wf', sql_natural)
@@ -59,6 +59,9 @@ class CreateNaturalAnthropogenicViewsTests(unittest.TestCase):
 		self.assertNotIn("cabd_waterfalls", sql_anthro)
 		self.assertNotIn("fall_name_en", sql_anthro)
 		self.assertNotIn("fall_height_m", sql_anthro)
+		# upstream_stream_length is on the natural view only.
+		self.assertIn("ab.downstream_edge_id, ab.upstream_stream_length,", sql_natural)
+		self.assertNotIn("upstream_stream_length", sql_anthro)
 
 	def test_natural_view_has_null_waterfall_columns_without_waterfalls(self):
 		cursor = FakeCursor()
@@ -85,10 +88,10 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		sql_natural_as = next(sql for sql, _ in cursor.executed if 'natural_barriers_as"' in sql)
 		self.assertIn("WHERE ab.structure_type = 'natural' AND ab.species_stats IS NOT NULL", sql_natural_as)
 		self.assertIn(
-			"SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.upstream_edge_id, ab.downstream_edge_id,",
+			"SELECT ab.feature_id, ab.feature_type, s.stream_name_en, ab.downstream_edge_id,",
 			sql_natural_as,
 		)
-		self.assertIn('LEFT JOIN "model_test".streams s ON s.id = ab.upstream_edge_id', sql_natural_as)
+		self.assertIn('LEFT JOIN "model_test".streams s ON s.id = ab.downstream_edge_id', sql_natural_as)
 		self.assertNotIn("SELECT id, feature_id", sql_natural_as)
 		sql_anthro_as = next(sql for sql, _ in cursor.executed if 'anthropogenic_barriers_as"' in sql)
 		self.assertIn("SELECT ab.feature_id, ab.feature_type,", sql_anthro_as)
@@ -200,6 +203,20 @@ class CreateSpeciesBarrierViewsTests(unittest.TestCase):
 		)
 		self.assertNotIn("spawn_upstream_length", sql_anthro_ae)
 
+	def test_new_upstream_length_columns_on_natural_views_only(self):
+		cursor = FakeCursor()
+		pv.create_species_barrier_views(cursor, "model_test", [("as", "rear")])
+		sql_natural = next(sql for sql, _ in cursor.executed if '"model_test"."natural_barriers_as"' in sql)
+		sql_anthro = next(sql for sql, _ in cursor.executed if '"model_test"."anthropogenic_barriers_as"' in sql)
+
+		self.assertIn("ab.downstream_edge_id, ab.upstream_stream_length,", sql_natural)
+		# Both lifestages, even though only rear is reported.
+		for lc in ("spawn", "rear"):
+			field = f"{lc}_upstream_below_gradient_threshold_length"
+			self.assertIn(f"(ab.species_stats->'as'->>'{field}')::double precision AS {field}", sql_natural)
+		self.assertNotIn("upstream_stream_length", sql_anthro)
+		self.assertNotIn("below_gradient_threshold", sql_anthro)
+
 	def test_rejects_unsafe_species_code(self):
 		cursor = FakeCursor()
 		with self.assertRaises(SystemExit):
@@ -259,6 +276,9 @@ class CreateSpeciesViewsTests(unittest.TestCase):
 		sql_as, sql_ae = (sql for sql, _ in cursor.executed)
 
 		self.assertIn('CREATE VIEW "model_test"."streams_as"', sql_as)
+		# Sink edges stay in streams but are left out of the views.
+		self.assertIn("AND NOT is_sink_barrier_edge", sql_as)
+		self.assertIn("AND NOT is_sink_barrier_edge", sql_ae)
 		self.assertIn("id, geometry, length, strahler_order, effective_length, segment_gradient", sql_as)
 		self.assertIn("(species_stats->'as'->>'spawn_accessibility') AS spawn_accessibility", sql_as)
 		self.assertIn("(species_stats->'as'->>'rear_accessibility') AS rear_accessibility", sql_as)
@@ -345,7 +365,7 @@ class CreateWatershedSummaryStatisticsTests(unittest.TestCase):
 
 		# Verify key single-pass CTE constructs
 		self.assertIn("LATERAL jsonb_each", sql)
-		self.assertIn("WHERE sp.key IN ('as', 'ae')", sql)
+		self.assertIn("WHERE sp.key IN ('as', 'ae') AND NOT s.is_sink_barrier_edge", sql)
 		self.assertIn("GROUP BY species", sql)
 
 		# Verify expected columns and calculations

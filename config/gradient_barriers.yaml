@@ -5,3 +5,11 @@
 #workunits:
 #  - 08MF001
 #  - 08MG001
+
+# Distance (m) upstream of the measured vertex at which to place the barrier point,
+# between 0 and 100 (the gradient is measured over the 100m upstream of the vertex).
+# 0 = at the downstream vertex, 100 = at the upstream end of the gradient window.
+# Placing it upstream keeps barriers measured from a tributary's confluence on that
+# tributary instead of on the confluence shared with the receiving stream.
+# Defaults to 100 if unset.
+barrier_offset_m: 100
