@@ -215,7 +215,7 @@ class StreamsBulkWriteIndexTests(unittest.TestCase):
 		lsn.create_streams_bulk_write_indexes(cursor, "model_test")
 		statements = [sql for sql, _ in cursor.executed]
 		for name in self.NEXUS_INDEX_NAMES:
-			self.assertTrue(any(f"CREATE INDEX {name} ON \"model_test\".streams" in sql for sql in statements), name)
+			self.assertTrue(any(f'CREATE INDEX {name} ON "model_test".streams' in sql for sql in statements), name)
 
 	def test_drop_keeps_graph_id_index(self):
 		# streams_graph_id_idx is what the steps 5-9 bundle fetches filter on.
