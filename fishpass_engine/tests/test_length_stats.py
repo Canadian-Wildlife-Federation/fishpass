@@ -573,9 +573,7 @@ class UpstreamStreamLengthAndGradientThresholdLengthTests(unittest.TestCase):
 		self.assertEqual(by_barrier["b"]["es"]["rear_upstream_below_gradient_threshold_length"], 0.0)
 
 	def test_two_barriers_on_the_same_edge_get_the_same_values(self):
-		_, _, by_barrier, upstream_by_barrier = self._run(
-			[self._barrier("b1", "E4"), self._barrier("b2", "E4")]
-		)
+		_, _, by_barrier, upstream_by_barrier = self._run([self._barrier("b1", "E4"), self._barrier("b2", "E4")])
 		self.assertEqual(upstream_by_barrier["b1"], 40.0)
 		self.assertEqual(upstream_by_barrier["b2"], 40.0)
 		for lc, expected in (("spawn", 33.0), ("rear", 11.0)):

@@ -558,7 +558,9 @@ def compute_barriers(conn, cursor, srid, species_params, aoi_ids=None, barrier_o
 					prune_path(path, window)
 					continue
 				barriers.extend(
-					resolve_vertex(window, prev, cum_dist, m, lon, lat, species_params, in_scope, path, barrier_offset_m)
+					resolve_vertex(
+						window, prev, cum_dist, m, lon, lat, species_params, in_scope, path, barrier_offset_m
+					)
 				)
 				prune_path(path, window)
 				prev = (cum_dist, m)

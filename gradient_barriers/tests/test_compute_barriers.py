@@ -530,7 +530,9 @@ class RealWorldMultiSpeciesTests(unittest.TestCase):
 		]
 
 		self.assertEqual(len(barriers), len(expected))
-		for (lon, lat, gradient, species, _ds_lon, _ds_lat), (exp_lon, exp_lat, exp_gradient, exp_species) in zip(barriers, expected):
+		for (lon, lat, gradient, species, _ds_lon, _ds_lat), (exp_lon, exp_lat, exp_gradient, exp_species) in zip(
+			barriers, expected
+		):
 			self.assertAlmostEqual(lon, exp_lon, places=9)
 			self.assertAlmostEqual(lat, exp_lat, places=9)
 			self.assertAlmostEqual(gradient, exp_gradient)
@@ -653,7 +655,12 @@ class LoadBarrierOffsetTests(unittest.TestCase):
 			self.assertEqual(cb.load_barrier_offset(self._config(tmp, "barrier_offset_m: 0\n")), 0.0)
 
 	def test_invalid_values_exit(self):
-		for text in ("barrier_offset_m: 150\n", "barrier_offset_m: -1\n", "barrier_offset_m: ten\n", "barrier_offset_m: true\n"):
+		for text in (
+			"barrier_offset_m: 150\n",
+			"barrier_offset_m: -1\n",
+			"barrier_offset_m: ten\n",
+			"barrier_offset_m: true\n",
+		):
 			with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
 				with self.assertRaises(SystemExit):
 					cb.load_barrier_offset(self._config(tmp, text))

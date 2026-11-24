@@ -32,9 +32,7 @@ SPECIES_LENGTH_FIELDS = tuple(f"{lc}_upstream_accessible_length" for lc in (SPAW
 # spawn and rear for every target species. Exposed on the natural_barriers_<species> views and
 # export only -- deliberately not part of barrier_length_fields(), which also feeds the
 # anthropogenic views, rank_barriers.py and create_combined_view.py.
-NATURAL_BARRIER_GRADIENT_LENGTH_FIELDS = tuple(
-	f"{lc}_upstream_below_gradient_threshold_length" for lc in (SPAWN, REAR)
-)
+NATURAL_BARRIER_GRADIENT_LENGTH_FIELDS = tuple(f"{lc}_upstream_below_gradient_threshold_length" for lc in (SPAWN, REAR))
 
 
 def barrier_length_fields(lifecycles):

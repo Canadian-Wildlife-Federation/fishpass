@@ -42,9 +42,7 @@ class WriteBarrierStatTablesTests(unittest.TestCase):
 
 	def test_updates_species_stats_on_all_barriers(self):
 		cursor = FakeCursor()
-		rows = [
-			{"id": "b1", "stats": {"es": {"upstream_natural_spawnrear_count": 0}}, "upstream_stream_length": 123.5}
-		]
+		rows = [{"id": "b1", "stats": {"es": {"upstream_natural_spawnrear_count": 0}}, "upstream_stream_length": 123.5}]
 		bt.write_barrier_stat_tables(cursor, "model_test", rows)
 		self.assertEqual(len(cursor.executemany_calls), 1)
 		sql, params = cursor.executemany_calls[0]
